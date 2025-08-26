@@ -1,0 +1,43 @@
+# Simple Calculation Workflow
+# Basic example demonstrating a simple two-step calculation
+
+name: simple-calculation
+description: Perform mathematical calculations with validation
+
+triggers:
+  patterns:
+    - ".*calculate.*"
+    - ".*compute.*"
+    - ".*what is.*\\d+.*\\d+.*"
+  keywords:
+    - calculate
+    - compute
+    - math
+  intents:
+    - mathematical_calculation
+
+steps:
+  - name: parse-expression
+    agent: parser-agent
+    namespace: math
+    instruction: "Parse the mathematical expression from user input"
+    required: true
+    timeout: "2s"
+
+  - name: calculate-result
+    agent: calculator-agent
+    namespace: math
+    instruction: "Calculate the result of the parsed expression"
+    depends_on:
+      - parse-expression
+    required: true
+    timeout: "1s"
+
+  - name: format-response
+    agent: formatter-agent
+    namespace: math
+    instruction: "Format the calculation result for user presentation"
+    depends_on:
+      - calculate-result
+    required: true
+    timeout: "1s"

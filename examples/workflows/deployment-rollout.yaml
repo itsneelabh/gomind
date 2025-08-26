@@ -1,0 +1,121 @@
+# Kubernetes Deployment Rollout Workflow
+# Demonstrates a controlled deployment process with
+# validation, rollout, and monitoring steps
+
+name: deployment-rollout
+description: Orchestrate a safe Kubernetes deployment with validation and rollback
+
+triggers:
+  patterns:
+    - ".*deploy.*application.*"
+    - ".*rollout.*update.*"
+    - ".*release.*version.*"
+  keywords:
+    - deploy
+    - rollout
+    - release
+  intents:
+    - deployment
+    - release_management
+
+variables:
+  environment: "{{.target_env}}"
+  rollout_strategy: "canary"
+  health_check_retries: "3"
+  rollback_on_failure: "true"
+
+steps:
+  - name: validate-config
+    agent: config-validator
+    namespace: devops
+    instruction: "Validate deployment configuration for {{.environment}} environment"
+    required: true
+    timeout: "30s"
+
+  - name: check-dependencies
+    agent: dependency-checker
+    namespace: devops
+    instruction: "Verify all service dependencies are healthy"
+    required: true
+    timeout: "1m"
+
+  - name: backup-current
+    agent: backup-agent
+    namespace: operations
+    instruction: "Create backup of current deployment state"
+    depends_on:
+      - validate-config
+      - check-dependencies
+    required: true
+    timeout: "2m"
+
+  - name: apply-deployment
+    agent: k8s-deployer
+    namespace: devops
+    instruction: "Apply deployment with {{.rollout_strategy}} strategy to {{.environment}}"
+    depends_on:
+      - backup-current
+    required: true
+    timeout: "5m"
+
+  - name: health-check
+    agent: health-monitor
+    namespace: monitoring
+    instruction: "Perform health checks with {{.health_check_retries}} retries"
+    depends_on:
+      - apply-deployment
+    required: true
+    timeout: "3m"
+    variables:
+      check_interval: "10s"
+
+  - name: smoke-tests
+    agent: test-runner
+    namespace: qa
+    instruction: "Run smoke tests against new deployment"
+    depends_on:
+      - health-check
+    parallel: true
+    required: true
+    timeout: "5m"
+
+  - name: performance-check
+    agent: performance-monitor
+    namespace: monitoring
+    instruction: "Verify performance metrics are within acceptable thresholds"
+    depends_on:
+      - health-check
+    parallel: true
+    required: false
+    timeout: "3m"
+
+  - name: update-load-balancer
+    agent: lb-manager
+    namespace: networking
+    instruction: "Update load balancer configuration for new deployment"
+    depends_on:
+      - smoke-tests
+    required: true
+    timeout: "1m"
+
+  - name: notify-stakeholders
+    agent: notification-agent
+    namespace: communications
+    instruction: "Send deployment status notification to stakeholders"
+    depends_on:
+      - update-load-balancer
+    parallel: true
+    required: false
+    timeout: "30s"
+
+  - name: update-documentation
+    agent: docs-agent
+    namespace: documentation
+    instruction: "Update deployment documentation and runbooks"
+    depends_on:
+      - update-load-balancer
+    parallel: true
+    required: false
+    timeout: "1m"
+
+on_error: "rollback_deployment"
