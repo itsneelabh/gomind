@@ -1,0 +1,235 @@
+# Technical Analysis Agent Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: technical-analysis-agent
+  namespace: financial-intelligence
+  labels:
+    app: technical-analysis-agent
+    component: analysis-engine
+    agent-type: technical-analysis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: technical-analysis-agent
+  template:
+    metadata:
+      labels:
+        app: technical-analysis-agent
+        component: analysis-engine
+        agent-type: technical-analysis
+    spec:
+      containers:
+      - name: technical-analysis-agent
+        image: technical-analysis-agent:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8084
+          name: http
+        env:
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: agent-config
+              key: REDIS_URL
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: agent-config
+              key: LOG_LEVEL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8084
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8084
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: technical-analysis-agent
+  namespace: financial-intelligence
+  labels:
+    app: technical-analysis-agent
+    component: analysis-engine
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8084
+    targetPort: 8084
+    name: http
+  selector:
+    app: technical-analysis-agent
+---
+# Portfolio Advisor Agent Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio-advisor-agent
+  namespace: financial-intelligence
+  labels:
+    app: portfolio-advisor-agent
+    component: advisory-engine
+    agent-type: portfolio-management
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: portfolio-advisor-agent
+  template:
+    metadata:
+      labels:
+        app: portfolio-advisor-agent
+        component: advisory-engine
+        agent-type: portfolio-management
+    spec:
+      containers:
+      - name: portfolio-advisor-agent
+        image: portfolio-advisor-agent:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8085
+          name: http
+        env:
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: agent-config
+              key: REDIS_URL
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: agent-config
+              key: LOG_LEVEL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8085
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8085
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portfolio-advisor-agent
+  namespace: financial-intelligence
+  labels:
+    app: portfolio-advisor-agent
+    component: advisory-engine
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8085
+    targetPort: 8085
+    name: http
+  selector:
+    app: portfolio-advisor-agent
+---
+# Chat UI Agent Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-ui-agent
+  namespace: financial-intelligence
+  labels:
+    app: chat-ui-agent
+    component: user-interface
+    agent-type: orchestrator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: chat-ui-agent
+  template:
+    metadata:
+      labels:
+        app: chat-ui-agent
+        component: user-interface
+        agent-type: orchestrator
+    spec:
+      containers:
+      - name: chat-ui-agent
+        image: chat-ui-agent:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8082
+          name: http
+        env:
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: agent-config
+              key: REDIS_URL
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: OPENAI_API_KEY
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: agent-config
+              key: LOG_LEVEL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chat-ui-agent
+  namespace: financial-intelligence
+  labels:
+    app: chat-ui-agent
+    component: user-interface
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8082
+    targetPort: 8082
+    name: http
+  selector:
+    app: chat-ui-agent

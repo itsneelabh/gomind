@@ -1,0 +1,117 @@
+# Customer Support Workflow
+# Handles customer inquiries with intelligent routing
+# and escalation procedures
+
+name: customer-support
+description: Process customer support requests with automated triage and resolution
+
+triggers:
+  patterns:
+    - ".*customer.*issue.*"
+    - ".*support.*request.*"
+    - ".*help.*problem.*"
+  keywords:
+    - support
+    - help
+    - issue
+    - problem
+  intents:
+    - customer_support
+    - issue_resolution
+
+variables:
+  priority_threshold: "high"
+  auto_resolve_enabled: "true"
+  escalation_timeout: "30m"
+
+steps:
+  - name: analyze-request
+    agent: nlp-analyzer
+    namespace: ai
+    instruction: "Analyze customer request for intent, sentiment, and urgency"
+    required: true
+    timeout: "5s"
+
+  - name: search-knowledge-base
+    agent: kb-search
+    namespace: knowledge
+    instruction: "Search knowledge base for relevant solutions"
+    depends_on:
+      - analyze-request
+    parallel: true
+    required: false
+    timeout: "3s"
+
+  - name: check-customer-history
+    agent: crm-agent
+    namespace: customer-data
+    instruction: "Retrieve customer history and previous interactions"
+    depends_on:
+      - analyze-request
+    parallel: true
+    required: false
+    timeout: "2s"
+
+  - name: categorize-issue
+    agent: classifier-agent
+    namespace: ai
+    instruction: "Categorize issue type and assign priority level"
+    depends_on:
+      - analyze-request
+      - check-customer-history
+    required: true
+    timeout: "2s"
+
+  - name: attempt-auto-resolution
+    agent: resolution-agent
+    namespace: automation
+    instruction: "Attempt automatic resolution if {{.auto_resolve_enabled}} and confidence > 0.8"
+    depends_on:
+      - categorize-issue
+      - search-knowledge-base
+    required: false
+    timeout: "10s"
+    variables:
+      max_attempts: "2"
+
+  - name: assign-to-specialist
+    agent: routing-agent
+    namespace: support
+    instruction: "Route to appropriate specialist based on issue category"
+    depends_on:
+      - attempt-auto-resolution
+    required: true
+    timeout: "1s"
+    variables:
+      routing_rules: "skill_based_routing_v3"
+
+  - name: create-ticket
+    agent: ticketing-agent
+    namespace: support
+    instruction: "Create support ticket with all gathered information"
+    depends_on:
+      - assign-to-specialist
+    parallel: true
+    required: true
+    timeout: "2s"
+
+  - name: send-acknowledgment
+    agent: communication-agent
+    namespace: notifications
+    instruction: "Send acknowledgment to customer with ticket ID and ETA"
+    depends_on:
+      - create-ticket
+    parallel: true
+    required: true
+    timeout: "1s"
+
+  - name: monitor-resolution
+    agent: monitoring-agent
+    namespace: support
+    instruction: "Monitor ticket progress and escalate if exceeds {{.escalation_timeout}}"
+    depends_on:
+      - create-ticket
+    required: false
+    timeout: "{{.escalation_timeout}}"
+
+on_error: "escalate_to_supervisor"

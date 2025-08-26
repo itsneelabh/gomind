@@ -1,0 +1,66 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+.env.local
+
+# IDE specific files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+/bin/
+/dist/
+/build/
+/tmp/
+
+# Example binaries
+examples/basic-agent/basic-agent
+examples/market-agent/market-agent
+examples/financial-intelligence-system/agents/portfolio-advisor/portfolio-advisor-agent
+examples/financial-intelligence-system/agents/technical-analysis/technical-analysis-agent
+examples/financial-intelligence-system/agents/chat-ui/chat-ui
+
+# Coverage files
+coverage.txt
+coverage.html
+*.cov
+
+# Local testing artifacts
+*.log
+*.pid
+
+# Temporary files
+*.tmp
+.tmp/
+
+# Debug files
+debug
+__debug_bin
+
+# Air live reload
+.air.toml
+tmp/

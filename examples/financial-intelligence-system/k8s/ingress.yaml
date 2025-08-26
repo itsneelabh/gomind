@@ -1,0 +1,79 @@
+# Ingress configuration for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: financial-intelligence-ingress
+  namespace: financial-intelligence
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: financial-intelligence.local
+    http:
+      paths:
+      # Chat UI - Main interface
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: chat-ui-agent
+            port:
+              number: 8082
+      - path: /chat
+        pathType: Prefix
+        backend:
+          service:
+            name: chat-ui-agent
+            port:
+              number: 8082
+      # Direct agent access
+      - path: /api/market-data
+        pathType: Prefix
+        backend:
+          service:
+            name: market-data-agent
+            port:
+              number: 8080
+      - path: /api/news-analysis
+        pathType: Prefix
+        backend:
+          service:
+            name: news-analysis-agent
+            port:
+              number: 8081
+      - path: /api/technical-analysis
+        pathType: Prefix
+        backend:
+          service:
+            name: technical-analysis-agent
+            port:
+              number: 8084
+      - path: /api/portfolio-advisor
+        pathType: Prefix
+        backend:
+          service:
+            name: portfolio-advisor-agent
+            port:
+              number: 8085
+---
+# LoadBalancer service for direct access (alternative to Ingress)
+apiVersion: v1
+kind: Service
+metadata:
+  name: chat-ui-loadbalancer
+  namespace: financial-intelligence
+  labels:
+    app: chat-ui-agent
+    component: user-interface
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8082
+    name: http
+  selector:
+    app: chat-ui-agent
