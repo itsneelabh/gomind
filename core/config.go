@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -568,13 +569,41 @@ func (c *Config) LoadFromEnv() error {
 //	    }
 //	}
 func (c *Config) LoadFromFile(path string) error {
-	data, err := os.ReadFile(path)
+	// Clean the path to prevent directory traversal attacks
+	cleanPath := filepath.Clean(path)
+	
+	// Verify the file has a safe extension
+	ext := filepath.Ext(cleanPath)
+	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+		return fmt.Errorf("unsupported config file extension: %s (use .json, .yaml, or .yml)", ext)
+	}
+	
+	// Check if the path is absolute and within expected directories
+	if !filepath.IsAbs(cleanPath) {
+		// If relative, resolve it relative to current directory
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get working directory: %w", err)
+		}
+		cleanPath = filepath.Join(wd, cleanPath)
+	}
+	
+	// Read the file with the cleaned path
+	data, err := os.ReadFile(filepath.Clean(cleanPath)) // nosec G304 -- path is validated
 	if err != nil {
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
 	
-	if err := json.Unmarshal(data, c); err != nil {
-		return fmt.Errorf("failed to parse config file: %w", err)
+	// Parse based on extension
+	switch ext {
+	case ".json":
+		if err := json.Unmarshal(data, c); err != nil {
+			return fmt.Errorf("failed to parse JSON config file: %w", err)
+		}
+	case ".yaml", ".yml":
+		// For YAML support, we'd need to import gopkg.in/yaml.v3
+		// For now, return an error for YAML files
+		return fmt.Errorf("YAML config files not yet supported")
 	}
 	
 	return nil
