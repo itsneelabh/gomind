@@ -73,10 +73,9 @@ func (d *RedisDiscovery) Register(ctx context.Context, registration *ServiceRegi
 
 	// Add to service name index
 	nameKey := fmt.Sprintf("%s:names:%s", d.namespace, registration.Name)
-	if err := d.client.SAdd(ctx, nameKey, registration.ID).Err(); err != nil {
-		// Log but don't fail
-	}
-	d.client.Expire(ctx, nameKey, d.ttl*2)
+	_ = d.client.SAdd(ctx, nameKey, registration.ID).Err()
+	// Ignore error as it's not critical
+	_ = d.client.Expire(ctx, nameKey, d.ttl*2)
 
 	return nil
 }

@@ -1,69 +1,343 @@
 package orchestration
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
 	"time"
 )
 
-// SimpleExecutor is a basic implementation of the Executor interface
-type SimpleExecutor struct {
+// SmartExecutor handles intelligent execution of routing plans
+type SmartExecutor struct {
+	catalog        *AgentCatalog
+	httpClient     *http.Client
 	maxConcurrency int
+	semaphore      chan struct{}
 }
 
-// NewExecutor creates a new executor
-func NewExecutor() *SimpleExecutor {
-	return &SimpleExecutor{
-		maxConcurrency: 5,
+// NewSmartExecutor creates a new smart executor
+func NewSmartExecutor(catalog *AgentCatalog) *SmartExecutor {
+	maxConcurrency := 5
+	return &SmartExecutor{
+		catalog:        catalog,
+		maxConcurrency: maxConcurrency,
+		semaphore:      make(chan struct{}, maxConcurrency),
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 
 // Execute runs a routing plan and collects agent responses
-func (e *SimpleExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
+func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
+	startTime := time.Now()
+
 	result := &ExecutionResult{
 		PlanID:        plan.PlanID,
-		Steps:         make([]StepResult, 0),
+		Steps:         make([]StepResult, 0, len(plan.Steps)),
 		Success:       true,
 		TotalDuration: 0,
 		Metadata:      make(map[string]interface{}),
 	}
-	
-	// Simplified implementation - just return success
-	for _, step := range plan.Steps {
-		stepResult := StepResult{
-			StepID:      step.StepID,
-			AgentName:   step.AgentName,
-			Namespace:   step.Namespace,
-			Instruction: step.Instruction,
-			Response:    "Step executed successfully",
-			Success:     true,
-			Duration:    100 * time.Millisecond,
-			Attempts:    1,
-			StartTime:   time.Now(),
-			EndTime:     time.Now().Add(100 * time.Millisecond),
+
+	// Create a map to store step results for dependency resolution
+	stepResults := make(map[string]*StepResult)
+	var resultsMutex sync.Mutex
+
+	// Execute steps respecting dependencies
+	executed := make(map[string]bool)
+
+	for len(executed) < len(plan.Steps) {
+		// Find steps that can be executed (all dependencies met)
+		readySteps := e.findReadySteps(plan, executed, stepResults)
+
+		if len(readySteps) == 0 {
+			// No steps ready - might be circular dependency
+			return nil, fmt.Errorf("no executable steps found - check for circular dependencies")
 		}
-		result.Steps = append(result.Steps, stepResult)
+
+		// Execute ready steps in parallel
+		var wg sync.WaitGroup
+		for _, step := range readySteps {
+			wg.Add(1)
+			go func(s RoutingStep) {
+				defer wg.Done()
+
+				// Acquire semaphore for concurrency control
+				e.semaphore <- struct{}{}
+				defer func() { <-e.semaphore }()
+
+				// Build context for step execution
+				stepCtx := e.buildStepContext(ctx, s, stepResults)
+
+				// Execute the step
+				stepResult := e.executeStep(stepCtx, s)
+
+				// Store result
+				resultsMutex.Lock()
+				stepResults[s.StepID] = &stepResult
+				result.Steps = append(result.Steps, stepResult)
+				executed[s.StepID] = true
+
+				if !stepResult.Success {
+					result.Success = false
+				}
+				resultsMutex.Unlock()
+			}(step)
+		}
+
+		// Wait for this batch to complete
+		wg.Wait()
+
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 	}
-	
+
+	result.TotalDuration = time.Since(startTime)
 	return result, nil
 }
 
-// ExecuteStep executes a single routing step
-func (e *SimpleExecutor) ExecuteStep(ctx context.Context, step RoutingStep) (*StepResult, error) {
-	return &StepResult{
+// findReadySteps identifies steps that can be executed
+func (e *SmartExecutor) findReadySteps(plan *RoutingPlan, executed map[string]bool, results map[string]*StepResult) []RoutingStep {
+	var ready []RoutingStep
+
+	for _, step := range plan.Steps {
+		if executed[step.StepID] {
+			continue
+		}
+
+		// Check if all dependencies are satisfied
+		allDepsReady := true
+		for _, dep := range step.DependsOn {
+			if !executed[dep] {
+				allDepsReady = false
+				break
+			}
+			// Check if dependency was successful
+			if result, ok := results[dep]; ok && !result.Success {
+				// Skip steps whose dependencies failed
+				allDepsReady = false
+				break
+			}
+		}
+
+		if allDepsReady {
+			ready = append(ready, step)
+		}
+	}
+
+	return ready
+}
+
+// buildStepContext creates context with dependency results
+func (e *SmartExecutor) buildStepContext(ctx context.Context, step RoutingStep, results map[string]*StepResult) context.Context {
+	// Add dependency results to context for reference
+	type contextKey string
+	const dependencyKey contextKey = "dependencies"
+
+	deps := make(map[string]interface{})
+	for _, depID := range step.DependsOn {
+		if result, ok := results[depID]; ok {
+			deps[depID] = result.Response
+		}
+	}
+
+	return context.WithValue(ctx, dependencyKey, deps)
+}
+
+// executeStep executes a single routing step
+func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepResult {
+	startTime := time.Now()
+
+	result := StepResult{
 		StepID:      step.StepID,
 		AgentName:   step.AgentName,
 		Namespace:   step.Namespace,
 		Instruction: step.Instruction,
-		Response:    "Step executed",
-		Success:     true,
-		Duration:    100 * time.Millisecond,
-		Attempts:    1,
-		StartTime:   time.Now(),
-		EndTime:     time.Now().Add(100 * time.Millisecond),
-	}, nil
+		StartTime:   startTime,
+		Attempts:    0,
+	}
+
+	// Get agent info from catalog
+	agentInfo := e.findAgentByName(step.AgentName)
+	if agentInfo == nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("agent %s not found in catalog", step.AgentName)
+		result.EndTime = time.Now()
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// Extract capability and parameters from metadata
+	capability := ""
+	var parameters map[string]interface{}
+
+	if cap, ok := step.Metadata["capability"].(string); ok {
+		capability = cap
+	}
+	if params, ok := step.Metadata["parameters"].(map[string]interface{}); ok {
+		parameters = params
+	}
+
+	// Find the capability endpoint
+	endpoint := e.findCapabilityEndpoint(agentInfo, capability)
+	if endpoint == "" {
+		result.Success = false
+		result.Error = fmt.Sprintf("capability %s not found for agent %s", capability, step.AgentName)
+		result.EndTime = time.Now()
+		result.Duration = time.Since(startTime)
+		return result
+	}
+
+	// Build the request URL
+	url := fmt.Sprintf("http://%s:%d%s",
+		agentInfo.Registration.Address,
+		agentInfo.Registration.Port,
+		endpoint)
+
+	// Execute with retry logic
+	maxAttempts := 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		result.Attempts = attempt
+
+		// Make the HTTP request
+		response, err := e.callAgent(ctx, url, parameters)
+		if err == nil {
+			result.Success = true
+			result.Response = response
+			break
+		}
+
+		result.Error = err.Error()
+
+		// Don't retry if context is cancelled
+		select {
+		case <-ctx.Done():
+			return result // Exit immediately on context cancellation
+		default:
+		}
+
+		// Wait before retry
+		if attempt < maxAttempts {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+
+	result.EndTime = time.Now()
+	result.Duration = time.Since(startTime)
+
+	return result
+}
+
+// findAgentByName finds agent info by name
+func (e *SmartExecutor) findAgentByName(name string) *AgentInfo {
+	agents := e.catalog.GetAgents()
+	for _, agent := range agents {
+		if agent.Registration.Name == name {
+			return agent
+		}
+	}
+	return nil
+}
+
+// findCapabilityEndpoint finds the endpoint for a capability
+func (e *SmartExecutor) findCapabilityEndpoint(agent *AgentInfo, capabilityName string) string {
+	for _, cap := range agent.Capabilities {
+		if cap.Name == capabilityName {
+			return cap.Endpoint
+		}
+	}
+	// Default endpoint if not specified
+	return fmt.Sprintf("/api/%s", capabilityName)
+}
+
+// callAgent makes an HTTP call to an agent
+// This method sends a POST request with JSON parameters to the specified agent endpoint
+// and returns the JSON response as a string
+func (e *SmartExecutor) callAgent(ctx context.Context, url string, parameters map[string]interface{}) (string, error) {
+	// Prepare request body
+	body, err := json.Marshal(parameters)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal parameters: %w", err)
+	}
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Make the request
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Log error but don't fail the operation
+			fmt.Printf("Error closing response body: %v\n", closeErr)
+		}
+	}()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("agent returned status %d", resp.StatusCode)
+	}
+
+	// Read response
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Convert back to string for storage
+	responseBytes, err := json.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseBytes), nil
+}
+
+// ExecuteStep executes a single routing step (interface method)
+func (e *SmartExecutor) ExecuteStep(ctx context.Context, step RoutingStep) (*StepResult, error) {
+	result := e.executeStep(ctx, step)
+	if !result.Success {
+		return nil, fmt.Errorf(result.Error)
+	}
+	return &result, nil
 }
 
 // SetMaxConcurrency sets the maximum number of parallel executions
-func (e *SimpleExecutor) SetMaxConcurrency(max int) {
+func (e *SmartExecutor) SetMaxConcurrency(max int) {
 	e.maxConcurrency = max
+	// Recreate semaphore with new size
+	e.semaphore = make(chan struct{}, max)
+}
+
+// SimpleExecutor is kept for backward compatibility
+type SimpleExecutor struct {
+	*SmartExecutor
+}
+
+// NewExecutor creates a new executor (backward compatibility)
+func NewExecutor() *SimpleExecutor {
+	return &SimpleExecutor{
+		SmartExecutor: &SmartExecutor{
+			maxConcurrency: 5,
+			semaphore:      make(chan struct{}, 5),
+			httpClient: &http.Client{
+				Timeout: 30 * time.Second,
+			},
+		},
+	}
 }

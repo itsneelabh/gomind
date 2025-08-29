@@ -2,147 +2,431 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/itsneelabh/gomind/ai"
+	"github.com/itsneelabh/gomind/core"
 )
 
-// StandardOrchestrator is the default implementation of Orchestrator
-type StandardOrchestrator struct {
-	config         *OrchestratorConfig
-	
+// AIOrchestrator is an AI-powered orchestrator that uses LLM for intelligent routing
+type AIOrchestrator struct {
+	config      *OrchestratorConfig
+	discovery   core.Discovery
+	aiClient    ai.AIClient
+	catalog     *AgentCatalog
+	executor    *SmartExecutor
+	synthesizer *AISynthesizer
+
 	// Metrics and history
-	metrics        *OrchestratorMetrics
-	history        []ExecutionRecord
-	historyMutex   sync.RWMutex
-	metricsMutex   sync.RWMutex
+	metrics      *OrchestratorMetrics
+	history      []ExecutionRecord
+	historyMutex sync.RWMutex
+	metricsMutex sync.RWMutex
+
+	// Context for background operations
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-// NewOrchestrator creates a new orchestrator instance
-func NewOrchestrator(config *OrchestratorConfig) *StandardOrchestrator {
+// NewAIOrchestrator creates a new AI-powered orchestrator
+func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiClient ai.AIClient) *AIOrchestrator {
 	if config == nil {
 		config = DefaultConfig()
 	}
-	
-	return &StandardOrchestrator{
-		config:  config,
-		metrics: &OrchestratorMetrics{},
-		history: make([]ExecutionRecord, 0, config.HistorySize),
+
+	ctx, cancel := context.WithCancel(context.Background())
+	catalog := NewAgentCatalog(discovery)
+
+	return &AIOrchestrator{
+		config:      config,
+		discovery:   discovery,
+		aiClient:    aiClient,
+		catalog:     catalog,
+		executor:    NewSmartExecutor(catalog),
+		synthesizer: NewAISynthesizer(aiClient),
+		metrics:     &OrchestratorMetrics{},
+		history:     make([]ExecutionRecord, 0, config.HistorySize),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 }
 
-// ProcessRequest handles a natural language request by orchestrating multiple agents
-func (o *StandardOrchestrator) ProcessRequest(ctx context.Context, request string, metadata map[string]interface{}) (*OrchestratorResponse, error) {
+// Start initializes the orchestrator and starts background processes
+func (o *AIOrchestrator) Start(ctx context.Context) error {
+	// Initial catalog refresh
+	if err := o.catalog.Refresh(ctx); err != nil {
+		return fmt.Errorf("failed to initialize catalog: %w", err)
+	}
+
+	// Start background catalog refresh
+	go o.catalogRefreshLoop()
+
+	return nil
+}
+
+// Stop gracefully shuts down the orchestrator
+func (o *AIOrchestrator) Stop() {
+	o.cancel()
+}
+
+// catalogRefreshLoop periodically refreshes the agent catalog
+func (o *AIOrchestrator) catalogRefreshLoop() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := o.catalog.Refresh(o.ctx); err != nil {
+				// Log error but continue
+				fmt.Printf("Catalog refresh error: %v\n", err)
+			}
+		case <-o.ctx.Done():
+			return
+		}
+	}
+}
+
+// ProcessRequest handles a natural language request using AI-powered orchestration
+func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, metadata map[string]interface{}) (*OrchestratorResponse, error) {
 	startTime := time.Now()
-	
-	// For now, return a simple response
-	// In a full implementation, this would route to agents and synthesize responses
+	requestID := generateID()
+
+	// Step 1: Get execution plan from LLM
+	plan, err := o.generateExecutionPlan(ctx, request)
+	if err != nil {
+		o.updateMetrics(time.Since(startTime), false)
+		return nil, fmt.Errorf("failed to generate execution plan: %w", err)
+	}
+
+	// Step 2: Validate the plan
+	if err := o.validatePlan(plan); err != nil {
+		// Try to regenerate with error feedback
+		plan, err = o.regeneratePlan(ctx, request, err)
+		if err != nil {
+			o.updateMetrics(time.Since(startTime), false)
+			return nil, fmt.Errorf("failed to generate valid plan: %w", err)
+		}
+	}
+
+	// Step 3: Execute the plan
+	result, err := o.executor.Execute(ctx, plan)
+	if err != nil {
+		o.updateMetrics(time.Since(startTime), false)
+		return nil, fmt.Errorf("execution failed: %w", err)
+	}
+
+	// Step 4: Synthesize results using AI
+	synthesizedResponse, err := o.synthesizer.Synthesize(ctx, request, result)
+	if err != nil {
+		o.updateMetrics(time.Since(startTime), false)
+		return nil, fmt.Errorf("synthesis failed: %w", err)
+	}
+
+	// Build response
 	response := &OrchestratorResponse{
-		RequestID:       generateID(),
+		RequestID:       requestID,
 		OriginalRequest: request,
-		Response:        "Orchestration module is being refactored",
+		Response:        synthesizedResponse,
 		RoutingMode:     o.config.RoutingMode,
 		ExecutionTime:   time.Since(startTime),
-		AgentsInvolved:  []string{},
+		AgentsInvolved:  o.extractAgentsFromPlan(plan),
 		Metadata:        metadata,
-		Confidence:      1.0,
+		Confidence:      0.95, // TODO: Calculate based on execution success
 	}
-	
-	// Update metrics
+
+	// Update metrics and history
 	o.updateMetrics(response.ExecutionTime, true)
-	
-	// Add to history
 	o.addToHistory(response)
-	
+
 	return response, nil
 }
 
+// generateExecutionPlan uses LLM to create an execution plan
+func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request string) (*RoutingPlan, error) {
+	// Build prompt with agent catalog
+	prompt := o.buildPlanningPrompt(request)
+
+	// Call LLM
+	aiResponse, err := o.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
+		Temperature:  0.3, // Lower temperature for more deterministic planning
+		MaxTokens:    2000,
+		SystemPrompt: "You are an intelligent orchestrator that creates execution plans for multi-agent systems.",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the LLM response into a plan
+	return o.parsePlan(aiResponse.Content)
+}
+
+// buildPlanningPrompt constructs the prompt for the LLM
+func (o *AIOrchestrator) buildPlanningPrompt(request string) string {
+	catalogInfo := o.catalog.FormatForLLM()
+
+	return fmt.Sprintf(`You are an AI orchestrator managing a multi-agent system.
+
+%s
+
+User Request: %s
+
+Create an execution plan in JSON format with the following structure:
+{
+  "plan_id": "unique-id",
+  "original_request": "the user request",
+  "mode": "autonomous",
+  "steps": [
+    {
+      "step_id": "step-1",
+      "agent_name": "agent-name-from-catalog",
+      "namespace": "default",
+      "instruction": "specific instruction for this agent",
+      "depends_on": [],
+      "metadata": {
+        "capability": "capability-name",
+        "parameters": {
+          "param1": "value1"
+        }
+      }
+    }
+  ]
+}
+
+Important:
+1. Only use agents and capabilities that exist in the catalog
+2. Ensure parameter names match exactly what the capability expects
+3. Order steps based on dependencies
+4. Include all necessary steps to fulfill the request
+5. Be specific in instructions
+
+Response (JSON only, no explanation):`, catalogInfo, request)
+}
+
+// parsePlan parses the LLM response into a RoutingPlan
+func (o *AIOrchestrator) parsePlan(llmResponse string) (*RoutingPlan, error) {
+	// Extract JSON from the response (LLM might include markdown)
+	jsonStart := findJSONStart(llmResponse)
+	if jsonStart == -1 {
+		return nil, fmt.Errorf("no JSON found in LLM response")
+	}
+
+	jsonEnd := findJSONEnd(llmResponse, jsonStart)
+	if jsonEnd == -1 {
+		return nil, fmt.Errorf("invalid JSON in LLM response")
+	}
+
+	jsonStr := llmResponse[jsonStart:jsonEnd]
+
+	var plan RoutingPlan
+	if err := json.Unmarshal([]byte(jsonStr), &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plan JSON: %w", err)
+	}
+
+	// Set creation time
+	plan.CreatedAt = time.Now()
+
+	return &plan, nil
+}
+
+// validatePlan checks if the plan is executable
+func (o *AIOrchestrator) validatePlan(plan *RoutingPlan) error {
+	for _, step := range plan.Steps {
+		// Check if agent exists
+		agents, err := o.discovery.FindService(context.Background(), step.AgentName)
+		if err != nil || len(agents) == 0 {
+			return fmt.Errorf("agent %s not found", step.AgentName)
+		}
+
+		// Check if capability exists
+		if capName, ok := step.Metadata["capability"].(string); ok {
+			agentInfo := o.catalog.GetAgent(agents[0].ID)
+			if agentInfo == nil {
+				return fmt.Errorf("agent %s not in catalog", step.AgentName)
+			}
+
+			found := false
+			for _, cap := range agentInfo.Capabilities {
+				if cap.Name == capName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("capability %s not found for agent %s", capName, step.AgentName)
+			}
+		}
+
+		// Check dependencies
+		for _, dep := range step.DependsOn {
+			found := false
+			for _, s := range plan.Steps {
+				if s.StepID == dep {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("dependency %s not found for step %s", dep, step.StepID)
+			}
+		}
+	}
+
+	return nil
+}
+
+// regeneratePlan attempts to fix a plan based on validation errors
+func (o *AIOrchestrator) regeneratePlan(ctx context.Context, request string, validationErr error) (*RoutingPlan, error) {
+	prompt := fmt.Sprintf(`%s
+
+The previous plan failed validation with error: %s
+
+Please generate a corrected plan that addresses this error.`,
+		o.buildPlanningPrompt(request), validationErr.Error())
+
+	aiResponse, err := o.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
+		Temperature: 0.2,
+		MaxTokens:   2000,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return o.parsePlan(aiResponse.Content)
+}
+
+// extractAgentsFromPlan gets list of agents involved in a plan
+func (o *AIOrchestrator) extractAgentsFromPlan(plan *RoutingPlan) []string {
+	agentSet := make(map[string]bool)
+	for _, step := range plan.Steps {
+		agentSet[step.AgentName] = true
+	}
+
+	agents := make([]string, 0, len(agentSet))
+	for agent := range agentSet {
+		agents = append(agents, agent)
+	}
+	return agents
+}
+
 // ExecutePlan executes a pre-defined routing plan
-func (o *StandardOrchestrator) ExecutePlan(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
-	// Simplified implementation
-	return &ExecutionResult{
-		PlanID:        plan.PlanID,
-		Steps:         []StepResult{},
-		Success:       true,
-		TotalDuration: 0,
-		Metadata:      make(map[string]interface{}),
-	}, nil
+func (o *AIOrchestrator) ExecutePlan(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
+	return o.executor.Execute(ctx, plan)
 }
 
 // GetExecutionHistory returns recent execution history
-func (o *StandardOrchestrator) GetExecutionHistory() []ExecutionRecord {
+func (o *AIOrchestrator) GetExecutionHistory() []ExecutionRecord {
 	o.historyMutex.RLock()
 	defer o.historyMutex.RUnlock()
-	
-	// Return a copy of the history
+
 	historyCopy := make([]ExecutionRecord, len(o.history))
 	copy(historyCopy, o.history)
 	return historyCopy
 }
 
 // GetMetrics returns orchestrator metrics
-func (o *StandardOrchestrator) GetMetrics() OrchestratorMetrics {
+func (o *AIOrchestrator) GetMetrics() OrchestratorMetrics {
 	o.metricsMutex.RLock()
 	defer o.metricsMutex.RUnlock()
-	
+
 	return *o.metrics
 }
 
 // Helper functions
 
-func (o *StandardOrchestrator) updateMetrics(duration time.Duration, success bool) {
+func (o *AIOrchestrator) updateMetrics(duration time.Duration, success bool) {
 	o.metricsMutex.Lock()
 	defer o.metricsMutex.Unlock()
-	
+
 	o.metrics.TotalRequests++
 	if success {
 		o.metrics.SuccessfulRequests++
 	} else {
 		o.metrics.FailedRequests++
 	}
-	
-	// Update latency metrics (simplified)
+
+	// Update latency metrics (simplified for MVP)
 	if o.metrics.AverageLatency == 0 {
 		o.metrics.AverageLatency = duration
 	} else {
-		// Simple moving average
 		o.metrics.AverageLatency = (o.metrics.AverageLatency + duration) / 2
 	}
-	
 	o.metrics.LastRequestTime = time.Now()
 }
 
-func (o *StandardOrchestrator) addToHistory(response *OrchestratorResponse) {
+func (o *AIOrchestrator) addToHistory(response *OrchestratorResponse) {
 	o.historyMutex.Lock()
 	defer o.historyMutex.Unlock()
-	
+
 	record := ExecutionRecord{
-		RequestID:       response.RequestID,
-		Timestamp:       time.Now(),
-		Request:         response.OriginalRequest,
-		Response:        response.Response,
-		RoutingMode:     response.RoutingMode,
-		AgentsInvolved:  response.AgentsInvolved,
-		ExecutionTime:   response.ExecutionTime,
-		Success:         len(response.Errors) == 0,
-		Errors:          response.Errors,
+		RequestID:      response.RequestID,
+		Timestamp:      time.Now(),
+		Request:        response.OriginalRequest,
+		Response:       response.Response,
+		RoutingMode:    response.RoutingMode,
+		AgentsInvolved: response.AgentsInvolved,
+		ExecutionTime:  response.ExecutionTime,
+		Success:        len(response.Errors) == 0,
+		Errors:         response.Errors,
 	}
-	
-	// Add to history with size limit
-	if len(o.history) >= o.config.HistorySize {
+
+	o.history = append(o.history, record)
+
+	// Trim history if needed
+	if len(o.history) > o.config.HistorySize {
 		o.history = o.history[1:]
 	}
-	o.history = append(o.history, record)
 }
 
-func generateID() string {
-	return time.Now().Format("20060102-150405") + "-" + randomString(6)
-}
-
-func randomString(n int) string {
-	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+// findJSONStart finds the start of JSON in a string
+func findJSONStart(s string) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '{' {
+			return i
+		}
 	}
-	return string(b)
+	return -1
+}
+
+// findJSONEnd finds the end of JSON in a string
+func findJSONEnd(s string, start int) int {
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
+// generateID generates a unique ID
+func generateID() string {
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().Nanosecond())
+}
+
+// StandardOrchestrator is kept for backward compatibility
+type StandardOrchestrator struct {
+	*AIOrchestrator
+}
+
+// NewOrchestrator creates a new orchestrator (backward compatibility)
+func NewOrchestrator(config *OrchestratorConfig) *StandardOrchestrator {
+	// This is a stub for backward compatibility
+	// Real usage should use NewAIOrchestrator with proper dependencies
+	return &StandardOrchestrator{
+		AIOrchestrator: &AIOrchestrator{
+			config:  config,
+			metrics: &OrchestratorMetrics{},
+			history: make([]ExecutionRecord, 0, config.HistorySize),
+		},
+	}
 }

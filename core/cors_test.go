@@ -189,7 +189,7 @@ func TestCORSMiddleware(t *testing.T) {
 			// Create a simple handler
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("OK"))
+				_, _ = w.Write([]byte("OK"))
 			})
 			
 			// Wrap with CORS middleware
@@ -416,7 +416,7 @@ func TestCORSIntegration(t *testing.T) {
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message":"success"}`))
+		_, _ = w.Write([]byte(`{"message":"success"}`))
 	})
 	
 	// Configure CORS
@@ -448,7 +448,7 @@ func TestCORSIntegration(t *testing.T) {
 		
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		
 		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 		assert.Equal(t, "https://app.example.com", resp.Header.Get("Access-Control-Allow-Origin"))
@@ -466,7 +466,7 @@ func TestCORSIntegration(t *testing.T) {
 		
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "https://api.example.com", resp.Header.Get("Access-Control-Allow-Origin"))
@@ -481,7 +481,7 @@ func TestCORSIntegration(t *testing.T) {
 		
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		// No CORS headers for disallowed origin
@@ -538,7 +538,7 @@ func ExampleCORSMiddleware() {
 	// Create your API handler
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("API response"))
+		_, _ = w.Write([]byte("API response"))
 	})
 	
 	// Configure CORS
@@ -553,7 +553,7 @@ func ExampleCORSMiddleware() {
 	handler := CORSMiddleware(corsConfig)(apiHandler)
 	
 	// Use the handler
-	http.ListenAndServe(":8080", handler)
+	_ = http.ListenAndServe(":8080", handler)
 }
 
 // ExampleApplyCORS demonstrates manual CORS application
@@ -568,8 +568,8 @@ func ExampleApplyCORS() {
 		
 		// Handle request
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Data"))
+		_, _ = w.Write([]byte("Data"))
 	})
 	
-	http.ListenAndServe(":8080", nil)
+	_ = http.ListenAndServe(":8080", nil)
 }
