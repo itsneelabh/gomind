@@ -231,7 +231,12 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			// Log error but response is already partially written
+			if b.Logger != nil {
+				b.Logger.Error("Failed to encode response", map[string]interface{}{"error": err})
+			}
+		}
 	}
 }
 
@@ -250,11 +255,16 @@ func (b *BaseAgent) Start(port int) error {
 	if b.Config.HTTP.EnableHealthCheck {
 		b.mux.HandleFunc(b.Config.HTTP.HealthCheckPath, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{
+			if err := json.NewEncoder(w).Encode(map[string]string{
 				"status": "healthy",
 				"agent":  b.Name,
 				"id":     b.ID,
-			})
+			}); err != nil {
+				// Log error but response is already partially written
+				if b.Logger != nil {
+					b.Logger.Error("Failed to encode health response", map[string]interface{}{"error": err})
+				}
+			}
 		})
 	}
 
@@ -262,7 +272,12 @@ func (b *BaseAgent) Start(port int) error {
 	b.mux.HandleFunc("/api/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		ApplyCORS(w, r, &b.Config.HTTP.CORS)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(b.Capabilities)
+		if err := json.NewEncoder(w).Encode(b.Capabilities); err != nil {
+			// Log error but response is already partially written
+			if b.Logger != nil {
+				b.Logger.Error("Failed to encode capabilities", map[string]interface{}{"error": err})
+			}
+		}
 	})
 
 	// Create handler with CORS middleware if enabled

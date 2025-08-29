@@ -10,23 +10,6 @@ type WorkflowRouter struct {
 	workflows map[string]*WorkflowDefinition
 }
 
-// WorkflowDefinition defines a workflow pattern
-type WorkflowDefinition struct {
-	Name        string                 `yaml:"name"`
-	Pattern     string                 `yaml:"pattern"`
-	Steps       []WorkflowStep         `yaml:"steps"`
-	Metadata    map[string]interface{} `yaml:"metadata"`
-}
-
-// WorkflowStep defines a single step in a workflow
-type WorkflowStep struct {
-	Agent       string                 `yaml:"agent"`
-	Namespace   string                 `yaml:"namespace"`
-	Instruction string                 `yaml:"instruction"`
-	DependsOn   []string               `yaml:"depends_on"`
-	Metadata    map[string]interface{} `yaml:"metadata"`
-}
-
 // NewWorkflowRouter creates a new workflow-based router
 func NewWorkflowRouter() *WorkflowRouter {
 	return &WorkflowRouter{
