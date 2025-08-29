@@ -34,8 +34,9 @@ framework.RunAgent(agent, 8080)  // Automatically registers with Redis
 
 ### 📦 Modular Design
 Start small, grow as needed:
-- **Core (8MB)**: Service discovery, HTTP server, basic orchestration
+- **Core (8MB)**: Service discovery, HTTP server, basic framework
 - **AI Module (+2MB)**: OpenAI/Anthropic integration, prompt management
+- **Orchestration (+1MB)**: AI-powered multi-agent coordination
 - **Telemetry (+10MB)**: Full OpenTelemetry with Jaeger/Datadog support
 
 ## Quick Start
@@ -127,13 +128,38 @@ type RiskAnalyzer struct {
     ai framework.AIClient
 }
 
-// Orchestrator coordinates both
-orchestrator := framework.NewOrchestrator()
-result := orchestrator.Execute(ctx, 
+// AI-powered orchestrator discovers agents and coordinates them
+discovery, _ := core.NewRedisDiscovery("redis://localhost:6379")
+aiClient := ai.NewOpenAIClient(apiKey)
+orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient)
+
+// Natural language request - AI figures out which agents to call
+result, _ := orchestrator.ProcessRequest(ctx, 
     "Get market data for AAPL and analyze risk")
 ```
 
 ## Production Patterns
+
+### AI-Powered Orchestration
+```go
+// The orchestrator uses LLM to understand requests and coordinate agents
+orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient)
+
+// Start the orchestrator (begins catalog refresh from Redis)
+orchestrator.Start(ctx)
+
+// Process natural language requests
+response, _ := orchestrator.ProcessRequest(ctx,
+    "Analyze Apple stock performance and provide investment recommendations",
+    nil,
+)
+
+// The orchestrator will:
+// 1. Query Redis for all available agents and capabilities
+// 2. Send the catalog + request to LLM for planning
+// 3. Execute the plan with parallel agent calls
+// 4. Use LLM to synthesize results into coherent response
+```
 
 ### Service Discovery
 ```go

@@ -199,7 +199,7 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 		// Start telemetry span if available
 		if b.Telemetry != nil {
 			var span Span
-			ctx, span = b.Telemetry.StartSpan(ctx, fmt.Sprintf("capability.%s", cap.Name))
+			_, span = b.Telemetry.StartSpan(ctx, fmt.Sprintf("capability.%s", cap.Name))
 			defer span.End()
 			span.SetAttribute("capability.name", cap.Name)
 		}
@@ -370,8 +370,6 @@ func (f *Framework) Run(ctx context.Context) error {
 	}
 
 	// For custom agents, they need to implement their own server
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	<-ctx.Done()
+	return ctx.Err()
 }
