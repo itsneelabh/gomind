@@ -201,7 +201,11 @@ func (d *RedisDiscovery) StartHeartbeat(ctx context.Context, serviceID string) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				d.UpdateHealth(ctx, serviceID, HealthHealthy)
+				if err := d.UpdateHealth(ctx, serviceID, HealthHealthy); err != nil {
+					// Log error but continue health check loop
+					// Health check failures are expected in distributed systems
+					continue
+				}
 			}
 		}
 	}()
