@@ -7,8 +7,7 @@ go 1.23.0
 //   - github.com/itsneelabh/gomind/core - For lightweight tools (8MB)
 //   - github.com/itsneelabh/gomind/ai - For AI capabilities
 //   - github.com/itsneelabh/gomind/telemetry - For observability
-//   - github.com/itsneelabh/gomind/orchestration - For multi-agent systems
-//   - github.com/itsneelabh/gomind/workflow - For workflow orchestration
+//   - github.com/itsneelabh/gomind/orchestration - For multi-agent systems and workflows
 //   - github.com/itsneelabh/gomind/resilience - For resilience patterns
 
 require github.com/itsneelabh/gomind/core v0.0.0-00010101000000-000000000000
@@ -28,5 +27,4 @@ replace (
 	github.com/itsneelabh/gomind/orchestration => ./orchestration
 	github.com/itsneelabh/gomind/resilience => ./resilience
 	github.com/itsneelabh/gomind/telemetry => ./telemetry
-	github.com/itsneelabh/gomind/workflow => ./workflow
 )

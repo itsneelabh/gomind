@@ -56,8 +56,8 @@ func TestDefaultConfig(t *testing.T) {
 func TestDetectEnvironment(t *testing.T) {
 	t.Run("Kubernetes environment", func(t *testing.T) {
 		// Set Kubernetes environment variable
-		os.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
-		defer os.Unsetenv("KUBERNETES_SERVICE_HOST")
+		_ = os.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+		defer func() { _ = os.Unsetenv("KUBERNETES_SERVICE_HOST") }()
 		
 		cfg := DefaultConfig()
 		
@@ -70,8 +70,8 @@ func TestDetectEnvironment(t *testing.T) {
 	
 	t.Run("Local environment", func(t *testing.T) {
 		// Ensure no Kubernetes env var
-		os.Unsetenv("KUBERNETES_SERVICE_HOST")
-		os.Unsetenv("GOMIND_DEV_MODE")
+		_ = os.Unsetenv("KUBERNETES_SERVICE_HOST")
+		_ = os.Unsetenv("GOMIND_DEV_MODE")
 		
 		cfg := DefaultConfig()
 		
@@ -109,8 +109,8 @@ func TestLoadFromEnv(t *testing.T) {
 	
 	// Set environment variables
 	for k, v := range testEnv {
-		os.Setenv(k, v)
-		defer os.Unsetenv(k)
+		_ = os.Setenv(k, v)
+		defer func() { _ = os.Unsetenv(k) }()
 	}
 	
 	cfg := DefaultConfig()
@@ -263,7 +263,7 @@ func TestValidate(t *testing.T) {
 				cfg.Discovery.RedisURL = ""
 				cfg.Development.MockDiscovery = false
 			},
-			wantErr: "Redis URL is required for Redis discovery provider",
+			wantErr: "redis URL is required for Redis discovery provider",
 		},
 		{
 			name: "Redis discovery with mock",
@@ -485,8 +485,8 @@ func TestFunctionalOptions(t *testing.T) {
 // TestConfigPriority verifies configuration priority order
 func TestConfigPriority(t *testing.T) {
 	// Set environment variable
-	os.Setenv("GOMIND_PORT", "7777")
-	defer os.Unsetenv("GOMIND_PORT")
+	_ = os.Setenv("GOMIND_PORT", "7777")
+	defer func() { _ = os.Unsetenv("GOMIND_PORT") }()
 	
 	// Create config with functional option (should override env)
 	cfg, err := NewConfig(WithPort(8888))
@@ -597,13 +597,13 @@ func BenchmarkNewConfig(b *testing.B) {
 // BenchmarkLoadFromEnv benchmarks environment variable loading
 func BenchmarkLoadFromEnv(b *testing.B) {
 	// Set test environment variables
-	os.Setenv("GOMIND_AGENT_NAME", "bench-agent")
-	os.Setenv("GOMIND_PORT", "8080")
-	os.Setenv("GOMIND_CORS_ENABLED", "true")
+	_ = os.Setenv("GOMIND_AGENT_NAME", "bench-agent")
+	_ = os.Setenv("GOMIND_PORT", "8080")
+	_ = os.Setenv("GOMIND_CORS_ENABLED", "true")
 	defer func() {
-		os.Unsetenv("GOMIND_AGENT_NAME")
-		os.Unsetenv("GOMIND_PORT")
-		os.Unsetenv("GOMIND_CORS_ENABLED")
+		_ = os.Unsetenv("GOMIND_AGENT_NAME")
+		_ = os.Unsetenv("GOMIND_PORT")
+		_ = os.Unsetenv("GOMIND_CORS_ENABLED")
 	}()
 	
 	b.ResetTimer()

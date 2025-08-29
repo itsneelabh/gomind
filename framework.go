@@ -3,22 +3,23 @@
 // Users should import specific modules based on their needs:
 //   - github.com/itsneelabh/gomind/core - For lightweight tools (8MB)
 //   - github.com/itsneelabh/gomind/ai - For AI capabilities
+//   - github.com/itsneelabh/gomind/orchestration - For multi-agent orchestration
 //   - github.com/itsneelabh/gomind/telemetry - For observability
 package framework
 
 import (
 	"context"
-	
+
 	"github.com/itsneelabh/gomind/core"
 )
 
 // Re-export core types for backward compatibility
 type (
 	// Core agent types
-	Agent        = core.Agent
-	BaseAgent    = core.BaseAgent
-	Capability   = core.Capability
-	
+	Agent      = core.Agent
+	BaseAgent  = core.BaseAgent
+	Capability = core.Capability
+
 	// Configuration types
 	Config            = core.Config
 	Option            = core.Option
@@ -32,23 +33,23 @@ type (
 	LoggingConfig     = core.LoggingConfig
 	DevelopmentConfig = core.DevelopmentConfig
 	KubernetesConfig  = core.KubernetesConfig
-	
+
 	// Interfaces
-	Logger       = core.Logger
-	Discovery    = core.Discovery
-	Memory       = core.Memory
-	Telemetry    = core.Telemetry
-	AIClient     = core.AIClient
-	
+	Logger    = core.Logger
+	Discovery = core.Discovery
+	Memory    = core.Memory
+	Telemetry = core.Telemetry
+	AIClient  = core.AIClient
+
 	// Service types
 	ServiceRegistration = core.ServiceRegistration
-	HealthStatus       = core.HealthStatus
-	
+	HealthStatus        = core.HealthStatus
+
 	// AI types
-	AIOptions   = core.AIOptions
-	AIResponse  = core.AIResponse
-	TokenUsage  = core.TokenUsage
-	
+	AIOptions  = core.AIOptions
+	AIResponse = core.AIResponse
+	TokenUsage = core.TokenUsage
+
 	// Telemetry types
 	Span = core.Span
 )
@@ -62,42 +63,42 @@ const (
 
 // Re-export core functions
 var (
-	NewBaseAgent             = core.NewBaseAgent
-	NewBaseAgentWithConfig   = core.NewBaseAgentWithConfig
-	NewFramework             = core.NewFramework
-	NewRedisDiscovery        = core.NewRedisDiscovery
-	NewMockDiscovery         = core.NewMockDiscovery
-	NewInMemoryStore         = core.NewInMemoryStore
-	NewConfig                = core.NewConfig
-	DefaultConfig            = core.DefaultConfig
-	
+	NewBaseAgent           = core.NewBaseAgent
+	NewBaseAgentWithConfig = core.NewBaseAgentWithConfig
+	NewFramework           = core.NewFramework
+	NewRedisDiscovery      = core.NewRedisDiscovery
+	NewMockDiscovery       = core.NewMockDiscovery
+	NewInMemoryStore       = core.NewInMemoryStore
+	NewConfig              = core.NewConfig
+	DefaultConfig          = core.DefaultConfig
+
 	// Configuration options
-	WithName                 = core.WithName
-	WithPort                 = core.WithPort
-	WithAddress              = core.WithAddress
-	WithNamespace            = core.WithNamespace
-	WithCORS                 = core.WithCORS
-	WithCORSDefaults         = core.WithCORSDefaults
-	WithRedisURL             = core.WithRedisURL
-	WithDiscovery            = core.WithDiscovery
+	WithName                  = core.WithName
+	WithPort                  = core.WithPort
+	WithAddress               = core.WithAddress
+	WithNamespace             = core.WithNamespace
+	WithCORS                  = core.WithCORS
+	WithCORSDefaults          = core.WithCORSDefaults
+	WithRedisURL              = core.WithRedisURL
+	WithDiscovery             = core.WithDiscovery
 	WithDiscoveryCacheEnabled = core.WithDiscoveryCacheEnabled
-	WithOpenAIAPIKey         = core.WithOpenAIAPIKey
-	WithAI                   = core.WithAI
-	WithAIModel              = core.WithAIModel
-	WithTelemetry            = core.WithTelemetry
-	WithEnableMetrics        = core.WithEnableMetrics
-	WithEnableTracing        = core.WithEnableTracing
-	WithOTELEndpoint         = core.WithOTELEndpoint
-	WithLogLevel             = core.WithLogLevel
-	WithLogFormat            = core.WithLogFormat
-	WithMemoryProvider       = core.WithMemoryProvider
-	WithCircuitBreaker       = core.WithCircuitBreaker
-	WithRetry                = core.WithRetry
-	WithKubernetes           = core.WithKubernetes
-	WithConfigFile           = core.WithConfigFile
-	WithDevelopmentMode      = core.WithDevelopmentMode
-	WithMockAI               = core.WithMockAI
-	WithMockDiscovery        = core.WithMockDiscovery
+	WithOpenAIAPIKey          = core.WithOpenAIAPIKey
+	WithAI                    = core.WithAI
+	WithAIModel               = core.WithAIModel
+	WithTelemetry             = core.WithTelemetry
+	WithEnableMetrics         = core.WithEnableMetrics
+	WithEnableTracing         = core.WithEnableTracing
+	WithOTELEndpoint          = core.WithOTELEndpoint
+	WithLogLevel              = core.WithLogLevel
+	WithLogFormat             = core.WithLogFormat
+	WithMemoryProvider        = core.WithMemoryProvider
+	WithCircuitBreaker        = core.WithCircuitBreaker
+	WithRetry                 = core.WithRetry
+	WithKubernetes            = core.WithKubernetes
+	WithConfigFile            = core.WithConfigFile
+	WithDevelopmentMode       = core.WithDevelopmentMode
+	WithMockAI                = core.WithMockAI
+	WithMockDiscovery         = core.WithMockDiscovery
 )
 
 // RunAgent provides a simplified way to run an agent

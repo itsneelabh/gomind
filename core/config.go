@@ -637,7 +637,7 @@ func (c *Config) Validate() error {
 	}
 	
 	if c.Discovery.Enabled && c.Discovery.Provider == "redis" && c.Discovery.RedisURL == "" && !c.Development.MockDiscovery {
-		return fmt.Errorf("Redis URL is required for Redis discovery provider (or use mock discovery in development)")
+		return fmt.Errorf("redis URL is required for Redis discovery provider (or use mock discovery in development)")
 	}
 	
 	return nil

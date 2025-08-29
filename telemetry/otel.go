@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -82,6 +82,7 @@ func (o *OTelProvider) RecordMetric(name string, value float64, labels map[strin
 	
 	// Record metric (simplified - in real implementation would cache counters/gauges)
 	// This is a placeholder - actual implementation would use proper metric instruments
+	_ = attrs // Will be used when actual metric recording is implemented
 }
 
 // Shutdown gracefully shuts down the telemetry provider

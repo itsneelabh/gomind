@@ -22,13 +22,16 @@ type OpenAIClient struct {
 }
 
 // NewOpenAIClient creates a new OpenAI client
-func NewOpenAIClient(apiKey string, logger core.Logger) *OpenAIClient {
+func NewOpenAIClient(apiKey string, logger ...core.Logger) *OpenAIClient {
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
 	
-	if logger == nil {
-		logger = &core.NoOpLogger{}
+	var log core.Logger
+	if len(logger) > 0 {
+		log = logger[0]
+	} else {
+		log = &core.NoOpLogger{}
 	}
 	
 	return &OpenAIClient{
@@ -37,7 +40,7 @@ func NewOpenAIClient(apiKey string, logger core.Logger) *OpenAIClient {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		logger: logger,
+		logger: log,
 	}
 }
 
@@ -98,7 +101,7 @@ func (c *OpenAIClient) GenerateResponse(ctx context.Context, prompt string, opti
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	
 	// Read response
 	body, err := io.ReadAll(resp.Body)
