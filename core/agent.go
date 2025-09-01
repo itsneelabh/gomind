@@ -21,11 +21,12 @@ type Agent interface {
 
 // Capability represents a capability that an agent provides
 type Capability struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Endpoint    string   `json:"endpoint"`
-	InputTypes  []string `json:"input_types"`
-	OutputTypes []string `json:"output_types"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Endpoint    string              `json:"endpoint"`
+	InputTypes  []string            `json:"input_types"`
+	OutputTypes []string            `json:"output_types"`
+	Handler     http.HandlerFunc    `json:"-"` // Optional custom handler, excluded from JSON
 }
 
 // BaseAgent provides the core agent functionality (Tool Builder Kit)
@@ -224,23 +225,41 @@ func (b *BaseAgent) HandleFunc(pattern string, handler http.HandlerFunc) error {
 	return nil
 }
 
-// RegisterCapability registers a new capability
+// RegisterCapability registers a new capability with optional custom handler.
+// If cap.Handler is provided, it will be used instead of the generic handler.
+// If cap.Endpoint is empty, it will be auto-generated as /api/capabilities/{name}.
 func (b *BaseAgent) RegisterCapability(cap Capability) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	
+	// Auto-generate endpoint if not provided
+	endpoint := cap.Endpoint
+	if endpoint == "" {
+		endpoint = fmt.Sprintf("/api/capabilities/%s", cap.Name)
+	}
+	
+	// Update the capability's endpoint for consistency
+	cap.Endpoint = endpoint
+	
+	// Append to capabilities list
 	b.Capabilities = append(b.Capabilities, cap)
 
 	// Register HTTP endpoint for the capability
-	endpoint := fmt.Sprintf("/api/capabilities/%s", cap.Name)
-	b.mux.HandleFunc(endpoint, b.handleCapabilityRequest(cap))
+	if cap.Handler != nil {
+		// Use custom handler if provided (no automatic telemetry/logging)
+		b.mux.HandleFunc(endpoint, cap.Handler)
+	} else {
+		// Use generic handler with telemetry and logging
+		b.mux.HandleFunc(endpoint, b.handleCapabilityRequest(cap))
+	}
 	
-	// Track this pattern internally (capabilities are system-managed, not custom)
+	// Track this pattern internally
 	b.registeredPatterns[endpoint] = true
 
 	b.Logger.Info("Registered capability", map[string]interface{}{
-		"name":     cap.Name,
-		"endpoint": endpoint,
+		"name":          cap.Name,
+		"endpoint":      endpoint,
+		"custom_handler": cap.Handler != nil,
 	})
 }
 
