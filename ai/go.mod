@@ -1,6 +1,6 @@
 module github.com/itsneelabh/gomind/ai
 
-go 1.23
+go 1.25
 
 replace github.com/itsneelabh/gomind/core => ../core
 
