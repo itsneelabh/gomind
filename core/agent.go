@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,6 +49,11 @@ type BaseAgent struct {
 	// HTTP server
 	server *http.Server
 	mux    *http.ServeMux
+	
+	// Handler registration tracking
+	registeredPatterns map[string]bool  // Track registered patterns to prevent duplicates
+	serverStarted      bool             // Track if server has started
+	mu                 sync.RWMutex     // Protect concurrent access
 }
 
 // NewBaseAgent creates a new base agent with minimal dependencies
@@ -74,14 +80,16 @@ func NewBaseAgentWithConfig(config *Config) *BaseAgent {
 	}
 	
 	return &BaseAgent{
-		ID:           config.ID,
-		Name:         config.Name,
-		Capabilities: []Capability{},
-		Logger:       &NoOpLogger{},  // Will be initialized based on config
-		Memory:       NewInMemoryStore(),  // Will be initialized based on config
-		Telemetry:    &NoOpTelemetry{},  // Will be initialized based on config
-		Config:       config,
-		mux:          http.NewServeMux(),
+		ID:                 config.ID,
+		Name:               config.Name,
+		Capabilities:       []Capability{},
+		Logger:             &NoOpLogger{},  // Will be initialized based on config
+		Memory:             NewInMemoryStore(),  // Will be initialized based on config
+		Telemetry:          &NoOpTelemetry{},  // Will be initialized based on config
+		Config:             config,
+		mux:                http.NewServeMux(),
+		registeredPatterns: make(map[string]bool),
+		serverStarted:      false,
 	}
 }
 
@@ -177,13 +185,58 @@ func (b *BaseAgent) GetCapabilities() []Capability {
 	return b.Capabilities
 }
 
+// HandleFunc registers a custom HTTP handler for the given pattern.
+// This method must be called before Start() is invoked.
+// It returns an error if:
+//   - The server has already been started
+//   - The pattern has already been registered
+//
+// Example:
+//
+//	agent := core.NewBaseAgent("my-agent")
+//	err := agent.HandleFunc("/api/custom", myHandler)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func (b *BaseAgent) HandleFunc(pattern string, handler http.HandlerFunc) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	
+	// Check if server has already started
+	if b.serverStarted {
+		return fmt.Errorf("cannot register handler for pattern %s: server already started", pattern)
+	}
+	
+	// Check for duplicate pattern registration
+	if b.registeredPatterns[pattern] {
+		return fmt.Errorf("handler already registered for pattern: %s", pattern)
+	}
+	
+	// Register the handler
+	b.mux.HandleFunc(pattern, handler)
+	b.registeredPatterns[pattern] = true
+	
+	// Log the registration
+	b.Logger.Info("Registered custom handler", map[string]interface{}{
+		"pattern": pattern,
+	})
+	
+	return nil
+}
+
 // RegisterCapability registers a new capability
 func (b *BaseAgent) RegisterCapability(cap Capability) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	
 	b.Capabilities = append(b.Capabilities, cap)
 
 	// Register HTTP endpoint for the capability
 	endpoint := fmt.Sprintf("/api/capabilities/%s", cap.Name)
 	b.mux.HandleFunc(endpoint, b.handleCapabilityRequest(cap))
+	
+	// Track this pattern internally (capabilities are system-managed, not custom)
+	b.registeredPatterns[endpoint] = true
 
 	b.Logger.Info("Registered capability", map[string]interface{}{
 		"name":     cap.Name,
@@ -242,6 +295,14 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 
 // Start starts the HTTP server for the agent
 func (b *BaseAgent) Start(port int) error {
+	b.mu.Lock()
+	
+	// Check if already started
+	if b.serverStarted {
+		b.mu.Unlock()
+		return fmt.Errorf("server already started")
+	}
+	
 	if b.Config != nil && b.Config.Port != 0 {
 		port = b.Config.Port
 	}
@@ -253,32 +314,41 @@ func (b *BaseAgent) Start(port int) error {
 
 	// Add health endpoint if enabled
 	if b.Config.HTTP.EnableHealthCheck {
-		b.mux.HandleFunc(b.Config.HTTP.HealthCheckPath, func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(map[string]string{
-				"status": "healthy",
-				"agent":  b.Name,
-				"id":     b.ID,
-			}); err != nil {
-				// Log error but response is already partially written
-				if b.Logger != nil {
-					b.Logger.Error("Failed to encode health response", map[string]interface{}{"error": err})
+		healthPath := b.Config.HTTP.HealthCheckPath
+		// Check if health path is already registered (shouldn't be, but be safe)
+		if !b.registeredPatterns[healthPath] {
+			b.mux.HandleFunc(healthPath, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				if err := json.NewEncoder(w).Encode(map[string]string{
+					"status": "healthy",
+					"agent":  b.Name,
+					"id":     b.ID,
+				}); err != nil {
+					// Log error but response is already partially written
+					if b.Logger != nil {
+						b.Logger.Error("Failed to encode health response", map[string]interface{}{"error": err})
+					}
 				}
-			}
-		})
+			})
+			b.registeredPatterns[healthPath] = true
+		}
 	}
 
 	// Add capabilities listing endpoint
-	b.mux.HandleFunc("/api/capabilities", func(w http.ResponseWriter, r *http.Request) {
-		ApplyCORS(w, r, &b.Config.HTTP.CORS)
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(b.Capabilities); err != nil {
-			// Log error but response is already partially written
-			if b.Logger != nil {
-				b.Logger.Error("Failed to encode capabilities", map[string]interface{}{"error": err})
+	capabilitiesPath := "/api/capabilities"
+	if !b.registeredPatterns[capabilitiesPath] {
+		b.mux.HandleFunc(capabilitiesPath, func(w http.ResponseWriter, r *http.Request) {
+			ApplyCORS(w, r, &b.Config.HTTP.CORS)
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(b.Capabilities); err != nil {
+				// Log error but response is already partially written
+				if b.Logger != nil {
+					b.Logger.Error("Failed to encode capabilities", map[string]interface{}{"error": err})
+				}
 			}
-		}
-	})
+		})
+		b.registeredPatterns[capabilitiesPath] = true
+	}
 
 	// Create handler with CORS middleware if enabled
 	var handler http.Handler = b.mux
@@ -295,6 +365,10 @@ func (b *BaseAgent) Start(port int) error {
 		MaxHeaderBytes: b.Config.HTTP.MaxHeaderBytes,
 	}
 
+	// Mark server as started (before actually starting to prevent race conditions)
+	b.serverStarted = true
+	b.mu.Unlock()  // Unlock before blocking ListenAndServe call
+	
 	b.Logger.Info("Starting HTTP server", map[string]interface{}{
 		"address": addr,
 		"cors":    b.Config.HTTP.CORS.Enabled,
@@ -305,6 +379,9 @@ func (b *BaseAgent) Start(port int) error {
 
 // Stop stops the HTTP server
 func (b *BaseAgent) Stop(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	
 	if b.server != nil {
 		// Use configured shutdown timeout or context deadline
 		shutdownCtx := ctx
@@ -322,6 +399,9 @@ func (b *BaseAgent) Stop(ctx context.Context) error {
 				})
 			}
 		}
+		
+		// Reset server state
+		b.serverStarted = false
 		
 		return b.server.Shutdown(shutdownCtx)
 	}
