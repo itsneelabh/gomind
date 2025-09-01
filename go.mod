@@ -1,6 +1,6 @@
 module github.com/itsneelabh/gomind
 
-go 1.23.0
+go 1.25
 
 // This is now a meta-module that re-exports from submodules
 // Users should import specific modules:
