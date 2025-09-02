@@ -1,6 +1,6 @@
 # GoMind - Kubernetes-Native AI Agent Framework
 
-[![Go Version](https://img.shields.io/badge/go-1.23+-blue.svg)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.21+-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 GoMind is a lightweight framework for building AI agents that run efficiently on Kubernetes. With an 8MB core and native K8s integration, it's designed for enterprises that need to deploy AI at scale using their existing infrastructure.
@@ -23,8 +23,10 @@ GoMind is a lightweight framework for building AI agents that run efficiently on
 ### 🚀 Production-Ready Architecture
 ```go
 // Service discovery built-in
-agent := framework.NewBaseAgent("pricing-service")
-framework.RunAgent(agent, 8080)  // Automatically registers with Redis
+agent := core.NewBaseAgent("pricing-service")
+if err := agent.Start(8080); err != nil {
+    log.Fatal(err)
+}  // Automatically registers with Redis
 ```
 
 - Redis-based service discovery (works with ElastiCache/MemoryStore)
@@ -32,12 +34,15 @@ framework.RunAgent(agent, 8080)  // Automatically registers with Redis
 - Distributed tracing with OpenTelemetry
 - Circuit breakers and retry logic included
 
-### 📦 Modular Design
-Start small, grow as needed:
-- **Core (8MB)**: Service discovery, HTTP server, basic framework
-- **AI Module (+2MB)**: OpenAI/Anthropic integration, prompt management
-- **Orchestration (+1MB)**: AI-powered multi-agent coordination
-- **Telemetry (+10MB)**: Full OpenTelemetry with Jaeger/Datadog support
+### 📦 Comprehensive Framework
+GoMind v0.1.0-alpha includes all modules in a single package:
+- **Core**: Service discovery, HTTP server, basic framework
+- **AI Module**: OpenAI/Anthropic integration, prompt management
+- **Orchestration**: AI-powered multi-agent coordination
+- **Telemetry**: Full OpenTelemetry with Jaeger/Datadog support
+- **Resilience**: Circuit breakers and retry patterns
+
+*Note: Future versions will offer modular installation for optimized deployments.*
 
 ## Quick Start
 
@@ -47,11 +52,11 @@ package main
 
 import (
     "context"
-    framework "github.com/itsneelabh/gomind"
+    "github.com/itsneelabh/gomind/core"
 )
 
 type AnalyticsAgent struct {
-    framework.BaseAgent
+    *core.BaseAgent
 }
 
 // Auto-discovered capability
@@ -62,8 +67,19 @@ func (a *AnalyticsAgent) AnalyzeMetrics(ctx context.Context, data []float64) (st
 }
 
 func main() {
-    agent := &AnalyticsAgent{}
-    framework.RunAgent(agent, 8080)
+    agent := &AnalyticsAgent{
+        BaseAgent: core.NewBaseAgent("analytics"),
+    }
+    
+    // Initialize and start the agent
+    ctx := context.Background()
+    if err := agent.Initialize(ctx); err != nil {
+        log.Fatal(err)
+    }
+    
+    if err := agent.Start(8080); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -117,15 +133,15 @@ spec:
 ## Real-World Example: Multi-Agent System
 
 ```go
-// Market data service (deterministic, 8MB)
+// Market data service
 type MarketDataService struct {
-    framework.BaseAgent
+    *core.BaseAgent
 }
 
-// Risk analyzer (AI-powered, 10MB)  
+// Risk analyzer (AI-powered)  
 type RiskAnalyzer struct {
-    framework.BaseAgent
-    ai framework.AIClient
+    *core.BaseAgent
+    ai core.AIClient
 }
 
 // AI-powered orchestrator discovers agents and coordinates them
@@ -234,8 +250,8 @@ defer span.End()
 ## Getting Started
 
 ```bash
-# Install the framework
-go get github.com/itsneelabh/gomind/core
+# Install the framework from main branch
+go get github.com/itsneelabh/gomind@main
 
 # Run locally
 go run main.go

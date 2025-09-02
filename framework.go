@@ -1,10 +1,13 @@
-// Package framework provides a lightweight meta-module that re-exports from submodules
-// This is the main entry point for the GoMind framework
-// Users should import specific modules based on their needs:
-//   - github.com/itsneelabh/gomind/core - For lightweight tools (8MB)
-//   - github.com/itsneelabh/gomind/ai - For AI capabilities
-//   - github.com/itsneelabh/gomind/orchestration - For multi-agent orchestration
-//   - github.com/itsneelabh/gomind/telemetry - For observability
+// Package framework provides the main entry point for the GoMind framework
+// This is a monolithic package that includes all GoMind capabilities
+// 
+// Import paths:
+//   - github.com/itsneelabh/gomind - Main framework package
+//   - github.com/itsneelabh/gomind/core - Core agent framework
+//   - github.com/itsneelabh/gomind/ai - AI capabilities
+//   - github.com/itsneelabh/gomind/orchestration - Multi-agent orchestration
+//   - github.com/itsneelabh/gomind/telemetry - Observability
+//   - github.com/itsneelabh/gomind/resilience - Resilience patterns
 package framework
 
 import (
