@@ -48,7 +48,11 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		MaxTokens:   200,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to analyze intent: %w", err)
+		return "", &core.FrameworkError{
+			Op:   "DiscoverAndUseTools.AnalyzeIntent",
+			Kind: "ai",
+			Err:  core.ErrAIOperationFailed,
+		}
 	}
 	
 	// 2. Discover available tools using the Discovery service
@@ -102,7 +106,11 @@ Create a plan for which tools to call and in what order.`, toolList, userQuery)
 		MaxTokens:   500,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to create plan: %w", err)
+		return "", &core.FrameworkError{
+			Op:   "DiscoverAndUseTools.CreatePlan",
+			Kind: "ai",
+			Err:  core.ErrAIOperationFailed,
+		}
 	}
 	
 	// 4. Execute the plan (simplified - in real implementation would call tools via HTTP)
@@ -123,7 +131,11 @@ Generate a response to the original user query: "%s"`, planResp.Content, userQue
 		MaxTokens:   1000,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to synthesize response: %w", err)
+		return "", &core.FrameworkError{
+			Op:   "DiscoverAndUseTools.Synthesize",
+			Kind: "ai",
+			Err:  core.ErrAIOperationFailed,
+		}
 	}
 	
 	return finalResp.Content, nil

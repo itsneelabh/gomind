@@ -38,6 +38,12 @@ var (
 	// HTTP/Network errors
 	ErrConnectionFailed = errors.New("connection failed")
 	ErrRequestFailed    = errors.New("request failed")
+	
+	// Resilience errors
+	ErrCircuitBreakerOpen = errors.New("circuit breaker open")
+	
+	// AI operation errors
+	ErrAIOperationFailed = errors.New("AI operation failed")
 )
 
 // FrameworkError provides structured error information with context
@@ -87,7 +93,8 @@ func IsRetryable(err error) bool {
 	return errors.Is(err, ErrDiscoveryUnavailable) ||
 		errors.Is(err, ErrTimeout) ||
 		errors.Is(err, ErrConnectionFailed) ||
-		errors.Is(err, ErrServiceNotFound)
+		errors.Is(err, ErrServiceNotFound) ||
+		errors.Is(err, ErrCircuitBreakerOpen)
 }
 
 // IsNotFound checks if an error represents a "not found" condition

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+	
+	"github.com/itsneelabh/gomind/core"
 )
 
 // RetryConfig configures retry behavior
@@ -80,14 +82,14 @@ func Retry(ctx context.Context, config *RetryConfig, fn func() error) error {
 		}
 	}
 	
-	return fmt.Errorf("max retry attempts (%d) exceeded: %w", config.MaxAttempts, lastErr)
+	return fmt.Errorf("max retry attempts (%d) exceeded for %v: %w", config.MaxAttempts, lastErr, core.ErrMaxRetriesExceeded)
 }
 
 // RetryWithCircuitBreaker combines retry logic with circuit breaker
 func RetryWithCircuitBreaker(ctx context.Context, config *RetryConfig, cb *CircuitBreaker, fn func() error) error {
 	return Retry(ctx, config, func() error {
 		if !cb.CanExecute() {
-			return fmt.Errorf("circuit breaker is open")
+			return core.ErrCircuitBreakerOpen
 		}
 		
 		err := fn()

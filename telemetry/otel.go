@@ -46,7 +46,7 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 		otlptracegrpc.WithInsecure(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create exporter: %w", err)
+		return nil, fmt.Errorf("failed to create OTLP exporter for endpoint %s: %w", endpoint, err)
 	}
 	
 	// Create trace provider
