@@ -58,18 +58,22 @@ type FrameworkError struct {
 
 // Error returns the string representation of the error
 func (e *FrameworkError) Error() string {
+	// Priority 1: If Message is set, return it (for backward compatibility)
+	if e.Message != "" {
+		return e.Message
+	}
+	// Priority 2: If Op and Err are set, format them
 	if e.Op != "" && e.Err != nil {
 		if e.ID != "" {
 			return fmt.Sprintf("%s [%s]: %v", e.Op, e.ID, e.Err)
 		}
 		return fmt.Sprintf("%s: %v", e.Op, e.Err)
 	}
-	if e.Message != "" {
-		return e.Message
-	}
+	// Priority 3: Return underlying error if present
 	if e.Err != nil {
 		return e.Err.Error()
 	}
+	// Priority 4: Generic error based on Kind
 	return fmt.Sprintf("%s error", e.Kind)
 }
 

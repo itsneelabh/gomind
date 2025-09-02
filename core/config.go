@@ -575,7 +575,7 @@ func (c *Config) LoadFromFile(path string) error {
 	// Verify the file has a safe extension
 	ext := filepath.Ext(cleanPath)
 	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
-		return fmt.Errorf("unsupported config file extension: %s (use .json, .yaml, or .yml)", ext)
+		return fmt.Errorf("unsupported config file extension %s: %w", ext, ErrInvalidConfiguration)
 	}
 	
 	// Check if the path is absolute and within expected directories
@@ -591,19 +591,19 @@ func (c *Config) LoadFromFile(path string) error {
 	// Read the file with the cleaned path
 	data, err := os.ReadFile(filepath.Clean(cleanPath)) // nosec G304 -- path is validated
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %w", err)
+		return fmt.Errorf("failed to read config file %s: %w", cleanPath, err)
 	}
 	
 	// Parse based on extension
 	switch ext {
 	case ".json":
 		if err := json.Unmarshal(data, c); err != nil {
-			return fmt.Errorf("failed to parse JSON config file: %w", err)
+			return fmt.Errorf("failed to parse JSON config file: %w", ErrInvalidConfiguration)
 		}
 	case ".yaml", ".yml":
 		// For YAML support, we'd need to import gopkg.in/yaml.v3
 		// For now, return an error for YAML files
-		return fmt.Errorf("YAML config files not yet supported")
+		return fmt.Errorf("YAML config files not yet supported: %w", ErrInvalidConfiguration)
 	}
 	
 	return nil
@@ -621,23 +621,53 @@ func (c *Config) LoadFromFile(path string) error {
 //   - Redis URL is required when Redis discovery is enabled (unless using mock)
 func (c *Config) Validate() error {
 	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("invalid port: %d", c.Port)
+		// Preserve exact message for test compatibility
+		return &FrameworkError{
+			Op:      "Config.Validate",
+			Kind:    "config",
+			Message: fmt.Sprintf("invalid port: %d", c.Port),
+			Err:     ErrInvalidConfiguration,
+		}
 	}
 	
 	if c.Name == "" {
-		return fmt.Errorf("agent name is required")
+		// Preserve exact message for test compatibility
+		return &FrameworkError{
+			Op:      "Config.Validate",
+			Kind:    "config",
+			Message: "agent name is required",
+			Err:     ErrMissingConfiguration,
+		}
 	}
 	
 	if c.AI.Enabled && c.AI.APIKey == "" && !c.Development.MockAI {
-		return fmt.Errorf("AI API key is required when AI is enabled (or use mock AI in development)")
+		// Preserve exact message for test compatibility
+		return &FrameworkError{
+			Op:      "Config.Validate",
+			Kind:    "config",
+			Message: "AI API key is required when AI is enabled (or use mock AI in development)",
+			Err:     ErrMissingConfiguration,
+		}
 	}
 	
 	if c.Telemetry.Enabled && c.Telemetry.Endpoint == "" {
-		return fmt.Errorf("telemetry endpoint is required when telemetry is enabled")
+		// Preserve exact message for test compatibility
+		return &FrameworkError{
+			Op:      "Config.Validate",
+			Kind:    "config",
+			Message: "telemetry endpoint is required when telemetry is enabled",
+			Err:     ErrMissingConfiguration,
+		}
 	}
 	
 	if c.Discovery.Enabled && c.Discovery.Provider == "redis" && c.Discovery.RedisURL == "" && !c.Development.MockDiscovery {
-		return fmt.Errorf("redis URL is required for Redis discovery provider (or use mock discovery in development)")
+		// Preserve exact message for test compatibility
+		return &FrameworkError{
+			Op:      "Config.Validate",
+			Kind:    "config",
+			Message: "redis URL is required for Redis discovery provider (or use mock discovery in development)",
+			Err:     ErrMissingConfiguration,
+		}
 	}
 	
 	return nil
@@ -686,7 +716,13 @@ func WithName(name string) Option {
 func WithPort(port int) Option {
 	return func(c *Config) error {
 		if port < 1 || port > 65535 {
-			return fmt.Errorf("invalid port: %d", port)
+			// Preserve exact message for test compatibility
+			return &FrameworkError{
+				Op:      "WithPort",
+				Kind:    "config",
+				Message: fmt.Sprintf("invalid port: %d", port),
+				Err:     ErrInvalidConfiguration,
+			}
 		}
 		c.Port = port
 		return nil
