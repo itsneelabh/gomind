@@ -3,7 +3,7 @@ package framework
 // Version information for the GoMind Agent Framework
 const (
 	// Version is the current framework version
-	Version = "v0.1.0-alpha"
+	Version = "development"
 
 	// APIVersion is the current API version
 	APIVersion = "v1alpha1"
