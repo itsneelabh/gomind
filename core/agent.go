@@ -205,11 +205,13 @@ func (b *BaseAgent) HandleFunc(pattern string, handler http.HandlerFunc) error {
 	
 	// Check if server has already started
 	if b.serverStarted {
+		// Keep the exact error message for backward compatibility with tests
 		return fmt.Errorf("cannot register handler for pattern %s: server already started", pattern)
 	}
 	
 	// Check for duplicate pattern registration
 	if b.registeredPatterns[pattern] {
+		// Keep the exact error message for backward compatibility with tests
 		return fmt.Errorf("handler already registered for pattern: %s", pattern)
 	}
 	

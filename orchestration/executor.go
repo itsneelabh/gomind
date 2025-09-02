@@ -312,7 +312,7 @@ func (e *SmartExecutor) callAgent(ctx context.Context, url string, parameters ma
 func (e *SmartExecutor) ExecuteStep(ctx context.Context, step RoutingStep) (*StepResult, error) {
 	result := e.executeStep(ctx, step)
 	if !result.Success {
-		return nil, fmt.Errorf(result.Error)
+		return nil, fmt.Errorf("%s", result.Error)
 	}
 	return &result, nil
 }
