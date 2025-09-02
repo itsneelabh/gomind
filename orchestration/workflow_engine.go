@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -258,15 +259,96 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ { // 5 concurrent workers
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		go func(workerID int) {
+			defer func() {
+				if r := recover(); r != nil {
+					// Capture panic and convert to error
+					panicErr := fmt.Errorf("worker %d panic: %v", workerID, r)
+					stackTrace := string(debug.Stack())
+					
+					// Try to send error result to prevent workflow hanging
+					// First check if context is cancelled
+					select {
+					case <-ctx.Done():
+						// Context already cancelled, log and exit
+						// TODO: Replace with proper logging
+						// Using structured format for easier parsing
+						if false { // Disabled, enable for debugging
+							fmt.Printf("PANIC|worker=%d|context=cancelled|error=%v\n", workerID, r)
+						}
+						return
+					default:
+					}
+					
+					// Try to send with a timeout to avoid indefinite blocking
+					sendTimeout := time.After(5 * time.Second)
+					select {
+					case results <- &TaskResult{
+						StepID: fmt.Sprintf("panic-recovery-worker-%d", workerID),
+						Error:  panicErr,
+						Output: map[string]interface{}{
+							"panic":       fmt.Sprintf("%v", r),
+							"worker_id":   workerID,
+							"stack_trace": stackTrace,
+						},
+					}:
+						// Successfully sent panic notification
+					case <-sendTimeout:
+						// Timeout sending result - this is critical and should be logged
+						// In production, this should trigger an alert
+						// TODO: Add proper logging/metrics here
+						_ = panicErr // Prevent unused variable warning
+					case <-ctx.Done():
+						// Context cancelled while trying to send
+						return
+					}
+				}
+				wg.Done()
+			}()
 			e.worker(ctx, taskQueue, results)
-		}()
+		}(i)
 	}
 
 	// DAG execution loop
 	go func() {
-		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				// Capture panic and convert to error
+				panicErr := fmt.Errorf("DAG execution panic: %v", r)
+				stackTrace := string(debug.Stack())
+				
+				// Check if context is already cancelled
+				select {
+				case <-ctx.Done():
+					// Context cancelled, just return
+					return
+				default:
+				}
+				
+				// Try to send error with timeout
+				sendTimeout := time.After(5 * time.Second)
+				select {
+				case results <- &TaskResult{
+					StepID: "panic-recovery-dag",
+					Error:  panicErr,
+					Output: map[string]interface{}{
+						"panic":       fmt.Sprintf("%v", r),
+						"source":      "dag-executor",
+						"stack_trace": stackTrace,
+					},
+				}:
+					// Successfully sent panic notification
+				case <-sendTimeout:
+					// Timeout - critical error that should be logged
+					// TODO: Add proper logging/alerting here
+					_ = panicErr // Prevent unused variable warning
+				case <-ctx.Done():
+					// Context cancelled while sending
+					return
+				}
+			}
+			close(done)
+		}()
 
 		for {
 			// Get ready nodes from DAG
@@ -313,12 +395,41 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 	for {
 		select {
 		case result := <-results:
-			stepExec := execution.Steps[result.StepID]
+			// Check if this is a panic recovery message (no corresponding step)
+			stepExec, exists := execution.Steps[result.StepID]
+			if !exists {
+				// This is likely a panic recovery message
+				// Log the error and add to execution errors
+				execution.Errors = append(execution.Errors, fmt.Errorf("worker panic: %w", result.Error))
+				
+				// TODO: Add proper logging here when logger is available
+				// For now, store panic info in execution errors with context
+				if result.Output != nil {
+					// Extract stack trace if available for debugging
+					if _, ok := result.Output["stack_trace"]; ok {
+						// Stack trace is available in Output for debugging
+					}
+				}
+				
+				// Decide whether to continue or fail based on error strategy
+				if workflow.OnError == nil || workflow.OnError.Strategy != "continue" {
+					// Fail fast on panic
+					close(taskQueue)
+					wg.Wait()
+					return fmt.Errorf("worker panic: %w", result.Error)
+				}
+				// Otherwise continue processing other tasks
+				continue
+			}
 
 			if result.Error != nil {
 				stepExec.Status = StepFailed
 				stepExec.Error = result.Error.Error()
-				execution.DAG.MarkNodeFailed(result.StepID)
+				
+				// Only update DAG if node exists
+				if execution.DAG.GetNode(result.StepID) != nil {
+					execution.DAG.MarkNodeFailed(result.StepID)
+				}
 
 				// Handle error based on strategy
 				if workflow.OnError != nil && workflow.OnError.Strategy == "continue" {
@@ -332,7 +443,11 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 			} else {
 				stepExec.Status = StepCompleted
 				stepExec.Output = result.Output
-				execution.DAG.MarkNodeCompleted(result.StepID)
+				
+				// Only update DAG if node exists
+				if execution.DAG.GetNode(result.StepID) != nil {
+					execution.DAG.MarkNodeCompleted(result.StepID)
+				}
 
 				// Store step output in context for reference
 				execution.Context[fmt.Sprintf("steps.%s.output", result.StepID)] = result.Output
@@ -341,7 +456,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 			endTime := time.Now()
 			stepExec.EndTime = &endTime
 
-			// Update state
+			// Update state only if step exists
 			if err := e.stateStore.UpdateStepExecution(ctx, execution.ID, stepExec); err != nil {
 				// Log error but don't fail the step
 				fmt.Printf("Failed to update step state: %v\n", err)

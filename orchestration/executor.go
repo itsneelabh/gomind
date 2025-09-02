@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -64,7 +65,46 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 		for _, step := range readySteps {
 			wg.Add(1)
 			go func(s RoutingStep) {
-				defer wg.Done()
+				// Track when this step started for accurate timing
+				stepStartTime := time.Now()
+				
+				defer func() {
+					if r := recover(); r != nil {
+						// Capture panic and convert to error result
+						stackTrace := string(debug.Stack())
+						errorMsg := fmt.Sprintf("step %s execution panic: %v", s.StepID, r)
+						
+						// Log stack trace separately (should be replaced with proper logger)
+						// TODO: Replace with proper logging when logger is available
+						// For now, using a more structured format
+						if false { // Disabled in production, enable for debugging
+							fmt.Printf("PANIC|step=%s|agent=%s|error=%v|stack=%s\n", 
+								s.StepID, s.AgentName, r, stackTrace)
+						}
+						
+						// Store panic as failed step result
+						// Avoid nested defer to prevent deadlock
+						resultsMutex.Lock()
+						
+						panicResult := StepResult{
+							StepID:    s.StepID,
+							AgentName: s.AgentName,
+							Namespace: s.Namespace,
+							Success:   false,
+							Error:     errorMsg,
+							StartTime: stepStartTime, // Use the actual start time
+							Duration:  time.Since(stepStartTime),
+						}
+						
+						stepResults[s.StepID] = &panicResult
+						result.Steps = append(result.Steps, panicResult)
+						executed[s.StepID] = true
+						result.Success = false
+						
+						resultsMutex.Unlock() // Unlock immediately, no defer
+					}
+					wg.Done()
+				}()
 
 				// Acquire semaphore for concurrency control
 				e.semaphore <- struct{}{}

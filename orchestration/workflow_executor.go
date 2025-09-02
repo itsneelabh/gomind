@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
@@ -155,6 +156,39 @@ func (e *WorkflowExecutor) BatchCall(ctx context.Context, calls []ServiceCall) [
 
 	for i, call := range calls {
 		go func(idx int, c ServiceCall) {
+			defer func() {
+				if r := recover(); r != nil {
+					// Capture panic and convert to error result
+					panicErr := fmt.Errorf("service call %s panic: %v", c.ID, r)
+					stackTrace := string(debug.Stack())
+					
+					// Try to send result with timeout to avoid blocking
+					sendTimeout := time.After(5 * time.Second)
+					select {
+					case resultChan <- indexedResult{
+						index: idx,
+						result: ServiceCallResult{
+							CallID:  c.ID,
+							Success: false,
+							Error:   panicErr.Error(),
+							Output: map[string]interface{}{
+								"panic":       fmt.Sprintf("%v", r),
+								"call_id":     c.ID,
+								"call_type":   c.Type,
+								"target":      c.Target,
+								"stack_trace": stackTrace,
+							},
+						},
+					}:
+						// Successfully sent panic result
+					case <-sendTimeout:
+						// Timeout sending result - this should be logged
+						// TODO: Add proper logging/metrics here
+						_ = panicErr // Prevent unused variable warning
+					}
+				}
+			}()
+
 			var result ServiceCallResult
 			result.CallID = c.ID
 
