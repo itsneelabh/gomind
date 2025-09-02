@@ -2,7 +2,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 )
 
 // Standard sentinel errors for comparison using errors.Is()
@@ -24,6 +23,7 @@ var (
 	// Configuration errors
 	ErrInvalidConfiguration = errors.New("invalid configuration")
 	ErrMissingConfiguration = errors.New("missing required configuration")
+	ErrPortOutOfRange       = errors.New("port out of range")
 	
 	// State errors
 	ErrAlreadyStarted   = errors.New("already started")
@@ -46,50 +46,6 @@ var (
 	ErrAIOperationFailed = errors.New("AI operation failed")
 )
 
-// FrameworkError provides structured error information with context
-// It implements the error interface and supports error wrapping
-type FrameworkError struct {
-	Op      string // Operation that failed (e.g., "discovery.Register")
-	Kind    string // Error kind (e.g., "agent", "discovery", "config")
-	ID      string // Optional ID of the entity involved
-	Message string // Human-readable message
-	Err     error  // Underlying error for wrapping
-}
-
-// Error returns the string representation of the error
-func (e *FrameworkError) Error() string {
-	// Priority 1: If Message is set, return it (for backward compatibility)
-	if e.Message != "" {
-		return e.Message
-	}
-	// Priority 2: If Op and Err are set, format them
-	if e.Op != "" && e.Err != nil {
-		if e.ID != "" {
-			return fmt.Sprintf("%s [%s]: %v", e.Op, e.ID, e.Err)
-		}
-		return fmt.Sprintf("%s: %v", e.Op, e.Err)
-	}
-	// Priority 3: Return underlying error if present
-	if e.Err != nil {
-		return e.Err.Error()
-	}
-	// Priority 4: Generic error based on Kind
-	return fmt.Sprintf("%s error", e.Kind)
-}
-
-// Unwrap returns the underlying error for use with errors.Is/As
-func (e *FrameworkError) Unwrap() error {
-	return e.Err
-}
-
-// NewFrameworkError creates a new FrameworkError
-func NewFrameworkError(op, kind string, err error) *FrameworkError {
-	return &FrameworkError{
-		Op:   op,
-		Kind: kind,
-		Err:  err,
-	}
-}
 
 // IsRetryable checks if an error is retryable
 // Retryable errors are typically transient network or availability issues

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ type RedisDiscovery struct {
 	client    *redis.Client
 	namespace string
 	ttl       time.Duration
+	logger    Logger // Optional logger for better observability
 }
 
 // NewRedisDiscovery creates a new Redis discovery client
@@ -169,7 +171,10 @@ func (d *RedisDiscovery) UpdateHealth(ctx context.Context, serviceID string, sta
 	// Get current registration
 	data, err := d.client.Get(ctx, key).Result()
 	if err != nil {
-		return fmt.Errorf("service %s not found: %w", serviceID, ErrServiceNotFound)
+		if err == redis.Nil {
+			return fmt.Errorf("service %s: %w", serviceID, ErrServiceNotFound)
+		}
+		return fmt.Errorf("failed to get service %s: %w", serviceID, err)
 	}
 
 	var registration ServiceRegistration
@@ -190,11 +195,33 @@ func (d *RedisDiscovery) UpdateHealth(ctx context.Context, serviceID string, sta
 	return d.client.Set(ctx, key, updatedData, d.ttl).Err()
 }
 
+// SetLogger sets the logger for the discovery client
+func (d *RedisDiscovery) SetLogger(logger Logger) {
+	d.logger = logger
+}
+
 // StartHeartbeat starts a heartbeat goroutine to keep registration alive
 func (d *RedisDiscovery) StartHeartbeat(ctx context.Context, serviceID string) {
 	ticker := time.NewTicker(d.ttl / 2)
 	go func() {
-		defer ticker.Stop()
+		defer func() {
+			ticker.Stop()
+			if r := recover(); r != nil {
+				// Log panic but don't crash the service
+				if d.logger != nil {
+					d.logger.Error("Heartbeat panic recovered", map[string]interface{}{
+						"panic":       r,
+						"panic_type":  fmt.Sprintf("%T", r),
+						"service_id":  serviceID,
+						"stack_trace": string(debug.Stack()),
+					})
+				} else {
+					// Fallback to fmt.Printf if no logger configured
+					fmt.Printf("Heartbeat panic recovered for service %s: %v\nStack trace:\n%s\n", 
+						serviceID, r, debug.Stack())
+				}
+			}
+		}()
 		for {
 			select {
 			case <-ctx.Done():
@@ -203,6 +230,13 @@ func (d *RedisDiscovery) StartHeartbeat(ctx context.Context, serviceID string) {
 				if err := d.UpdateHealth(ctx, serviceID, HealthHealthy); err != nil {
 					// Log error but continue health check loop
 					// Health check failures are expected in distributed systems
+					if d.logger != nil {
+						d.logger.Debug("Heartbeat update failed", map[string]interface{}{
+							"error":      err,
+							"error_type": fmt.Sprintf("%T", err),
+							"service_id": serviceID,
+						})
+					}
 					continue
 				}
 			}

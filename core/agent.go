@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -111,10 +112,14 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 			} else if b.Config.Discovery.Provider == "redis" && b.Config.Discovery.RedisURL != "" {
 				// Initialize Redis discovery
 				if discovery, err := NewRedisDiscovery(b.Config.Discovery.RedisURL); err == nil {
+					// Set logger for better observability
+					discovery.SetLogger(b.Logger)
 					b.Discovery = discovery
 				} else {
 					b.Logger.Error("Failed to initialize Redis discovery", map[string]interface{}{
-						"error": err.Error(),
+						"error":      err,
+						"error_type": fmt.Sprintf("%T", err),
+						"redis_url":  b.Config.Discovery.RedisURL,
 					})
 				}
 			}
@@ -162,7 +167,10 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 
 		if err := b.Discovery.Register(ctx, registration); err != nil {
 			b.Logger.Error("Failed to register with discovery", map[string]interface{}{
-				"error": err.Error(),
+				"error":      err,
+				"error_type": fmt.Sprintf("%T", err),
+				"agent_id":   b.ID,
+				"agent_name": b.Name,
 			})
 			// Continue anyway - graceful degradation
 		}
@@ -288,7 +296,10 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 		var input map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			b.Logger.Error("Failed to parse request", map[string]interface{}{
-				"error": err.Error(),
+				"error":      err,
+				"error_type": fmt.Sprintf("%T", err),
+				"path":       r.URL.Path,
+				"method":     r.Method,
 			})
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -308,7 +319,11 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			// Log error but response is already partially written
 			if b.Logger != nil {
-				b.Logger.Error("Failed to encode response", map[string]interface{}{"error": err})
+				b.Logger.Error("Failed to encode response", map[string]interface{}{
+					"error":      err,
+					"error_type": fmt.Sprintf("%T", err),
+					"path":       r.URL.Path,
+				})
 			}
 		}
 	}
@@ -347,7 +362,11 @@ func (b *BaseAgent) Start(port int) error {
 				}); err != nil {
 					// Log error but response is already partially written
 					if b.Logger != nil {
-						b.Logger.Error("Failed to encode health response", map[string]interface{}{"error": err})
+						b.Logger.Error("Failed to encode health response", map[string]interface{}{
+							"error":      err,
+							"error_type": fmt.Sprintf("%T", err),
+							"agent_id":   b.ID,
+						})
 					}
 				}
 			})
@@ -364,7 +383,11 @@ func (b *BaseAgent) Start(port int) error {
 			if err := json.NewEncoder(w).Encode(b.Capabilities); err != nil {
 				// Log error but response is already partially written
 				if b.Logger != nil {
-					b.Logger.Error("Failed to encode capabilities", map[string]interface{}{"error": err})
+					b.Logger.Error("Failed to encode capabilities", map[string]interface{}{
+						"error":      err,
+						"error_type": fmt.Sprintf("%T", err),
+						"agent_id":   b.ID,
+					})
 				}
 			}
 		})
@@ -376,6 +399,9 @@ func (b *BaseAgent) Start(port int) error {
 	if b.Config.HTTP.CORS.Enabled {
 		handler = CORSMiddleware(&b.Config.HTTP.CORS)(handler)
 	}
+	
+	// Always wrap with panic recovery middleware
+	handler = RecoveryMiddleware(b.Logger)(handler)
 
 	b.server = &http.Server{
 		Addr:           addr,
@@ -416,7 +442,10 @@ func (b *BaseAgent) Stop(ctx context.Context) error {
 		if b.Discovery != nil && b.Config.Discovery.Enabled {
 			if err := b.Discovery.Unregister(shutdownCtx, b.ID); err != nil {
 				b.Logger.Error("Failed to unregister from discovery", map[string]interface{}{
-					"error": err.Error(),
+					"error":      err,                    // Preserve full error object
+					"error_type": fmt.Sprintf("%T", err), // Log error type for debugging
+					"agent_id":   b.ID,
+					"operation":  "unregister",
 				})
 			}
 		}
@@ -427,6 +456,37 @@ func (b *BaseAgent) Stop(ctx context.Context) error {
 		return b.server.Shutdown(shutdownCtx)
 	}
 	return nil
+}
+
+// RecoveryMiddleware creates a middleware that recovers from panics in HTTP handlers
+func RecoveryMiddleware(logger Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if err := recover(); err != nil {
+					// Log the panic with stack trace
+					stackTrace := debug.Stack()
+					if logger != nil {
+						logger.Error("HTTP handler panic recovered", map[string]interface{}{
+							"panic":      err,
+							"error_type": fmt.Sprintf("%T", err),
+							"path":       r.URL.Path,
+							"method":     r.Method,
+							"stack":      string(stackTrace),
+						})
+					} else {
+						// Fallback to standard logging if no logger available
+						fmt.Printf("HTTP handler panic recovered: %v\nPath: %s\nMethod: %s\nStack trace:\n%s\n", 
+							err, r.URL.Path, r.Method, stackTrace)
+					}
+					
+					// Return Internal Server Error to client
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // Framework provides a simple way to run agents
