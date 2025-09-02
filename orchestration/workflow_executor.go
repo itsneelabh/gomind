@@ -93,7 +93,7 @@ func (e *WorkflowExecutor) CallAgent(ctx context.Context, agentName string, acti
 	}
 
 	if len(services) == 0 {
-		return nil, fmt.Errorf("agent %s not found", agentName)
+		return nil, fmt.Errorf("agent %s: %w", agentName, core.ErrAgentNotFound)
 	}
 
 	// Select best service (first healthy one)
@@ -122,7 +122,7 @@ func (e *WorkflowExecutor) CallCapability(ctx context.Context, capability string
 	}
 
 	if len(services) == 0 {
-		return nil, fmt.Errorf("no services with capability %s", capability)
+		return nil, fmt.Errorf("no services with capability %s: %w", capability, core.ErrCapabilityNotFound)
 	}
 
 	// Select best service

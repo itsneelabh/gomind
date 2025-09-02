@@ -26,7 +26,7 @@ func NewRedisDiscovery(redisURL string) (*RedisDiscovery, error) {
 func NewRedisDiscoveryWithNamespace(redisURL, namespace string) (*RedisDiscovery, error) {
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid Redis URL: %w", err)
+		return nil, fmt.Errorf("invalid Redis URL: %w", ErrInvalidConfiguration)
 	}
 
 	client := redis.NewClient(opt)
@@ -36,7 +36,7 @@ func NewRedisDiscoveryWithNamespace(redisURL, namespace string) (*RedisDiscovery
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
+		return nil, fmt.Errorf("failed to connect to Redis: %w", ErrConnectionFailed)
 	}
 
 	return &RedisDiscovery{
@@ -52,12 +52,12 @@ func (d *RedisDiscovery) Register(ctx context.Context, registration *ServiceRegi
 
 	data, err := json.Marshal(registration)
 	if err != nil {
-		return fmt.Errorf("failed to marshal registration: %w", err)
+		return fmt.Errorf("failed to marshal registration for %s: %w", registration.ID, err)
 	}
 
 	// Store service data with TTL
 	if err := d.client.Set(ctx, key, data, d.ttl).Err(); err != nil {
-		return fmt.Errorf("failed to register service: %w", err)
+		return fmt.Errorf("failed to register service %s: %w", registration.ID, err)
 	}
 
 	// Add to capability indexes
@@ -111,7 +111,7 @@ func (d *RedisDiscovery) FindService(ctx context.Context, serviceName string) ([
 	// Get service IDs
 	ids, err := d.client.SMembers(ctx, nameKey).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to find services: %w", err)
+		return nil, fmt.Errorf("failed to find services by name %s: %w", serviceName, err)
 	}
 
 	var services []*ServiceRegistration
@@ -140,7 +140,7 @@ func (d *RedisDiscovery) FindByCapability(ctx context.Context, capability string
 	// Get service IDs
 	ids, err := d.client.SMembers(ctx, capKey).Result()
 	if err != nil {
-		return nil, fmt.Errorf("failed to find services by capability: %w", err)
+		return nil, fmt.Errorf("failed to find services by capability %s: %w", capability, err)
 	}
 
 	var services []*ServiceRegistration
@@ -169,12 +169,12 @@ func (d *RedisDiscovery) UpdateHealth(ctx context.Context, serviceID string, sta
 	// Get current registration
 	data, err := d.client.Get(ctx, key).Result()
 	if err != nil {
-		return fmt.Errorf("service not found: %w", err)
+		return fmt.Errorf("service %s not found: %w", serviceID, ErrServiceNotFound)
 	}
 
 	var registration ServiceRegistration
 	if err := json.Unmarshal([]byte(data), &registration); err != nil {
-		return fmt.Errorf("failed to unmarshal registration: %w", err)
+		return fmt.Errorf("failed to unmarshal registration for %s: %w", serviceID, err)
 	}
 
 	// Update health and timestamp
@@ -184,7 +184,7 @@ func (d *RedisDiscovery) UpdateHealth(ctx context.Context, serviceID string, sta
 	// Save updated registration
 	updatedData, err := json.Marshal(registration)
 	if err != nil {
-		return fmt.Errorf("failed to marshal registration: %w", err)
+		return fmt.Errorf("failed to marshal health data for %s: %w", serviceID, err)
 	}
 
 	return d.client.Set(ctx, key, updatedData, d.ttl).Err()
