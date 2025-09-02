@@ -63,4 +63,4 @@ __debug_bin
 
 # Air live reload
 .air.toml
-tmp/
+tmp/DEVELOPER_FRIENDLY_UPDATES.md
