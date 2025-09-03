@@ -1,0 +1,620 @@
+package resilience
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/itsneelabh/gomind/core"
+)
+
+// CircuitState represents the state of the circuit breaker
+type CircuitState int
+
+const (
+	// StateClosed allows all requests through
+	StateClosed CircuitState = iota
+	// StateOpen blocks all requests
+	StateOpen
+	// StateHalfOpen allows limited requests for testing
+	StateHalfOpen
+)
+
+// String returns the string representation of the state
+func (s CircuitState) String() string {
+	switch s {
+	case StateClosed:
+		return "closed"
+	case StateOpen:
+		return "open"
+	case StateHalfOpen:
+		return "half-open"
+	default:
+		return "unknown"
+	}
+}
+
+// Logger interface for circuit breaker logging
+type Logger interface {
+	Error(msg string, fields map[string]interface{})
+	Info(msg string, fields map[string]interface{})
+	Debug(msg string, fields map[string]interface{})
+}
+
+// noopLogger is a no-op logger implementation
+type noopLogger struct{}
+
+func (n *noopLogger) Error(msg string, fields map[string]interface{}) {}
+func (n *noopLogger) Info(msg string, fields map[string]interface{})  {}
+func (n *noopLogger) Debug(msg string, fields map[string]interface{}) {}
+
+// MetricsCollector interface for circuit breaker metrics
+type MetricsCollector interface {
+	RecordSuccess(name string)
+	RecordFailure(name string, errorType string)
+	RecordStateChange(name string, from, to string)
+	RecordRejection(name string)
+}
+
+// noopMetrics is a no-op metrics implementation
+type noopMetrics struct{}
+
+func (n *noopMetrics) RecordSuccess(name string)                        {}
+func (n *noopMetrics) RecordFailure(name string, errorType string)      {}
+func (n *noopMetrics) RecordStateChange(name string, from, to string)   {}
+func (n *noopMetrics) RecordRejection(name string)                      {}
+
+// ErrorClassifier determines which errors should count toward circuit breaker thresholds
+type ErrorClassifier func(error) bool
+
+// DefaultErrorClassifier only counts infrastructure errors, not user errors
+func DefaultErrorClassifier(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	// Configuration errors - DON'T count (user error)
+	if core.IsConfigurationError(err) {
+		return false
+	}
+	
+	// Not found errors - DON'T count (user error)
+	if core.IsNotFound(err) {
+		return false
+	}
+	
+	// State errors - DON'T count (programming error)
+	if core.IsStateError(err) {
+		return false
+	}
+	
+	// Context cancellation - DON'T count (client gave up)
+	if errors.Is(err, context.Canceled) || errors.Is(err, core.ErrContextCanceled) {
+		return false
+	}
+	
+	// All other errors count as failures (network, timeout, connection issues)
+	return true
+}
+
+// SlidingWindow tracks success/failure counts over a time window
+type SlidingWindow struct {
+	buckets     []bucket
+	windowSize  time.Duration
+	bucketSize  time.Duration
+	currentIdx  int
+	mu          sync.RWMutex
+}
+
+type bucket struct {
+	timestamp time.Time
+	success   uint64
+	failure   uint64
+}
+
+// NewSlidingWindow creates a new sliding window
+func NewSlidingWindow(windowSize time.Duration, bucketCount int) *SlidingWindow {
+	if bucketCount <= 0 {
+		bucketCount = 10
+	}
+	
+	bucketSize := windowSize / time.Duration(bucketCount)
+	buckets := make([]bucket, bucketCount)
+	now := time.Now()
+	
+	for i := range buckets {
+		buckets[i].timestamp = now
+	}
+	
+	return &SlidingWindow{
+		buckets:    buckets,
+		windowSize: windowSize,
+		bucketSize: bucketSize,
+	}
+}
+
+// RecordSuccess records a successful operation
+func (sw *SlidingWindow) RecordSuccess() {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	
+	sw.rotateBuckets()
+	atomic.AddUint64(&sw.buckets[sw.currentIdx].success, 1)
+}
+
+// RecordFailure records a failed operation
+func (sw *SlidingWindow) RecordFailure() {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	
+	sw.rotateBuckets()
+	atomic.AddUint64(&sw.buckets[sw.currentIdx].failure, 1)
+}
+
+// rotateBuckets ensures we're writing to the correct bucket based on time
+func (sw *SlidingWindow) rotateBuckets() {
+	now := time.Now()
+	elapsed := now.Sub(sw.buckets[sw.currentIdx].timestamp)
+	
+	if elapsed >= sw.bucketSize {
+		// Move to next bucket(s)
+		bucketsToRotate := int(elapsed / sw.bucketSize)
+		if bucketsToRotate > len(sw.buckets) {
+			bucketsToRotate = len(sw.buckets)
+		}
+		
+		for i := 0; i < bucketsToRotate; i++ {
+			sw.currentIdx = (sw.currentIdx + 1) % len(sw.buckets)
+			sw.buckets[sw.currentIdx] = bucket{
+				timestamp: now,
+				success:   0,
+				failure:   0,
+			}
+		}
+	}
+}
+
+// GetCounts returns the total success and failure counts within the window
+func (sw *SlidingWindow) GetCounts() (success, failure uint64) {
+	sw.mu.RLock()
+	defer sw.mu.RUnlock()
+	
+	cutoff := time.Now().Add(-sw.windowSize)
+	
+	for _, b := range sw.buckets {
+		if b.timestamp.After(cutoff) {
+			success += atomic.LoadUint64(&b.success)
+			failure += atomic.LoadUint64(&b.failure)
+		}
+	}
+	
+	return success, failure
+}
+
+// GetErrorRate returns the current error rate
+func (sw *SlidingWindow) GetErrorRate() float64 {
+	success, failure := sw.GetCounts()
+	total := success + failure
+	if total == 0 {
+		return 0
+	}
+	return float64(failure) / float64(total)
+}
+
+// GetTotal returns the total number of requests in the window
+func (sw *SlidingWindow) GetTotal() uint64 {
+	success, failure := sw.GetCounts()
+	return success + failure
+}
+
+// CircuitBreakerConfig holds configuration for the circuit breaker
+type CircuitBreakerConfig struct {
+	// Name identifies the circuit breaker
+	Name string
+	
+	// FailureThreshold is the number of failures before opening (deprecated, use ErrorThreshold)
+	FailureThreshold int
+	
+	// RecoveryTimeout is how long to wait before attempting recovery (deprecated, use SleepWindow)
+	RecoveryTimeout time.Duration
+	
+	// ErrorThreshold is the error rate (0.0 to 1.0) that triggers opening
+	ErrorThreshold float64
+	
+	// VolumeThreshold is the minimum number of requests before evaluation
+	VolumeThreshold int
+	
+	// SleepWindow is how long to wait before entering half-open state
+	SleepWindow time.Duration
+	
+	// HalfOpenRequests is the number of test requests in half-open state
+	HalfOpenRequests int
+	
+	// SuccessThreshold is the success rate needed to close from half-open
+	SuccessThreshold float64
+	
+	// WindowSize is the sliding window duration for metrics
+	WindowSize time.Duration
+	
+	// BucketCount is the number of buckets in the sliding window
+	BucketCount int
+	
+	// ErrorClassifier determines which errors count as failures
+	ErrorClassifier ErrorClassifier
+	
+	// Logger for circuit breaker events
+	Logger Logger
+	
+	// Metrics collector for monitoring
+	Metrics MetricsCollector
+}
+
+// DefaultConfig returns a production-ready default configuration
+func DefaultConfig() *CircuitBreakerConfig {
+	return &CircuitBreakerConfig{
+		Name:             "default",
+		ErrorThreshold:   0.5,  // 50% error rate
+		VolumeThreshold:  10,   // Need 10 requests minimum
+		SleepWindow:      30 * time.Second,
+		HalfOpenRequests: 5,
+		SuccessThreshold: 0.6,  // 60% success to recover
+		WindowSize:       60 * time.Second,
+		BucketCount:      10,
+		ErrorClassifier:  DefaultErrorClassifier,
+		Logger:           &noopLogger{},
+		Metrics:          &noopMetrics{},
+	}
+}
+
+// CircuitBreaker implements a production-grade circuit breaker pattern
+type CircuitBreaker struct {
+	// Configuration
+	config *CircuitBreakerConfig
+	
+	// State management
+	state          CircuitState
+	stateChangedAt time.Time
+	generation     uint64 // For detecting state changes
+	
+	// Metrics tracking
+	window *SlidingWindow
+	
+	// Half-open state management
+	halfOpenCount    int
+	halfOpenSuccesses int
+	halfOpenFailures  int
+	
+	// Manual control
+	forceOpen   bool
+	forceClosed bool
+	
+	// Legacy compatibility
+	failureCount int // For backward compatibility
+	
+	// Synchronization
+	mu sync.RWMutex
+}
+
+// NewCircuitBreaker creates a new circuit breaker with basic configuration
+// This maintains backward compatibility with the existing API
+func NewCircuitBreaker(threshold int, timeout time.Duration) *CircuitBreaker {
+	config := DefaultConfig()
+	config.FailureThreshold = threshold
+	config.RecoveryTimeout = timeout
+	
+	// Convert legacy parameters to new model
+	if threshold > 0 {
+		config.VolumeThreshold = threshold
+		config.ErrorThreshold = 1.0 // Fail on any error with old behavior
+	}
+	if timeout > 0 {
+		config.SleepWindow = timeout
+	}
+	
+	return NewCircuitBreakerWithConfig(config)
+}
+
+// NewCircuitBreakerWithConfig creates a circuit breaker with custom configuration
+func NewCircuitBreakerWithConfig(config *CircuitBreakerConfig) *CircuitBreaker {
+	if config == nil {
+		config = DefaultConfig()
+	}
+	
+	// Apply defaults for missing values
+	if config.WindowSize == 0 {
+		config.WindowSize = 60 * time.Second
+	}
+	if config.BucketCount == 0 {
+		config.BucketCount = 10
+	}
+	if config.ErrorClassifier == nil {
+		config.ErrorClassifier = DefaultErrorClassifier
+	}
+	if config.Logger == nil {
+		config.Logger = &noopLogger{}
+	}
+	if config.Metrics == nil {
+		config.Metrics = &noopMetrics{}
+	}
+	if config.SuccessThreshold == 0 {
+		config.SuccessThreshold = 0.6
+	}
+	if config.HalfOpenRequests == 0 {
+		config.HalfOpenRequests = 5
+	}
+	
+	return &CircuitBreaker{
+		config:         config,
+		state:          StateClosed,
+		stateChangedAt: time.Now(),
+		window:         NewSlidingWindow(config.WindowSize, config.BucketCount),
+	}
+}
+
+// Execute runs the given function with circuit breaker protection
+func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error {
+	if !cb.CanExecute() {
+		cb.config.Metrics.RecordRejection(cb.config.Name)
+		return core.ErrCircuitBreakerOpen
+	}
+	
+	// Execute the function
+	err := fn()
+	
+	// Record the result
+	cb.RecordResult(err)
+	
+	return err
+}
+
+// CanExecute checks if the circuit breaker allows execution
+func (cb *CircuitBreaker) CanExecute() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	
+	// Check manual overrides
+	if cb.forceClosed {
+		return true
+	}
+	if cb.forceOpen {
+		return false
+	}
+	
+	// Check for state transitions
+	cb.evaluateState()
+	
+	switch cb.state {
+	case StateClosed:
+		return true
+		
+	case StateOpen:
+		// Check if we should transition to half-open
+		if time.Since(cb.stateChangedAt) > cb.config.SleepWindow {
+			cb.transitionTo(StateHalfOpen)
+			cb.halfOpenCount = 0
+			cb.halfOpenSuccesses = 0
+			cb.halfOpenFailures = 0
+		}
+		return cb.state == StateHalfOpen
+		
+	case StateHalfOpen:
+		// Allow limited requests in half-open state
+		if cb.halfOpenCount < cb.config.HalfOpenRequests {
+			cb.halfOpenCount++
+			return true
+		}
+		return false
+		
+	default:
+		return false
+	}
+}
+
+// RecordResult records the result of an execution
+func (cb *CircuitBreaker) RecordResult(err error) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	
+	// Skip recording if manually controlled
+	if cb.forceClosed || cb.forceOpen {
+		return
+	}
+	
+	// Record in sliding window
+	if err == nil {
+		cb.window.RecordSuccess()
+		cb.config.Metrics.RecordSuccess(cb.config.Name)
+		
+		if cb.state == StateHalfOpen {
+			cb.halfOpenSuccesses++
+		}
+	} else if cb.config.ErrorClassifier(err) {
+		cb.window.RecordFailure()
+		cb.config.Metrics.RecordFailure(cb.config.Name, fmt.Sprintf("%T", err))
+		
+		// Legacy failure counting for backward compatibility
+		cb.failureCount++
+		
+		if cb.state == StateHalfOpen {
+			cb.halfOpenFailures++
+		}
+	}
+	
+	// Evaluate state after recording
+	cb.evaluateState()
+}
+
+// evaluateState checks if state transition is needed
+func (cb *CircuitBreaker) evaluateState() {
+	switch cb.state {
+	case StateClosed:
+		// Check if we should open
+		errorRate := cb.window.GetErrorRate()
+		total := cb.window.GetTotal()
+		
+		// Use legacy threshold if set
+		if cb.config.FailureThreshold > 0 && cb.failureCount >= cb.config.FailureThreshold {
+			cb.transitionTo(StateOpen)
+			return
+		}
+		
+		// Use error rate threshold
+		if total >= uint64(cb.config.VolumeThreshold) && errorRate >= cb.config.ErrorThreshold {
+			cb.transitionTo(StateOpen)
+		}
+		
+	case StateHalfOpen:
+		// Check if we have enough test requests to make a decision
+		totalHalfOpen := cb.halfOpenSuccesses + cb.halfOpenFailures
+		if totalHalfOpen >= cb.config.HalfOpenRequests {
+			successRate := float64(cb.halfOpenSuccesses) / float64(totalHalfOpen)
+			
+			if successRate >= cb.config.SuccessThreshold {
+				// Enough successes, close the circuit
+				cb.transitionTo(StateClosed)
+				cb.failureCount = 0 // Reset legacy counter
+			} else {
+				// Too many failures, reopen
+				cb.transitionTo(StateOpen)
+				// Exponential backoff for next attempt
+				cb.config.SleepWindow = time.Duration(float64(cb.config.SleepWindow) * 1.5)
+				if cb.config.SleepWindow > 5*time.Minute {
+					cb.config.SleepWindow = 5 * time.Minute // Cap at 5 minutes
+				}
+			}
+		}
+	}
+}
+
+// transitionTo changes the circuit breaker state
+func (cb *CircuitBreaker) transitionTo(newState CircuitState) {
+	if cb.state == newState {
+		return
+	}
+	
+	oldState := cb.state
+	cb.state = newState
+	cb.stateChangedAt = time.Now()
+	cb.generation++
+	
+	// Log state change
+	cb.config.Logger.Info("Circuit breaker state changed", map[string]interface{}{
+		"name":       cb.config.Name,
+		"from":       oldState.String(),
+		"to":         newState.String(),
+		"error_rate": cb.window.GetErrorRate(),
+	})
+	
+	// Record metrics
+	cb.config.Metrics.RecordStateChange(cb.config.Name, oldState.String(), newState.String())
+}
+
+// RecordSuccess records a successful operation (backward compatibility)
+func (cb *CircuitBreaker) RecordSuccess() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	
+	// Legacy behavior: direct state transition
+	if cb.state == StateOpen && time.Since(cb.stateChangedAt) > cb.config.SleepWindow {
+		cb.state = StateClosed
+		cb.failureCount = 0
+	}
+	
+	cb.window.RecordSuccess()
+	cb.config.Metrics.RecordSuccess(cb.config.Name)
+}
+
+// RecordFailure records a failed operation (backward compatibility)
+func (cb *CircuitBreaker) RecordFailure() {
+	cb.RecordResult(errors.New("generic failure"))
+}
+
+// GetState returns the current state of the circuit breaker
+func (cb *CircuitBreaker) GetState() string {
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
+	return cb.state.String()
+}
+
+// Reset resets the circuit breaker
+func (cb *CircuitBreaker) Reset() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	
+	cb.state = StateClosed
+	cb.stateChangedAt = time.Now()
+	cb.failureCount = 0
+	cb.halfOpenCount = 0
+	cb.halfOpenSuccesses = 0
+	cb.halfOpenFailures = 0
+	cb.window = NewSlidingWindow(cb.config.WindowSize, cb.config.BucketCount)
+	
+	cb.config.Logger.Info("Circuit breaker reset", map[string]interface{}{
+		"name": cb.config.Name,
+	})
+}
+
+// ForceOpen manually opens the circuit breaker
+func (cb *CircuitBreaker) ForceOpen() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	
+	cb.forceOpen = true
+	cb.forceClosed = false
+	if cb.state != StateOpen {
+		cb.transitionTo(StateOpen)
+	}
+}
+
+// ForceClosed manually closes the circuit breaker
+func (cb *CircuitBreaker) ForceClosed() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	
+	cb.forceClosed = true
+	cb.forceOpen = false
+	if cb.state != StateClosed {
+		cb.transitionTo(StateClosed)
+	}
+}
+
+// ClearForce removes manual override
+func (cb *CircuitBreaker) ClearForce() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	
+	cb.forceOpen = false
+	cb.forceClosed = false
+}
+
+// GetMetrics returns current circuit breaker metrics
+func (cb *CircuitBreaker) GetMetrics() map[string]interface{} {
+	cb.mu.RLock()
+	defer cb.mu.RUnlock()
+	
+	success, failure := cb.window.GetCounts()
+	total := success + failure
+	
+	metrics := map[string]interface{}{
+		"name":         cb.config.Name,
+		"state":        cb.state.String(),
+		"generation":   cb.generation,
+		"success":      success,
+		"failure":      failure,
+		"total":        total,
+		"error_rate":   cb.window.GetErrorRate(),
+		"force_open":   cb.forceOpen,
+		"force_closed": cb.forceClosed,
+	}
+	
+	if cb.state == StateHalfOpen {
+		metrics["half_open_count"] = cb.halfOpenCount
+		metrics["half_open_successes"] = cb.halfOpenSuccesses
+		metrics["half_open_failures"] = cb.halfOpenFailures
+	}
+	
+	return metrics
+}

@@ -172,17 +172,19 @@ func (e *WorkflowExecutor) BatchCall(ctx context.Context, calls []ServiceCall) [
 							Success: false,
 							Error:   panicErr.Error(),
 							Output: map[string]interface{}{
-								"panic":       fmt.Sprintf("%v", r),
-								"call_id":     c.ID,
-								"call_type":   c.Type,
-								"target":      c.Target,
-								"stack_trace": stackTrace,
+								"panic":       fmt.Sprintf("%v", r),        // The panic value for debugging
+								"call_id":     c.ID,                         // Identifies which call failed
+								"call_type":   c.Type,                       // Type of call (agent/capability)
+								"target":      c.Target,                     // Target service or capability
+								"stack_trace": stackTrace,                   // Full stack trace for debugging
 							},
 						},
 					}:
 						// Successfully sent panic result
 					case <-sendTimeout:
-						// Timeout sending result - this should be logged
+						// Timeout occurred while sending panic result.
+						// This indicates the result channel might be blocked or closed.
+						// In production, this should be logged for monitoring.
 						// TODO: Add proper logging/metrics here
 						_ = panicErr // Prevent unused variable warning
 					}

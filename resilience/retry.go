@@ -66,7 +66,8 @@ func Retry(ctx context.Context, config *RetryConfig, fn func() error) error {
 			}
 		}
 		
-		// Add jitter if enabled
+		// Add jitter if enabled to prevent synchronized retries
+		// across multiple clients (thundering herd mitigation)
 		if config.JitterEnabled {
 			jitter := time.Duration(float64(delay) * 0.1 * math.Sin(float64(attempt)))
 			delay += jitter
