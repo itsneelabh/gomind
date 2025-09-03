@@ -59,10 +59,10 @@ func callExternalService() error {
 func performOperation() error {
 	// Use FrameworkError for better context
 	return &core.FrameworkError{
-		Op:   "discovery.Register",
-		Kind: "discovery",
-		ID:   "agent-123",
-		Err:  core.ErrDiscoveryUnavailable,
+		Op:      "discovery.Register",
+		Kind:    "discovery",
+		Message: "failed to register agent-123",
+		Err:     core.ErrDiscoveryUnavailable,
 	}
 }
 
@@ -82,10 +82,10 @@ func (a *MyAgent) Initialize(ctx context.Context) error {
 	if err := a.BaseAgent.Initialize(ctx); err != nil {
 		// Wrap the error with context
 		return &core.FrameworkError{
-			Op:   "MyAgent.Initialize",
-			Kind: "agent",
-			ID:   a.GetID(),
-			Err:  err,
+			Op:      "MyAgent.Initialize",
+			Kind:    "agent",
+			Message: fmt.Sprintf("failed to initialize agent %s", a.GetID()),
+			Err:     err,
 		}
 	}
 	
