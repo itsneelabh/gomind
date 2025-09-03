@@ -200,14 +200,19 @@ func (d *RedisDiscovery) SetLogger(logger Logger) {
 	d.logger = logger
 }
 
-// StartHeartbeat starts a heartbeat goroutine to keep registration alive
+// StartHeartbeat starts a heartbeat goroutine to keep registration alive.
+// The heartbeat runs at half the TTL interval to ensure the service registration
+// doesn't expire. This method includes panic recovery to prevent heartbeat
+// failures from crashing the entire service.
 func (d *RedisDiscovery) StartHeartbeat(ctx context.Context, serviceID string) {
 	ticker := time.NewTicker(d.ttl / 2)
 	go func() {
 		defer func() {
 			ticker.Stop()
 			if r := recover(); r != nil {
-				// Log panic but don't crash the service
+				// Panic recovery: Log the panic details but don't crash the service.
+				// This ensures that a failure in the heartbeat goroutine doesn't
+				// bring down the entire application
 				if d.logger != nil {
 					d.logger.Error("Heartbeat panic recovered", map[string]interface{}{
 						"panic":       r,

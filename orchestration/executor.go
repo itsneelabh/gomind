@@ -32,7 +32,10 @@ func NewSmartExecutor(catalog *AgentCatalog) *SmartExecutor {
 	}
 }
 
-// Execute runs a routing plan and collects agent responses
+// Execute runs a routing plan and collects agent responses.
+// This method orchestrates the execution of all steps in the plan,
+// respecting dependencies and running steps in parallel where possible.
+// It includes panic recovery for each step to ensure resilience.
 func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
 	startTime := time.Now()
 
@@ -70,20 +73,23 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 				
 				defer func() {
 					if r := recover(); r != nil {
-						// Capture panic and convert to error result
+						// Panic recovery mechanism for step execution.
+						// Captures any panic that occurs during step execution and converts it
+						// to a failed step result rather than crashing the entire workflow.
+						// This ensures that one failing step doesn't break the entire execution.
 						stackTrace := string(debug.Stack())
 						errorMsg := fmt.Sprintf("step %s execution panic: %v", s.StepID, r)
 						
-						// Log stack trace separately (should be replaced with proper logger)
-						// TODO: Replace with proper logging when logger is available
-						// For now, using a more structured format
+						// Structured logging placeholder - enable for debugging
+						// When proper logging is integrated, replace this with logger calls
 						if false { // Disabled in production, enable for debugging
 							fmt.Printf("PANIC|step=%s|agent=%s|error=%v|stack=%s\n", 
 								s.StepID, s.AgentName, r, stackTrace)
 						}
 						
-						// Store panic as failed step result
-						// Avoid nested defer to prevent deadlock
+						// Store panic as a failed step result in the execution results.
+						// Uses direct Lock/Unlock instead of defer to avoid potential deadlock
+						// in nested defer statements during panic recovery.
 						resultsMutex.Lock()
 						
 						panicResult := StepResult{
@@ -144,7 +150,9 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 	return result, nil
 }
 
-// findReadySteps identifies steps that can be executed
+// findReadySteps identifies steps that can be executed.
+// A step is ready when all its dependencies have been successfully executed.
+// This enables parallel execution of independent steps.
 func (e *SmartExecutor) findReadySteps(plan *RoutingPlan, executed map[string]bool, results map[string]*StepResult) []RoutingStep {
 	var ready []RoutingStep
 
