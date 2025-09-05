@@ -291,10 +291,10 @@ func TestSmartExecutor_PanicInFindReadySteps(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	
+
 	// This should handle the situation gracefully
 	result, err := executor.Execute(ctx, plan)
-	
+
 	// Should complete without panic
 	if err == nil && result != nil {
 		// The execution might fail but shouldn't panic
@@ -426,7 +426,7 @@ func TestSmartExecutor_PanicWithContextCancellation(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Cancel context after a short delay
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -492,7 +492,7 @@ func TestSmartExecutor_StartTimePreservationInPanic(t *testing.T) {
 	}
 
 	stepResult := result.Steps[0]
-	
+
 	// Duration should be at least 100ms
 	if stepResult.Duration < 100*time.Millisecond {
 		t.Errorf("Duration should be at least 100ms, got %v", stepResult.Duration)
@@ -547,7 +547,7 @@ func TestSmartExecutor_NoDeadlockInPanic(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	
+
 	// Should complete without deadlock
 	done := make(chan bool)
 	go func() {

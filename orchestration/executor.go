@@ -70,7 +70,7 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 			go func(s RoutingStep) {
 				// Track when this step started for accurate timing
 				stepStartTime := time.Now()
-				
+
 				defer func() {
 					if r := recover(); r != nil {
 						// Panic recovery mechanism for step execution.
@@ -79,19 +79,19 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 						// This ensures that one failing step doesn't break the entire execution.
 						stackTrace := string(debug.Stack())
 						errorMsg := fmt.Sprintf("step %s execution panic: %v", s.StepID, r)
-						
+
 						// Structured logging placeholder - enable for debugging
 						// When proper logging is integrated, replace this with logger calls
 						if false { // Disabled in production, enable for debugging
-							fmt.Printf("PANIC|step=%s|agent=%s|error=%v|stack=%s\n", 
+							fmt.Printf("PANIC|step=%s|agent=%s|error=%v|stack=%s\n",
 								s.StepID, s.AgentName, r, stackTrace)
 						}
-						
+
 						// Store panic as a failed step result in the execution results.
 						// Uses direct Lock/Unlock instead of defer to avoid potential deadlock
 						// in nested defer statements during panic recovery.
 						resultsMutex.Lock()
-						
+
 						panicResult := StepResult{
 							StepID:    s.StepID,
 							AgentName: s.AgentName,
@@ -101,12 +101,12 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 							StartTime: stepStartTime, // Use the actual start time
 							Duration:  time.Since(stepStartTime),
 						}
-						
+
 						stepResults[s.StepID] = &panicResult
 						result.Steps = append(result.Steps, panicResult)
 						executed[s.StepID] = true
 						result.Success = false
-						
+
 						resultsMutex.Unlock() // Unlock immediately, no defer
 					}
 					wg.Done()

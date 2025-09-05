@@ -49,8 +49,9 @@ func Gauge(name string, value float64, labels ...string) {
 // Duration records elapsed time since startTime in milliseconds.
 // Convenience function for the common pattern of timing operations.
 // Example:
-//   start := time.Now()
-//   defer Duration("operation.duration_ms", start, "op", "process")
+//
+//	start := time.Now()
+//	defer Duration("operation.duration_ms", start, "op", "process")
 func Duration(name string, startTime time.Time, labels ...string) {
 	ms := float64(time.Since(startTime).Milliseconds())
 	Emit(name, ms, labels...)
@@ -115,22 +116,22 @@ func EmitWithOptions(ctx context.Context, name string, value float64, opts ...Em
 		labels:     make(map[string]string),
 		sampleRate: 1.0,
 	}
-	
+
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	
+
 	// Apply sampling
 	if cfg.sampleRate < 1.0 && !shouldSample(cfg.sampleRate) {
 		return
 	}
-	
+
 	// Convert labels map to variadic
 	var labelPairs []string
 	for k, v := range cfg.labels {
 		labelPairs = append(labelPairs, k, v)
 	}
-	
+
 	// Use context-aware emission if available
 	EmitWithContext(ctx, name, value, labelPairs...)
 }

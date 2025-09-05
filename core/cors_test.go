@@ -183,7 +183,7 @@ func TestCORSMiddleware(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a simple handler
@@ -191,23 +191,23 @@ func TestCORSMiddleware(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte("OK"))
 			})
-			
+
 			// Wrap with CORS middleware
 			corsHandler := CORSMiddleware(tt.config)(handler)
-			
+
 			// Create test request
 			req := httptest.NewRequest(tt.requestMethod, "/test", nil)
 			if tt.requestOrigin != "" {
 				req.Header.Set("Origin", tt.requestOrigin)
 			}
-			
+
 			// Record response
 			recorder := httptest.NewRecorder()
 			corsHandler.ServeHTTP(recorder, req)
-			
+
 			// Check status
 			assert.Equal(t, tt.expectedStatus, recorder.Code)
-			
+
 			// Check headers
 			if tt.checkHeaders != nil {
 				tt.checkHeaders(t, recorder.Header())
@@ -315,7 +315,7 @@ func TestIsOriginAllowed(t *testing.T) {
 			expected:       false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := isOriginAllowed(tt.origin, tt.allowedOrigins)
@@ -362,7 +362,7 @@ func TestApplyCORS(t *testing.T) {
 			expectHeaders: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -370,9 +370,9 @@ func TestApplyCORS(t *testing.T) {
 			if tt.origin != "" {
 				req.Header.Set("Origin", tt.origin)
 			}
-			
+
 			ApplyCORS(recorder, req, tt.config)
-			
+
 			if tt.expectHeaders {
 				assert.NotEmpty(t, recorder.Header().Get("Access-Control-Allow-Origin"))
 				if tt.config.AllowCredentials {
@@ -388,7 +388,7 @@ func TestApplyCORS(t *testing.T) {
 // TestDefaultCORSConfig verifies default CORS configuration
 func TestDefaultCORSConfig(t *testing.T) {
 	config := DefaultCORSConfig()
-	
+
 	assert.False(t, config.Enabled)
 	assert.Empty(t, config.AllowedOrigins)
 	assert.Equal(t, []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}, config.AllowedMethods)
@@ -400,7 +400,7 @@ func TestDefaultCORSConfig(t *testing.T) {
 // TestDevelopmentCORSConfig verifies development CORS configuration
 func TestDevelopmentCORSConfig(t *testing.T) {
 	config := DevelopmentCORSConfig()
-	
+
 	assert.True(t, config.Enabled)
 	assert.Equal(t, []string{"*"}, config.AllowedOrigins)
 	assert.Equal(t, []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"}, config.AllowedMethods)
@@ -418,7 +418,7 @@ func TestCORSIntegration(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message":"success"}`))
 	})
-	
+
 	// Configure CORS
 	corsConfig := &CORSConfig{
 		Enabled: true,
@@ -433,23 +433,23 @@ func TestCORSIntegration(t *testing.T) {
 		AllowCredentials: true,
 		MaxAge:           3600,
 	}
-	
+
 	// Create server with CORS middleware
 	handler := CORSMiddleware(corsConfig)(apiHandler)
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	
+
 	t.Run("Preflight request", func(t *testing.T) {
 		req, err := http.NewRequest("OPTIONS", server.URL, nil)
 		require.NoError(t, err)
 		req.Header.Set("Origin", "https://app.example.com")
 		req.Header.Set("Access-Control-Request-Method", "POST")
 		req.Header.Set("Access-Control-Request-Headers", "Content-Type, Authorization")
-		
+
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
-		
+
 		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 		assert.Equal(t, "https://app.example.com", resp.Header.Get("Access-Control-Allow-Origin"))
 		assert.Equal(t, "true", resp.Header.Get("Access-Control-Allow-Credentials"))
@@ -458,31 +458,31 @@ func TestCORSIntegration(t *testing.T) {
 		assert.Contains(t, resp.Header.Get("Access-Control-Allow-Headers"), "Authorization")
 		assert.Equal(t, "3600", resp.Header.Get("Access-Control-Max-Age"))
 	})
-	
+
 	t.Run("Actual request with allowed origin", func(t *testing.T) {
 		req, err := http.NewRequest("GET", server.URL, nil)
 		require.NoError(t, err)
 		req.Header.Set("Origin", "https://api.example.com")
-		
+
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
-		
+
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		assert.Equal(t, "https://api.example.com", resp.Header.Get("Access-Control-Allow-Origin"))
 		assert.Equal(t, "true", resp.Header.Get("Access-Control-Allow-Credentials"))
 		assert.Equal(t, "X-Total-Count, X-Page-Count", resp.Header.Get("Access-Control-Expose-Headers"))
 	})
-	
+
 	t.Run("Request with disallowed origin", func(t *testing.T) {
 		req, err := http.NewRequest("GET", server.URL, nil)
 		require.NoError(t, err)
 		req.Header.Set("Origin", "https://evil.com")
-		
+
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
-		
+
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 		// No CORS headers for disallowed origin
 		assert.Empty(t, resp.Header.Get("Access-Control-Allow-Origin"))
@@ -498,16 +498,16 @@ func BenchmarkCORSMiddleware(b *testing.B) {
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,
 	}
-	
+
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	
+
 	corsHandler := CORSMiddleware(config)(handler)
-	
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("Origin", "https://api.example.com")
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		recorder := httptest.NewRecorder()
@@ -524,9 +524,9 @@ func BenchmarkIsOriginAllowed(b *testing.B) {
 		"http://localhost:*",
 		"https://other.com",
 	}
-	
+
 	origin := "https://subdomain.example.com"
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = isOriginAllowed(origin, allowedOrigins)
@@ -540,7 +540,7 @@ func ExampleCORSMiddleware() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("API response"))
 	})
-	
+
 	// Configure CORS
 	corsConfig := &CORSConfig{
 		Enabled:          true,
@@ -548,10 +548,10 @@ func ExampleCORSMiddleware() {
 		AllowedMethods:   []string{"GET", "POST"},
 		AllowCredentials: true,
 	}
-	
+
 	// Wrap with CORS middleware
 	handler := CORSMiddleware(corsConfig)(apiHandler)
-	
+
 	// Use the handler
 	_ = http.ListenAndServe(":8080", handler)
 }
@@ -565,11 +565,11 @@ func ExampleApplyCORS() {
 			AllowedOrigins: []string{"*"},
 		}
 		ApplyCORS(w, r, corsConfig)
-		
+
 		// Handle request
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("Data"))
 	})
-	
+
 	_ = http.ListenAndServe(":8080", nil)
 }

@@ -17,7 +17,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize telemetry: %v", err)
 	}
-	defer telemetry.Shutdown(context.Background())
+	defer func() {
+		if err := telemetry.Shutdown(context.Background()); err != nil {
+			log.Printf("Failed to shutdown telemetry: %v", err)
+		}
+	}()
 
 	// Example 1: Simple metrics emission
 	fmt.Println("Example 1: Simple metrics")
@@ -29,7 +33,7 @@ func main() {
 	fmt.Println("\nExample 2: Operation timing")
 	done := telemetry.TimeOperation("database.query", "table", "users")
 	time.Sleep(50 * time.Millisecond) // Simulate work
-	done() // This records the duration
+	done()                            // This records the duration
 
 	// Example 3: Error tracking
 	fmt.Println("\nExample 3: Error tracking")
@@ -55,7 +59,7 @@ func main() {
 			}
 			return fmt.Errorf("simulated error")
 		})
-		
+
 		if err != nil {
 			fmt.Printf("  Request %d failed: %v\n", i+1, err)
 		} else {
@@ -78,7 +82,7 @@ func main() {
 			return nil // Success on third attempt
 		},
 	)
-	
+
 	if err != nil {
 		fmt.Printf("  Retry failed: %v\n", err)
 	} else {
@@ -116,7 +120,7 @@ func main() {
 	fmt.Printf("Errors: %d\n", health.Errors)
 	fmt.Printf("Circuit State: %s\n", health.CircuitState)
 	fmt.Printf("Uptime: %s\n", health.Uptime)
-	
+
 	// Get internal metrics
 	internal := telemetry.GetInternalMetrics()
 	fmt.Printf("\nInternal Metrics:\n")

@@ -265,7 +265,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 					// Capture panic and convert to error
 					panicErr := fmt.Errorf("worker %d panic: %v", workerID, r)
 					stackTrace := string(debug.Stack())
-					
+
 					// Try to send error result to prevent workflow hanging
 					// First check if context is cancelled
 					select {
@@ -279,7 +279,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 						return
 					default:
 					}
-					
+
 					// Try to send with a timeout to avoid indefinite blocking
 					sendTimeout := time.After(5 * time.Second)
 					select {
@@ -316,7 +316,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 				// Capture panic and convert to error
 				panicErr := fmt.Errorf("DAG execution panic: %v", r)
 				stackTrace := string(debug.Stack())
-				
+
 				// Check if context is already cancelled
 				select {
 				case <-ctx.Done():
@@ -324,7 +324,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 					return
 				default:
 				}
-				
+
 				// Try to send error with timeout
 				sendTimeout := time.After(5 * time.Second)
 				select {
@@ -401,7 +401,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 				// This is likely a panic recovery message
 				// Log the error and add to execution errors
 				execution.Errors = append(execution.Errors, fmt.Errorf("worker panic: %w", result.Error))
-				
+
 				// TODO: Add proper logging here when logger is available
 				// For now, store panic info in execution errors with context
 				if result.Output != nil {
@@ -410,7 +410,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 						// Stack trace is available in Output for debugging
 					}
 				}
-				
+
 				// Decide whether to continue or fail based on error strategy
 				if workflow.OnError == nil || workflow.OnError.Strategy != "continue" {
 					// Fail fast on panic
@@ -425,7 +425,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 			if result.Error != nil {
 				stepExec.Status = StepFailed
 				stepExec.Error = result.Error.Error()
-				
+
 				// Only update DAG if node exists
 				if execution.DAG.GetNode(result.StepID) != nil {
 					execution.DAG.MarkNodeFailed(result.StepID)
@@ -443,7 +443,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 			} else {
 				stepExec.Status = StepCompleted
 				stepExec.Output = result.Output
-				
+
 				// Only update DAG if node exists
 				if execution.DAG.GetNode(result.StepID) != nil {
 					execution.DAG.MarkNodeCompleted(result.StepID)

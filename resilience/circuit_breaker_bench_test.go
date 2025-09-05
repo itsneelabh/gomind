@@ -23,13 +23,13 @@ func BenchmarkCircuitBreakerExecute(b *testing.B) {
 		Logger:           &noopLogger{},
 		Metrics:          &noopMetrics{},
 	}
-	
+
 	cb := NewCircuitBreakerWithConfig(config)
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = cb.Execute(ctx, func() error {
 			return nil // Always succeed
@@ -52,14 +52,14 @@ func BenchmarkCircuitBreakerExecuteWithErrors(b *testing.B) {
 		Logger:           &noopLogger{},
 		Metrics:          &noopMetrics{},
 	}
-	
+
 	cb := NewCircuitBreakerWithConfig(config)
 	ctx := context.Background()
 	testErr := errors.New("test error")
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = cb.Execute(ctx, func() error {
 			// 30% error rate
@@ -86,13 +86,13 @@ func BenchmarkCircuitBreakerConcurrentExecute(b *testing.B) {
 		Logger:           &noopLogger{},
 		Metrics:          &noopMetrics{},
 	}
-	
+
 	cb := NewCircuitBreakerWithConfig(config)
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			_ = cb.Execute(ctx, func() error {
@@ -105,10 +105,10 @@ func BenchmarkCircuitBreakerConcurrentExecute(b *testing.B) {
 // BenchmarkSlidingWindowRecord measures sliding window performance
 func BenchmarkSlidingWindowRecord(b *testing.B) {
 	window := NewSlidingWindow(60*time.Second, 10, true)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		if i%2 == 0 {
 			window.RecordSuccess()
@@ -121,7 +121,7 @@ func BenchmarkSlidingWindowRecord(b *testing.B) {
 // BenchmarkSlidingWindowGetMetrics measures metrics calculation performance
 func BenchmarkSlidingWindowGetMetrics(b *testing.B) {
 	window := NewSlidingWindow(60*time.Second, 10, true)
-	
+
 	// Populate with some data
 	for i := 0; i < 1000; i++ {
 		if i%2 == 0 {
@@ -130,10 +130,10 @@ func BenchmarkSlidingWindowGetMetrics(b *testing.B) {
 			window.RecordFailure()
 		}
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = window.GetErrorRate()
 		_ = window.GetTotal()
@@ -152,10 +152,10 @@ func BenchmarkCircuitBreakerCanExecute(b *testing.B) {
 		Metrics:          &noopMetrics{},
 	}
 	cb := NewCircuitBreakerWithConfig(config)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = cb.CanExecute()
 	}
@@ -166,7 +166,7 @@ func BenchmarkCircuitBreakerStateTransition(b *testing.B) {
 	config := &CircuitBreakerConfig{
 		Name:             "bench",
 		ErrorThreshold:   0.5,
-		VolumeThreshold:  2, // Low threshold for frequent transitions
+		VolumeThreshold:  2,                    // Low threshold for frequent transitions
 		SleepWindow:      1 * time.Millisecond, // Short window
 		HalfOpenRequests: 1,
 		SuccessThreshold: 0.5,
@@ -176,19 +176,19 @@ func BenchmarkCircuitBreakerStateTransition(b *testing.B) {
 		Logger:           &noopLogger{},
 		Metrics:          &noopMetrics{},
 	}
-	
+
 	cb := NewCircuitBreakerWithConfig(config)
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		// Force state transitions
 		cb.RecordFailure()
 		cb.RecordFailure()
-		cb.RecordFailure() // Opens
+		cb.RecordFailure()               // Opens
 		time.Sleep(2 * time.Millisecond) // Wait for sleep window
-		cb.RecordSuccess() // Half-open to closed
+		cb.RecordSuccess()               // Half-open to closed
 	}
 }
 
@@ -200,10 +200,10 @@ func BenchmarkErrorClassifier(b *testing.B) {
 		context.Canceled,
 		nil,
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = classifier(testErrors[i%len(testErrors)])
 	}
@@ -212,7 +212,7 @@ func BenchmarkErrorClassifier(b *testing.B) {
 // BenchmarkCircuitBreakerGetMetrics measures metrics collection performance
 func BenchmarkCircuitBreakerGetMetrics(b *testing.B) {
 	cb := NewCircuitBreakerLegacy(5, 100*time.Millisecond)
-	
+
 	// Generate some activity
 	for i := 0; i < 100; i++ {
 		if i%2 == 0 {
@@ -221,10 +221,10 @@ func BenchmarkCircuitBreakerGetMetrics(b *testing.B) {
 			cb.RecordFailure()
 		}
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = cb.GetMetrics()
 	}
@@ -233,7 +233,7 @@ func BenchmarkCircuitBreakerGetMetrics(b *testing.B) {
 // BenchmarkCircuitBreakerMemoryUsage measures memory allocation patterns
 func BenchmarkCircuitBreakerMemoryUsage(b *testing.B) {
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		config := &CircuitBreakerConfig{
 			Name:             "bench",
@@ -248,7 +248,7 @@ func BenchmarkCircuitBreakerMemoryUsage(b *testing.B) {
 			Logger:           &noopLogger{},
 			Metrics:          &noopMetrics{},
 		}
-		
+
 		_ = NewCircuitBreakerWithConfig(config)
 	}
 }
@@ -268,16 +268,16 @@ func BenchmarkCircuitBreakerHighContention(b *testing.B) {
 		Logger:           &noopLogger{},
 		Metrics:          &noopMetrics{},
 	}
-	
+
 	cb := NewCircuitBreakerWithConfig(config)
 	ctx := context.Background()
-	
+
 	// Create contention with many goroutines
 	goroutines := 100
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	var wg sync.WaitGroup
 	for i := 0; i < b.N; i++ {
 		wg.Add(goroutines)
@@ -303,10 +303,10 @@ func BenchmarkDirectFunctionCall(b *testing.B) {
 	fn := func() error {
 		return nil
 	}
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = fn()
 	}
@@ -315,10 +315,10 @@ func BenchmarkDirectFunctionCall(b *testing.B) {
 // BenchmarkMutexLockUnlock provides a baseline for mutex operations
 func BenchmarkMutexLockUnlock(b *testing.B) {
 	var mu sync.RWMutex
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		mu.Lock()
 		mu.Unlock()
@@ -329,7 +329,7 @@ func BenchmarkMutexLockUnlock(b *testing.B) {
 func BenchmarkTimeNow(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		_ = time.Now()
 	}

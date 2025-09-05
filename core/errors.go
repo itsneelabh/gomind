@@ -14,41 +14,40 @@ var (
 	ErrAgentNotFound      = errors.New("agent not found")
 	ErrAgentNotReady      = errors.New("agent not ready")
 	ErrAgentAlreadyExists = errors.New("agent already exists")
-	
+
 	// Capability-related errors
 	ErrCapabilityNotFound   = errors.New("capability not found")
 	ErrCapabilityNotEnabled = errors.New("capability not enabled")
-	
+
 	// Discovery-related errors
 	ErrServiceNotFound      = errors.New("service not found")
 	ErrDiscoveryUnavailable = errors.New("discovery service unavailable")
-	
+
 	// Configuration errors
 	ErrInvalidConfiguration = errors.New("invalid configuration")
 	ErrMissingConfiguration = errors.New("missing required configuration")
 	ErrPortOutOfRange       = errors.New("port out of range")
-	
+
 	// State errors
-	ErrAlreadyStarted   = errors.New("already started")
-	ErrNotInitialized   = errors.New("not initialized")
+	ErrAlreadyStarted    = errors.New("already started")
+	ErrNotInitialized    = errors.New("not initialized")
 	ErrAlreadyRegistered = errors.New("already registered")
-	
+
 	// Operation errors
-	ErrTimeout          = errors.New("operation timeout")
-	ErrContextCanceled  = errors.New("context canceled")
+	ErrTimeout            = errors.New("operation timeout")
+	ErrContextCanceled    = errors.New("context canceled")
 	ErrMaxRetriesExceeded = errors.New("maximum retries exceeded")
-	
+
 	// HTTP/Network errors
 	ErrConnectionFailed = errors.New("connection failed")
 	ErrRequestFailed    = errors.New("request failed")
-	
+
 	// Resilience errors
 	ErrCircuitBreakerOpen = errors.New("circuit breaker open")
-	
+
 	// AI operation errors
 	ErrAIOperationFailed = errors.New("AI operation failed")
 )
-
 
 // IsRetryable checks if an error is retryable.
 // Retryable errors are typically transient network or availability issues

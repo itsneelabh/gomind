@@ -12,13 +12,13 @@ import (
 
 // MetricInstruments holds cached metric instruments for efficient recording
 type MetricInstruments struct {
-	meter           metric.Meter
-	counters        map[string]metric.Int64Counter
-	floatCounters   map[string]metric.Float64Counter
-	upDownCounters  map[string]metric.Int64UpDownCounter
-	histograms      map[string]metric.Float64Histogram
-	gauges          map[string]gaugeCallback
-	mu              sync.RWMutex
+	meter          metric.Meter
+	counters       map[string]metric.Int64Counter
+	floatCounters  map[string]metric.Float64Counter
+	upDownCounters map[string]metric.Int64UpDownCounter
+	histograms     map[string]metric.Float64Histogram
+	gauges         map[string]gaugeCallback
+	mu             sync.RWMutex
 }
 
 // gaugeCallback holds gauge registration info
@@ -216,7 +216,7 @@ func (m *MetricInstruments) RecordBytesTransferred(ctx context.Context, name str
 
 // RecordError increments an error counter with error type
 func (m *MetricInstruments) RecordError(ctx context.Context, name string, errorType string) error {
-	return m.RecordCounter(ctx, name, 1, 
+	return m.RecordCounter(ctx, name, 1,
 		metric.WithAttributes(attribute.String("error.type", errorType)))
 }
 
@@ -229,40 +229,40 @@ func (m *MetricInstruments) RecordSuccess(ctx context.Context, name string) erro
 // Agent-specific metric constants
 const (
 	// Agent lifecycle metrics
-	MetricAgentStartup         = "agent.startup.duration"
-	MetricAgentUptime          = "agent.uptime"
-	MetricAgentHealth          = "agent.health"
-	MetricAgentCapabilities    = "agent.capabilities.count"
-	MetricAgentShutdown        = "agent.shutdown.duration"
-	
+	MetricAgentStartup      = "agent.startup.duration"
+	MetricAgentUptime       = "agent.uptime"
+	MetricAgentHealth       = "agent.health"
+	MetricAgentCapabilities = "agent.capabilities.count"
+	MetricAgentShutdown     = "agent.shutdown.duration"
+
 	// Capability metrics
 	MetricCapabilityExecutions = "agent.capability.executions"
 	MetricCapabilityDuration   = "agent.capability.duration"
 	MetricCapabilityErrors     = "agent.capability.errors"
-	
+
 	// Discovery metrics
 	MetricDiscoveryRegistrations = "agent.discovery.registrations"
 	MetricDiscoveryLookups       = "agent.discovery.lookups"
 	MetricDiscoveryHealth        = "agent.discovery.health_checks"
-	
+
 	// Memory/State metrics
 	MetricMemoryOperations = "agent.memory.operations"
 	MetricMemorySize       = "agent.memory.size"
 	MetricMemoryEvictions  = "agent.memory.evictions"
-	
+
 	// AI/LLM metrics
-	MetricAIPromptTokens      = "agent.ai.prompt_tokens"
-	MetricAICompletionTokens  = "agent.ai.completion_tokens"
-	MetricAIRequestDuration   = "agent.ai.request_duration"
-	MetricAIRequestCost       = "agent.ai.request_cost"
-	MetricAIRateLimitHits     = "agent.ai.rate_limit_hits"
-	
+	MetricAIPromptTokens     = "agent.ai.prompt_tokens"
+	MetricAICompletionTokens = "agent.ai.completion_tokens"
+	MetricAIRequestDuration  = "agent.ai.request_duration"
+	MetricAIRequestCost      = "agent.ai.request_cost"
+	MetricAIRateLimitHits    = "agent.ai.rate_limit_hits"
+
 	// Circuit breaker metrics
-	MetricCircuitBreakerSuccess = "agent.circuit_breaker.success"
-	MetricCircuitBreakerFailure = "agent.circuit_breaker.failure"
-	MetricCircuitBreakerOpen    = "agent.circuit_breaker.open"
+	MetricCircuitBreakerSuccess  = "agent.circuit_breaker.success"
+	MetricCircuitBreakerFailure  = "agent.circuit_breaker.failure"
+	MetricCircuitBreakerOpen     = "agent.circuit_breaker.open"
 	MetricCircuitBreakerRejected = "agent.circuit_breaker.rejected"
-	
+
 	// Workflow metrics
 	MetricWorkflowExecutions  = "agent.workflow.executions"
 	MetricWorkflowDuration    = "agent.workflow.duration"

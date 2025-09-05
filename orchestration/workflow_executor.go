@@ -161,7 +161,7 @@ func (e *WorkflowExecutor) BatchCall(ctx context.Context, calls []ServiceCall) [
 					// Capture panic and convert to error result
 					panicErr := fmt.Errorf("service call %s panic: %v", c.ID, r)
 					stackTrace := string(debug.Stack())
-					
+
 					// Try to send result with timeout to avoid blocking
 					sendTimeout := time.After(5 * time.Second)
 					select {
@@ -172,11 +172,11 @@ func (e *WorkflowExecutor) BatchCall(ctx context.Context, calls []ServiceCall) [
 							Success: false,
 							Error:   panicErr.Error(),
 							Output: map[string]interface{}{
-								"panic":       fmt.Sprintf("%v", r),        // The panic value for debugging
-								"call_id":     c.ID,                         // Identifies which call failed
-								"call_type":   c.Type,                       // Type of call (agent/capability)
-								"target":      c.Target,                     // Target service or capability
-								"stack_trace": stackTrace,                   // Full stack trace for debugging
+								"panic":       fmt.Sprintf("%v", r), // The panic value for debugging
+								"call_id":     c.ID,                 // Identifies which call failed
+								"call_type":   c.Type,               // Type of call (agent/capability)
+								"target":      c.Target,             // Target service or capability
+								"stack_trace": stackTrace,           // Full stack trace for debugging
 							},
 						},
 					}:

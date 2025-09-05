@@ -35,46 +35,46 @@ func CORSMiddleware(config *CORSConfig) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			origin := r.Header.Get("Origin")
-			
+
 			// Check if origin is allowed
 			if isOriginAllowed(origin, config.AllowedOrigins) {
 				// Set CORS headers
 				w.Header().Set("Access-Control-Allow-Origin", origin)
-				
+
 				if config.AllowCredentials {
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
 				}
-				
+
 				// Set allowed methods
 				if len(config.AllowedMethods) > 0 {
 					w.Header().Set("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ", "))
 				}
-				
+
 				// Set allowed headers
 				if len(config.AllowedHeaders) > 0 {
 					w.Header().Set("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ", "))
 				}
-				
+
 				// Set exposed headers
 				if len(config.ExposedHeaders) > 0 {
 					w.Header().Set("Access-Control-Expose-Headers", strings.Join(config.ExposedHeaders, ", "))
 				}
-				
+
 				// Set max age for preflight caching
 				if config.MaxAge > 0 {
 					w.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", config.MaxAge))
 				}
 			}
-			
+
 			// Handle preflight OPTIONS request
 			if r.Method == http.MethodOptions {
 				// Preflight request - just return the headers
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			
+
 			// Continue with the next handler
 			next.ServeHTTP(w, r)
 		})
@@ -96,41 +96,41 @@ func isOriginAllowed(origin string, allowedOrigins []string) bool {
 	if origin == "" {
 		return false
 	}
-	
+
 	for _, allowed := range allowedOrigins {
 		// Allow all origins
 		if allowed == "*" {
 			return true
 		}
-		
+
 		// Exact match
 		if allowed == origin {
 			return true
 		}
-		
+
 		// Wildcard subdomain support (e.g., *.example.com or https://*.example.com)
 		if strings.Contains(allowed, "*.") {
 			// Find the wildcard position
 			wildcardIdx := strings.Index(allowed, "*.")
-			
+
 			// Get the parts before and after the wildcard
 			beforeWildcard := allowed[:wildcardIdx]
 			afterWildcard := allowed[wildcardIdx+2:] // Skip "*."
-			
+
 			// Check if origin starts with the part before wildcard (if any)
 			if !strings.HasPrefix(origin, beforeWildcard) {
 				continue
 			}
-			
+
 			// Check if origin ends with the part after wildcard
 			if !strings.HasSuffix(origin, afterWildcard) {
 				continue
 			}
-			
+
 			// Extract the middle part that replaces the wildcard
 			remainingOrigin := origin[len(beforeWildcard):]
 			remainingOrigin = strings.TrimSuffix(remainingOrigin, afterWildcard)
-			
+
 			// The wildcard part must:
 			// 1. Not be empty (root domain shouldn't match)
 			// 2. End with a dot (to ensure it's a complete subdomain)
@@ -138,7 +138,7 @@ func isOriginAllowed(origin string, allowedOrigins []string) bool {
 				return true
 			}
 		}
-		
+
 		// Wildcard port support (e.g., http://localhost:*)
 		if strings.Contains(allowed, ":*") {
 			// Get the base URL without port
@@ -149,7 +149,7 @@ func isOriginAllowed(origin string, allowedOrigins []string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -172,24 +172,24 @@ func ApplyCORS(w http.ResponseWriter, r *http.Request, config *CORSConfig) {
 	if !config.Enabled {
 		return
 	}
-	
+
 	origin := r.Header.Get("Origin")
-	
+
 	if isOriginAllowed(origin, config.AllowedOrigins) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		
+
 		if config.AllowCredentials {
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
-		
+
 		if len(config.AllowedMethods) > 0 {
 			w.Header().Set("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ", "))
 		}
-		
+
 		if len(config.AllowedHeaders) > 0 {
 			w.Header().Set("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ", "))
 		}
-		
+
 		if len(config.ExposedHeaders) > 0 {
 			w.Header().Set("Access-Control-Expose-Headers", strings.Join(config.ExposedHeaders, ", "))
 		}
@@ -209,13 +209,13 @@ func ApplyCORS(w http.ResponseWriter, r *http.Request, config *CORSConfig) {
 //   - MaxAge: 86400 seconds (24 hours)
 func DefaultCORSConfig() *CORSConfig {
 	return &CORSConfig{
-		Enabled:          false,  // Disabled by default for security
+		Enabled:          false, // Disabled by default for security
 		AllowedOrigins:   []string{},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
 		ExposedHeaders:   []string{},
 		AllowCredentials: false,
-		MaxAge:           86400,  // 24 hours
+		MaxAge:           86400, // 24 hours
 	}
 }
 

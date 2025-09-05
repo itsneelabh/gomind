@@ -54,7 +54,7 @@ func init() {
 			},
 		},
 	})
-	
+
 	// Declare pipeline executor metrics
 	telemetry.DeclareMetrics("pipeline", telemetry.ModuleConfig{
 		Metrics: []telemetry.MetricDefinition{
@@ -86,7 +86,7 @@ func init() {
 			},
 		},
 	})
-	
+
 	// Declare task executor metrics
 	telemetry.DeclareMetrics("executor", telemetry.ModuleConfig{
 		Metrics: []telemetry.MetricDefinition{
