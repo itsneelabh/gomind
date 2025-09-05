@@ -1,314 +1,639 @@
-# GoMind - Kubernetes-Native AI Agent Framework
+# GoMind - Go-Native AI Agent Framework with Production Primitives
 
 [![Go Version](https://img.shields.io/badge/go-1.21+-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-GoMind is a lightweight framework for building AI agents that run efficiently on Kubernetes. With an 8MB core and native K8s integration, it's designed for enterprises that need to deploy AI at scale using their existing infrastructure.
+A modular framework for building AI agents in Go with production-grade resilience, observability, and orchestration capabilities built-in from the start.
 
-## Why GoMind?
+## What Makes GoMind Different?
 
-**The Problem**: You have Kubernetes. You need AI agents. Most frameworks require 500MB+ containers, complex service meshes, and dedicated infrastructure.
+**The Simple Truth**: Many AI agent frameworks are optimized for proof-of-concepts and experimentation. GoMind is built for production deployment from day one.
 
-**The Solution**: GoMind gives you 8MB agents that run as regular pods, use standard K8s services, and scale with HPA. No special operators, no CRDs, no complexity.
+### The Problems We Solve
 
-## Key Features
+🔴 **Common Challenge**: "Here's how to build an agent. Good luck running 100 of them in production!"
+✅ **GoMind**: Built-in circuit breakers, retries, and telemetry. Your agents stay up even when external APIs go down.
 
-### 🎯 Kubernetes-Native from Day One
-- **8MB containers** vs 500MB+ for Python frameworks
-- Works with standard K8s services, ConfigMaps, and Secrets
-- Built-in health checks and graceful shutdown
-- Scales with HorizontalPodAutoscaler
-- No custom operators or CRDs required
+🔴 **Common Challenge**: "Install these 50 dependencies, hope they don't conflict."
+✅ **GoMind**: Single binary. No dependency hell. Compiles once, runs everywhere.
 
-### 🚀 Production-Ready Architecture
+🔴 **Common Challenge**: "To coordinate agents, write complex orchestration code."
+✅ **GoMind**: Just describe what you want in English, or use simple YAML workflows.
+
+🔴 **Common Challenge**: "Add Prometheus, OpenTelemetry, Grafana, configure them all..."
+✅ **GoMind**: Initialize once, then `telemetry.Counter("task.done")`. Observability built-in.
+
+### Who This Is For
+
+- **You're building production AI agents**, not research prototypes
+- **You care about reliability** - agents that stay up when APIs fail
+- **You want simplicity** - less code, fewer dependencies, cleaner deployment
+- **You need observability** - know what your agents are doing without complex setup
+
+## How GoMind Works
+
+### Pick What You Need (Modular Design)
+
 ```go
-// Service discovery built-in
-agent := core.NewBaseAgent("pricing-service")
-if err := agent.Start(8080); err != nil {
-    log.Fatal(err)
-}  // Automatically registers with Redis
+import (
+    "github.com/itsneelabh/gomind/core"          // Base agent (always needed)
+    "github.com/itsneelabh/gomind/ai"            // Add if you need LLM integration
+    "github.com/itsneelabh/gomind/orchestration" // Add for multi-agent coordination  
+    "github.com/itsneelabh/gomind/resilience"    // Add for circuit breakers
+    "github.com/itsneelabh/gomind/telemetry"     // Add for metrics
+)
 ```
 
-- Redis-based service discovery (works with ElastiCache/MemoryStore)
-- HTTP/JSON communication (no gRPC complexity)
-- Distributed tracing with OpenTelemetry
-- Circuit breakers and retry logic included
+Start simple with just `core`, add modules as you grow. No bloat, no unused features.
 
-### 📦 Comprehensive Framework
-GoMind v0.1.0-alpha includes all modules in a single package:
-- **Core**: Service discovery, HTTP server, basic framework
-- **AI Module**: OpenAI/Anthropic integration, prompt management
-- **Orchestration**: AI-powered multi-agent coordination
-- **Telemetry**: Full OpenTelemetry with Jaeger/Datadog support
-- **Resilience**: Circuit breakers and retry patterns
+## Getting Started in 5 Minutes
 
-*Note: Future versions will offer modular installation for optimized deployments.*
+### Your First Agent
 
-## Quick Start
-
-### 1. Create an Agent
 ```go
 package main
 
 import (
-    "context"
+    "log"
     "github.com/itsneelabh/gomind/core"
 )
 
-type AnalyticsAgent struct {
-    *core.BaseAgent
-}
-
-// Auto-discovered capability
-// @capability: analyze_metrics
-func (a *AnalyticsAgent) AnalyzeMetrics(ctx context.Context, data []float64) (string, error) {
-    // Your logic here
-    return "Analysis complete", nil
-}
-
 func main() {
-    agent := &AnalyticsAgent{
-        BaseAgent: core.NewBaseAgent("analytics"),
-    }
+    // 1. Create an agent
+    agent := core.NewBaseAgent("hello-agent")
     
-    // Initialize and start the agent
-    ctx := context.Background()
-    if err := agent.Initialize(ctx); err != nil {
-        log.Fatal(err)
-    }
+    // 2. Tell it what it can do
+    agent.AddCapability(core.Capability{
+        Name: "greet",
+        Description: "Says hello",
+    })
     
+    // 3. Run it
     if err := agent.Start(8080); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-### 2. Deploy to Kubernetes
+That's it! Your agent is running at `http://localhost:8080` with:
+- ✅ Health checks at `/health`
+- ✅ Automatic service discovery (if Redis is configured)
+- ✅ Graceful shutdown handling
+- ✅ Built-in error handling
+
+## Core Capabilities
+
+### 1. Agents That Find Each Other Automatically
+
+**The Problem**: You have multiple AI agents. How do they discover and talk to each other without hardcoding addresses?
+
+**The Solution**: Agents announce themselves and find each other by what they can do.
+
+```go
+import (
+    "context"
+    "log"
+    "github.com/itsneelabh/gomind/core"
+)
+
+// Step 1: Your agent introduces itself to the network
+agent := core.NewBaseAgent("weather-agent")
+discovery, err := core.NewRedisDiscovery("redis://redis:6379")
+if err != nil {
+    log.Fatalf("Failed to connect to Redis: %v", err)
+}
+agent.Discovery = discovery
+
+agent.AddCapability(core.Capability{
+    Name: "get_weather",
+    Description: "Fetches current weather for any city",
+})
+
+// Step 2: Other agents can find it by capability
+ctx := context.Background()
+weatherAgents, err := discovery.FindByCapability(ctx, "get_weather")
+if err != nil {
+    log.Printf("Failed to find weather agents: %v", err)
+}
+// Returns: [weather-agent at http://10.0.0.5:8080]
+```
+
+**What Happens Behind the Scenes**:
+- Weather agent registers itself in Redis with a TTL of 30 seconds
+- If it crashes, it's automatically removed after TTL expires
+- Other agents query Redis to find who can do what
+- No hardcoded IPs, no service mesh needed
+
+### 2. Talk to Your Agents in Plain English
+
+**The Problem**: You have specialized agents (data fetcher, analyzer, reporter). How do you coordinate them without writing complex orchestration code?
+
+**The Solution**: Just describe what you want. The framework figures out which agents to call and in what order.
+
+```go
+import (
+    "context"
+    "log"
+    "github.com/itsneelabh/gomind/ai"
+    "github.com/itsneelabh/gomind/orchestration"
+)
+
+// Setup once
+ctx := context.Background()
+aiClient := ai.NewOpenAIClient(apiKey)
+orchestrator := orchestration.NewAIOrchestrator(
+    orchestration.DefaultConfig(),
+    discovery,  // Finds available agents
+    aiClient,   // Understands your request
+)
+
+// Start the orchestrator
+if err := orchestrator.Start(ctx); err != nil {
+    log.Fatalf("Failed to start orchestrator: %v", err)
+}
+defer orchestrator.Stop()
+
+// Then just ask for what you want
+response, err := orchestrator.ProcessRequest(ctx,
+    "Get weather for NYC, analyze if it's good for outdoor events, and create a recommendation",
+    nil,
+)
+if err != nil {
+    log.Printf("Request failed: %v", err)
+}
+
+// The orchestrator automatically:
+// 1. Finds weather-agent, analysis-agent, and recommendation-agent
+// 2. Calls weather-agent first
+// 3. Passes weather data to analysis-agent
+// 4. Uses both results for recommendation-agent
+// 5. Returns: "Perfect day for outdoor events! 72°F, sunny, low wind."
+```
+
+**What Happens Behind the Scenes**:
+- LLM understands your intent and available agent capabilities
+- Creates an execution plan (weather → analysis → recommendation)
+- Runs agents in parallel when possible
+- Caches the routing decision for similar future requests
+
+### 3. Define Repeatable Agent Workflows
+
+**The Problem**: Some agent tasks always follow the same pattern. How do you avoid re-orchestrating the same sequence every time?
+
+**The Solution**: Write the recipe once in YAML, run it forever.
+
+```yaml
+# workflow.yaml - Your agent recipe
+name: daily-report
+steps:
+  - name: get-sales
+    agent: sales-agent
+    action: fetch_daily_total
+    
+  - name: get-costs  
+    agent: finance-agent  
+    action: fetch_daily_costs
+    # This runs in parallel with get-sales!
+    
+  - name: calculate-profit
+    agent: calculator-agent
+    action: subtract
+    inputs:
+      revenue: ${steps.get-sales.output}
+      costs: ${steps.get-costs.output}
+    depends_on: [get-sales, get-costs]  # Wait for both
+```
+
+```go
+import (
+    "context"
+    "log"
+    "github.com/itsneelabh/gomind/orchestration"
+)
+
+// Run your workflow anytime
+ctx := context.Background()
+engine := orchestration.NewWorkflowEngine(discovery)
+
+workflow, err := engine.ParseWorkflowYAML(yamlFile)
+if err != nil {
+    log.Fatalf("Failed to parse workflow: %v", err)
+}
+
+// Execute with different inputs each time
+monday, err := engine.ExecuteWorkflow(ctx, workflow, map[string]any{"date": "2024-01-01"})
+if err != nil {
+    log.Printf("Monday workflow failed: %v", err)
+}
+
+tuesday, err := engine.ExecuteWorkflow(ctx, workflow, map[string]any{"date": "2024-01-02"})
+if err != nil {
+    log.Printf("Tuesday workflow failed: %v", err)
+}
+```
+
+**What Happens Behind the Scenes**:
+- Framework identifies which steps can run in parallel (sales & costs)
+- Automatically waits for dependencies before running next steps
+- Passes data between agents using ${} variable substitution
+- If an agent fails, the workflow stops and reports which step failed
+
+### 4. Agents That Don't Crash Your System
+
+**The Problem**: When external APIs are down or slow, your agents keep trying and failing, creating a cascade of failures.
+
+**The Solution**: Circuit breakers that "fail fast" when something is broken, and smart retries for temporary hiccups.
+
+```go
+import (
+    "context"
+    "log"
+    "time"
+    "github.com/itsneelabh/gomind/resilience"
+)
+
+// Setup protection for your agent's external calls
+ctx := context.Background()
+config := resilience.DefaultConfig()
+circuitBreaker := resilience.NewCircuitBreaker(config)
+
+// Wrap any risky operation
+err := circuitBreaker.Execute(ctx, func() error {
+    // Your risky operation here
+    return callExternalAPI()
+})
+if err != nil {
+    log.Printf("Circuit breaker protected us: %v", err)
+}
+
+// What happens:
+// - First 5 calls fail → Circuit opens → Next calls fail immediately for 30 seconds
+// - After 30 seconds → Tests with 1 call → If it works, circuit closes
+// - Your system stays responsive even when external API is down
+
+// For temporary network issues, use smart retry
+retryConfig := &resilience.RetryConfig{
+    MaxAttempts: 3,  // Try 3 times
+    InitialDelay: 100 * time.Millisecond,  // Wait 100ms
+    BackoffFactor: 2.0,  // Then 200ms, then 400ms
+    JitterEnabled: true,  // Add randomness to prevent thundering herd
+}
+
+// This handles temporary network blips automatically
+err = resilience.Retry(ctx, retryConfig, func() error {
+    return fetchDataFromAPI()
+})
+if err != nil {
+    log.Printf("All retries failed: %v", err)
+}
+```
+
+**Real-World Example**: Like a smart electrical breaker - if there's a short circuit, it cuts power immediately instead of letting your house burn down. Once the problem is fixed, it can be reset.
+
+### 5. Know What Your Agents Are Doing (Without the Hassle)
+
+**The Problem**: You need metrics and tracing to debug issues, but setting up Prometheus/Grafana/OpenTelemetry is complex.
+
+**The Solution**: Initialize once, then emit metrics with one line from anywhere, with built-in safety features.
+
+```go
+import (
+    "context"
+    "log"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+// Initialize once in main() - that's it!
+err := telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
+if err != nil {
+    log.Printf("Telemetry init failed (non-fatal): %v", err)
+    // Your app continues to work even without telemetry
+}
+defer telemetry.Shutdown(context.Background())
+
+// Then anywhere in any agent, just emit metrics
+telemetry.Counter("agent.tasks.completed", "agent", "analyzer")
+telemetry.Histogram("agent.llm.response_ms", 234.5, "model", "gpt-4")
+
+// Track a request across multiple agents
+ctx := telemetry.WithBaggage(context.Background(), "request_id", "req-789")
+
+// Every agent that processes this context automatically includes request_id
+agent1.Process(ctx)  // Metrics include: request_id=req-789
+agent2.Process(ctx)  // Metrics include: request_id=req-789
+
+// See the full journey of request req-789 across all agents!
+```
+
+**Built-in Safety Features**:
+- **Won't crash your agents**: If metrics backend is down, agents keep running
+- **Won't explode your bill**: Automatic cardinality limiting (no infinite label combinations)
+- **Won't spam your backend**: Circuit breaker stops metric flood during outages
+- **Development vs Production**: Different settings for local testing vs production
+
+**Real-World Example**: Like a flight recorder - constantly recording what's happening, but doesn't interfere with the plane flying.
+
+## Putting It All Together: A Real Example
+
+Let's build a customer support system with three specialized agents:
+
+```go
+import (
+    "context"
+    "fmt"
+    "log"
+    "github.com/itsneelabh/gomind/core"
+    "github.com/itsneelabh/gomind/ai"
+    "github.com/itsneelabh/gomind/resilience"
+    "github.com/itsneelabh/gomind/telemetry"
+    "github.com/itsneelabh/gomind/orchestration"
+)
+
+// 1. Ticket Classifier Agent - understands the problem
+type ClassifierAgent struct {
+    *core.BaseAgent
+    aiClient core.AIClient
+}
+
+func NewClassifierAgent(aiClient core.AIClient) *ClassifierAgent {
+    return &ClassifierAgent{
+        BaseAgent: core.NewBaseAgent("classifier"),
+        aiClient: aiClient,
+    }
+}
+
+func (c *ClassifierAgent) ClassifyTicket(ctx context.Context, ticket string) (string, error) {
+    // Use AI to understand the ticket
+    response, err := c.aiClient.GenerateResponse(ctx, 
+        fmt.Sprintf("Classify this support ticket: %s", ticket),
+        &core.AIOptions{Model: "gpt-3.5-turbo"})
+    if err != nil {
+        return "", fmt.Errorf("classification failed: %w", err)
+    }
+    
+    telemetry.Counter("tickets.classified", "category", response.Content)
+    return response.Content, nil
+}
+
+// 2. Knowledge Agent - searches documentation
+type KnowledgeAgent struct {
+    *core.BaseAgent
+}
+
+func (k *KnowledgeAgent) SearchDocs(ctx context.Context, query string) (string, error) {
+    // Resilient external API call
+    var result string
+    err := resilience.Retry(ctx, resilience.DefaultRetryConfig(), func() error {
+        var err error
+        result, err = k.searchKnowledgeBase(query)
+        return err
+    })
+    
+    if err == nil {
+        telemetry.Counter("knowledge.searches", "status", "success")
+    } else {
+        telemetry.Counter("knowledge.searches", "status", "failure")
+    }
+    return result, err
+}
+
+// Orchestrate them all
+func HandleSupportTicket(ctx context.Context, orchestrator *orchestration.AIOrchestrator, ticket string) (string, error) {
+    // The orchestrator coordinates all three agents
+    response, err := orchestrator.ProcessRequest(ctx,
+        fmt.Sprintf("Handle this support ticket: %s", ticket),
+        nil,
+    )
+    if err != nil {
+        return "", fmt.Errorf("orchestration failed: %w", err)
+    }
+    
+    return response.Response, nil
+}
+```
+
+**What's Happening**:
+1. **Discovery**: Agents find each other automatically via Redis
+2. **Orchestration**: Natural language or workflow coordinates them
+3. **Resilience**: Retries and circuit breakers protect external calls
+4. **Observability**: Every step is tracked, traceable across agents
+5. **Production Ready**: Health checks, graceful shutdown, all built-in
+
+## Complete Production Setup
+
+Here's how all the pieces come together in production:
+
+```go
+import (
+    "context"
+    "log"
+    "os"
+    "github.com/itsneelabh/gomind/core"
+    "github.com/itsneelabh/gomind/ai"
+    "github.com/itsneelabh/gomind/orchestration"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // 1. Observability (always first!)
+    if err := telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction)); err != nil {
+        log.Printf("Telemetry init failed (continuing anyway): %v", err)
+    }
+    defer telemetry.Shutdown(ctx)
+
+    // 2. Agent discovery
+    discovery, err := core.NewRedisDiscovery(os.Getenv("REDIS_URL"))
+    if err != nil {
+        log.Fatalf("Failed to connect to Redis: %v", err)
+    }
+
+    // 3. Create your agents
+    dataAgent := &DataAgent{BaseAgent: core.NewBaseAgent("data-agent")}
+    dataAgent.Discovery = discovery
+    
+    aiAgent := ai.NewIntelligentAgent("ai-agent", os.Getenv("OPENAI_KEY"))
+    aiAgent.Discovery = discovery
+
+    // 4. Add orchestration
+    orchestrator := orchestration.NewAIOrchestrator(
+        orchestration.DefaultConfig(),
+        discovery,
+        aiAgent.AI,
+    )
+    
+    if err := orchestrator.Start(ctx); err != nil {
+        log.Fatalf("Failed to start orchestrator: %v", err)
+    }
+    defer orchestrator.Stop()
+
+    // 5. Start agents
+    go func() {
+        if err := dataAgent.Start(8081); err != nil {
+            log.Printf("Data agent failed: %v", err)
+        }
+    }()
+    
+    go func() {
+        if err := aiAgent.Start(8082); err != nil {
+            log.Printf("AI agent failed: %v", err)
+        }
+    }()
+    
+    // Your agents are now:
+    // ✅ Discoverable by capability
+    // ✅ Protected by circuit breakers
+    // ✅ Emitting metrics automatically
+    // ✅ Orchestratable via natural language
+    
+    // Block forever (or until shutdown signal)
+    select {}
+}
+```
+
+## Quick Framework Comparison
+
+### The Practical Differences
+
+| What You're Doing | GoMind | Python Frameworks |
+|-------------------|---------|-------------------|
+| **Deploy an agent** | Copy single binary, run | Install Python, pip install 50 packages, pray |
+| **Handle API failures** | Built-in circuit breakers | Add retry library, configure it |
+| **Coordinate agents** | "Analyze this data" (English) | Write orchestration code |
+| **Add observability** | `telemetry.Counter("done")` | Setup Prometheus + Grafana + exporters |
+| **Fix production issue** | Compile-time type safety caught it | Runtime error at 3 AM |
+| **Scale to 100 agents** | Just works (goroutines) | Careful with that GIL |
+
+## When to Use GoMind
+
+### ✅ Choose GoMind If:
+- You're deploying agents to production (not just notebooks)
+- You want agents that stay up when APIs fail
+- You need to run many agents efficiently
+- You value "it just works" over "infinite flexibility"
+- Your team knows Go (or wants fewer moving parts than Python)
+
+### ❌ Consider Python Frameworks If:
+- You're doing ML research/experimentation
+- You need cutting-edge Python-only libraries
+- You're prototyping in Jupyter notebooks
+- Your team is Python-only and won't touch Go
+
+## Installation
+
+```bash
+go get github.com/itsneelabh/gomind@main
+```
+
+See the [Quick Start](#getting-started-in-5-minutes) section above for your first agent.
+
+### Deploy Your Agent to Kubernetes
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: analytics-agent
+  name: ai-agent
 spec:
   replicas: 3
   template:
     spec:
       containers:
       - name: agent
-        image: mycompany/analytics-agent:latest
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "100m"
-          limits:
-            memory: "128Mi"
-            cpu: "200m"
+        image: my-ai-agent:latest
+        ports:
+        - containerPort: 8080
         env:
         - name: REDIS_URL
-          value: "redis://redis:6379"
+          value: "redis://redis:6379"  # For agent discovery
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: openai
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
 ```
-
-### 3. Scale with HPA
-```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: analytics-agent-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: analytics-agent
-  minReplicas: 2
-  maxReplicas: 100
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-```
-
-## Real-World Example: Multi-Agent System
-
-```go
-// Market data service
-type MarketDataService struct {
-    *core.BaseAgent
-}
-
-// Risk analyzer (AI-powered)  
-type RiskAnalyzer struct {
-    *core.BaseAgent
-    ai core.AIClient
-}
-
-// AI-powered orchestrator discovers agents and coordinates them
-discovery, _ := core.NewRedisDiscovery("redis://localhost:6379")
-aiClient := ai.NewOpenAIClient(apiKey)
-orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient)
-
-// Natural language request - AI figures out which agents to call
-result, _ := orchestrator.ProcessRequest(ctx, 
-    "Get market data for AAPL and analyze risk")
-```
-
-## Production Patterns
-
-### AI-Powered Orchestration
-```go
-// The orchestrator uses LLM to understand requests and coordinate agents
-orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient)
-
-// Start the orchestrator (begins catalog refresh from Redis)
-orchestrator.Start(ctx)
-
-// Process natural language requests
-response, _ := orchestrator.ProcessRequest(ctx,
-    "Analyze Apple stock performance and provide investment recommendations",
-    nil,
-)
-
-// The orchestrator will:
-// 1. Query Redis for all available agents and capabilities
-// 2. Send the catalog + request to LLM for planning
-// 3. Execute the plan with parallel agent calls
-// 4. Use LLM to synthesize results into coherent response
-```
-
-### Service Discovery
-```go
-// Agents find each other automatically
-discovery := framework.NewRedisDiscovery(redisURL)
-agents := discovery.FindByCapability("analyze_risk")
-```
-
-### Circuit Breakers
-```go
-// Prevent cascade failures
-response, err := framework.CallWithCircuitBreaker(
-    func() (interface{}, error) {
-        return agent.CallRemoteAgent(ctx, "expensive-operation")
-    },
-)
-```
-
-### Distributed Tracing
-```go
-// Traces flow across all agents automatically
-ctx, span := tracer.Start(ctx, "ProcessOrder")
-defer span.End()
-// All downstream agent calls are traced
-```
-
-## Performance on Kubernetes
-
-| Metric | GoMind | Traditional Frameworks |
-|--------|--------|----------------------|
-| Container Size | 8-20MB | 500MB+ |
-| Memory Usage | 10-30MB | 200MB+ |
-| Cold Start | <100ms | 2-10s |
-| Pods per Node* | 100-200 | 10-20 |
-| HPA Scale Time | <10s | 30-60s |
-
-*Based on 2GB node memory
-
-## Enterprise Integration
-
-### Works with Your Stack
-- **Databases**: PostgreSQL, MongoDB, DynamoDB
-- **Message Queues**: Kafka, RabbitMQ, SQS
-- **Cache**: Redis, Memcached
-- **Observability**: Prometheus, Grafana, Datadog
-- **AI Providers**: OpenAI, Anthropic, Bedrock, Vertex AI
-
-### Security & Compliance
-- No external dependencies in core module
-- Supports private endpoints and VPC peering
-- Works with K8s NetworkPolicies
-- Compatible with service meshes (Istio, Linkerd)
-- Audit logging built-in
-
-## Use Cases
-
-### Financial Services
-- **Trading Bots**: Sub-millisecond latency with Go's performance
-- **Risk Analysis**: Orchestrate multiple specialized agents
-- **Fraud Detection**: Scale to handle transaction spikes
-
-### Healthcare
-- **Patient Routing**: HIPAA-compliant agent communication
-- **Diagnostic Assistance**: Coordinate specialist AI models
-- **Resource Optimization**: Efficient scheduling agents
-
-### E-Commerce
-- **Dynamic Pricing**: Real-time price adjustments
-- **Inventory Management**: Distributed decision making
-- **Customer Service**: Scalable chat agents
-
-## Getting Started
-
-```bash
-# Install the framework from main branch
-go get github.com/itsneelabh/gomind@main
-
-# Run locally
-go run main.go
-
-# Build container (multi-stage for tiny images)
-docker build -t myagent:latest .
-
-# Deploy to Kubernetes
-kubectl apply -f deployment.yaml
-```
-
-## Documentation
-
-- [Quick Start Guide](docs/GETTING_STARTED.md)
-- [Framework Capabilities](docs/framework_capabilities_guide.md)
-- [Kubernetes Deployment](docs/k8s-service-fronted-discovery.md)
-- [API Reference](https://pkg.go.dev/github.com/itsneelabh/gomind)
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
-│            Kubernetes Cluster                │
+│           AI Agent Layer                     │
 ├─────────────────────────────────────────────┤
 │                                             │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │ Agent A │  │ Agent B │  │ Agent C │   │
-│  │  (8MB)  │  │  (10MB) │  │  (8MB)  │   │
+│  │  Data   │  │Reasoning│  │ Action  │   │
+│  │  Agent  │  │  Agent  │  │  Agent  │   │
 │  └────┬────┘  └────┬────┘  └────┬────┘   │
-│       │            │            │          │
-│       └────────────┼────────────┘          │
-│                    │                       │
-│            ┌───────▼────────┐              │
-│            │     Redis      │              │
-│            │Service Registry│              │
-│            └────────────────┘              │
-│                                             │
-│  ┌──────────────────────────────────────┐  │
-│  │        Horizontal Pod Autoscaler      │  │
-│  └──────────────────────────────────────┘  │
+│       └────────────┼────────────┘         │
+│                    │                      │
+├─────────────────────────────────────────────┤
+│     Agent Orchestration Layer               │
+│   (Natural Language + Workflow Engine)      │
+├─────────────────────────────────────────────┤
+│        Core Agent Framework                 │
+│   (Base Agent, Discovery, Capabilities)     │
+├─────────────────────────────────────────────┤
+│     Production Infrastructure               │
+│  (Resilience, Telemetry, LLM Integration)  │
 └─────────────────────────────────────────────┘
+```
+
+## Module Documentation
+
+- [Core Module](core/README.md) - Base agent implementation, discovery, capabilities
+- [AI Module](ai/README.md) - LLM integration, intelligent agent patterns  
+- [Orchestration Module](orchestration/README.md) - Multi-agent coordination and workflows
+- [Resilience Module](resilience/README.md) - Fault tolerance for agent operations
+- [Telemetry Module](telemetry/README.md) - Agent metrics, tracing, and observability
+
+## Examples
+
+- [Context Propagation](examples/context_propagation/main.go) - Tracing across agent interactions
+- [Error Handling](examples/error_handling/main.go) - Robust agent error patterns
+- [Telemetry](examples/telemetry/main.go) - Agent metrics and observability
+
+## Next Steps
+
+### Learn More
+1. **[Core Module README](core/README.md)** - Start here, everything builds on this
+2. **[Examples](examples/)** - Working code you can copy and modify
+3. **[AI Module](ai/README.md)** - Add intelligence to your agents
+4. **[Orchestration Module](orchestration/README.md)** - Coordinate multiple agents
+
+### Common Patterns
+
+**Need LLM-powered agents?**
+```go
+import "github.com/itsneelabh/gomind/ai"
+agent := ai.NewIntelligentAgent("my-ai", apiKey)
+```
+
+**Need resilient external calls?**
+```go
+import "github.com/itsneelabh/gomind/resilience"
+resilience.Retry(ctx, config, riskyOperation)
+```
+
+**Need agent metrics?**
+```go
+import "github.com/itsneelabh/gomind/telemetry"
+telemetry.Initialize(telemetry.ProfileProduction)
+telemetry.Counter("agent.tasks", "status", "success")
 ```
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/itsneelabh/gomind/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/itsneelabh/gomind/discussions)
-- **Security**: [SECURITY.md](SECURITY.md)
-
----
-
-Built for developers who need production-ready AI agents on Kubernetes. No hype, just solid engineering.
+MIT License - see [LICENSE](LICENSE)
