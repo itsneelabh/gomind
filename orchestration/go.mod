@@ -1,6 +1,6 @@
 module github.com/itsneelabh/gomind/orchestration
 
-go 1.25
+go 1.23
 
 replace (
 	github.com/itsneelabh/gomind/ai => ../ai

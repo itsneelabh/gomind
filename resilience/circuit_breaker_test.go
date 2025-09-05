@@ -184,7 +184,7 @@ func TestCircuitBreakerHalfOpenState(t *testing.T) {
 
 	// Open the circuit
 	for i := 0; i < 3; i++ {
-		cb.Execute(context.Background(), func() error {
+		_ = cb.Execute(context.Background(), func() error {
 			return errors.New("test error")
 		})
 	}
@@ -350,7 +350,7 @@ func TestCircuitBreakerExponentialBackoff(t *testing.T) {
 
 	// Open circuit
 	for i := 0; i < 3; i++ {
-		cb.Execute(context.Background(), func() error {
+		_ = cb.Execute(context.Background(), func() error {
 			return errors.New("test error")
 		})
 	}
@@ -359,7 +359,7 @@ func TestCircuitBreakerExponentialBackoff(t *testing.T) {
 
 	// Wait and fail in half-open
 	time.Sleep(60 * time.Millisecond)
-	cb.Execute(context.Background(), func() error {
+	_ = cb.Execute(context.Background(), func() error {
 		return errors.New("test error")
 	})
 

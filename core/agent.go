@@ -60,9 +60,9 @@ type BaseAgent struct {
 
 // NewBaseAgent creates a new base agent with minimal dependencies
 func NewBaseAgent(name string) *BaseAgent {
-	return NewBaseAgentWithConfig(&Config{
-		Name: name,
-	})
+	config := DefaultConfig()
+	config.Name = name
+	return NewBaseAgentWithConfig(config)
 }
 
 // NewBaseAgentWithConfig creates a new base agent with configuration
