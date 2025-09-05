@@ -222,7 +222,7 @@ func (d *RedisDiscovery) StartHeartbeat(ctx context.Context, serviceID string) {
 					})
 				} else {
 					// Fallback to fmt.Printf if no logger configured
-					fmt.Printf("Heartbeat panic recovered for service %s: %v\nStack trace:\n%s\n", 
+					fmt.Printf("Heartbeat panic recovered for service %s: %v\nStack trace:\n%s\n",
 						serviceID, r, debug.Stack())
 				}
 			}
@@ -253,8 +253,8 @@ func (d *RedisDiscovery) StartHeartbeat(ctx context.Context, serviceID string) {
 type MockDiscovery struct {
 	mu           sync.RWMutex
 	services     map[string]*ServiceRegistration
-	capabilities map[string][]string  // capability -> service IDs
-	names        map[string][]string  // name -> service IDs
+	capabilities map[string][]string // capability -> service IDs
+	names        map[string][]string // name -> service IDs
 }
 
 // NewMockDiscovery creates a new mock discovery client

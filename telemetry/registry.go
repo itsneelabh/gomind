@@ -13,17 +13,17 @@ var (
 	// We use atomic.Value for lock-free reads on the hot path (metric emission).
 	// This is only written once during Initialize() and read many times during Emit().
 	globalRegistry atomic.Value // *Registry
-	
+
 	// initOnce ensures Initialize() can only succeed once.
 	// Multiple calls to Initialize() will return the same result.
 	initOnce sync.Once
-	
+
 	// declaredMetrics stores metric declarations from init() functions.
 	// This allows packages to declare their metrics before the telemetry
 	// system is initialized, solving the init() ordering problem.
 	// sync.Map is used for concurrent writes during init().
 	declaredMetrics sync.Map // map[string]ModuleConfig
-	
+
 	// Internal health metrics tracked atomically for thread-safety
 	telemetryErrors  atomic.Int64 // Total errors encountered
 	telemetryDropped atomic.Int64 // Metrics dropped due to limits
@@ -39,10 +39,10 @@ type ModuleConfig struct {
 // Use this to declare metrics upfront for better validation
 type MetricDefinition struct {
 	Name    string
-	Type    string   // counter, histogram, gauge, updowncounter
+	Type    string // counter, histogram, gauge, updowncounter
 	Help    string
 	Labels  []string
-	Unit    string   // optional: milliseconds, bytes, etc.
+	Unit    string    // optional: milliseconds, bytes, etc.
 	Buckets []float64 // optional: for histograms
 }
 
@@ -51,17 +51,17 @@ type MetricDefinition struct {
 // and provides a unified interface for metric emission.
 // All fields that may be accessed concurrently use atomic operations or mutex protection.
 type Registry struct {
-	config     Config
-	provider   *OTelProvider           // OpenTelemetry provider for metric export
-	limiter    *CardinalityLimiter     // Prevents metric explosion
-	circuit    *TelemetryCircuitBreaker // Protects backend from overload
-	metrics    *MetricInstruments      // Pre-registered metric instruments
-	
+	config   Config
+	provider *OTelProvider            // OpenTelemetry provider for metric export
+	limiter  *CardinalityLimiter      // Prevents metric explosion
+	circuit  *TelemetryCircuitBreaker // Protects backend from overload
+	metrics  *MetricInstruments       // Pre-registered metric instruments
+
 	// Internal metrics for observability of the telemetry system itself
 	emitted   atomic.Int64 // Total metrics successfully emitted
 	startTime time.Time    // When the registry was created
 	lastError atomic.Value // string - Last error message for diagnostics
-	
+
 	// errorLimiter prevents error logging from overwhelming the system
 	// (e.g., if the backend is down, we don't want to spam error logs)
 	errorLimiter *RateLimiter
@@ -74,13 +74,14 @@ type Registry struct {
 // before the telemetry system is initialized.
 //
 // Example:
-//   func init() {
-//       telemetry.DeclareMetrics("my-module", telemetry.ModuleConfig{
-//           Metrics: []telemetry.MetricDefinition{
-//               {Name: "requests.total", Type: "counter"},
-//           },
-//       })
-//   }
+//
+//	func init() {
+//	    telemetry.DeclareMetrics("my-module", telemetry.ModuleConfig{
+//	        Metrics: []telemetry.MetricDefinition{
+//	            {Name: "requests.total", Type: "counter"},
+//	        },
+//	    })
+//	}
 func DeclareMetrics(module string, config ModuleConfig) {
 	declaredMetrics.Store(module, config)
 }
@@ -107,7 +108,7 @@ func Initialize(config Config) error {
 			initErr = err
 			return
 		}
-		
+
 		// Process all metrics declared via DeclareMetrics()
 		// This allows packages to declare their metrics in init()
 		declaredMetrics.Range(func(key, value interface{}) bool {
@@ -116,7 +117,7 @@ func Initialize(config Config) error {
 			registry.registerModule(module, moduleConfig)
 			return true
 		})
-		
+
 		// Store globally for access by Emit functions
 		globalRegistry.Store(registry)
 	})
@@ -135,13 +136,13 @@ func newRegistry(config Config) (*Registry, error) {
 	if config.CardinalityLimit == 0 {
 		config.CardinalityLimit = 10000
 	}
-	
+
 	// Create OpenTelemetry provider
 	provider, err := NewOTelProvider(config.ServiceName, config.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTel provider: %w", err)
 	}
-	
+
 	// Create cardinality limiter with default limits
 	limits := config.CardinalityLimits
 	if limits == nil {
@@ -152,7 +153,7 @@ func newRegistry(config Config) (*Registry, error) {
 			"user_id":    100,
 		}
 	}
-	
+
 	r := &Registry{
 		config:       config,
 		provider:     provider,
@@ -162,9 +163,9 @@ func newRegistry(config Config) (*Registry, error) {
 		startTime:    time.Now(),
 		errorLimiter: NewRateLimiter(1 * time.Second), // Log errors at most once per second
 	}
-	
+
 	r.lastError.Store("")
-	
+
 	return r, nil
 }
 
@@ -198,7 +199,7 @@ func (r *Registry) emit(name string, value float64, labels map[string]string) er
 		telemetryDropped.Add(1)
 		return fmt.Errorf("telemetry circuit breaker open")
 	}
-	
+
 	// Apply cardinality limiting
 	if r.limiter != nil {
 		for key, val := range labels {
@@ -208,18 +209,18 @@ func (r *Registry) emit(name string, value float64, labels map[string]string) er
 			}
 		}
 	}
-	
+
 	// Record the metric
 	if r.provider != nil {
 		r.provider.RecordMetric(name, value, labels)
 		r.emitted.Add(1)
-		
+
 		// Record success with circuit breaker
 		if r.circuit != nil {
 			r.circuit.RecordSuccess()
 		}
 	}
-	
+
 	return nil
 }
 
@@ -227,19 +228,19 @@ func (r *Registry) emit(name string, value float64, labels map[string]string) er
 func Emit(name string, value float64, labels ...string) {
 	registry := globalRegistry.Load()
 	if registry == nil {
-		return  // Telemetry not initialized, silent no-op
+		return // Telemetry not initialized, silent no-op
 	}
-	
+
 	r := registry.(*Registry)
 	if err := r.emit(name, value, parseLabels(labels...)); err != nil {
 		telemetryErrors.Add(1)
 		r.lastError.Store(err.Error())
-		
+
 		// Rate-limited logging
 		// In production, this would log the error if rate limit allows
 		// For now, we just track errors in telemetryErrors counter
 		_ = r.errorLimiter.Allow()
-		
+
 		// Record failure with circuit breaker
 		if r.circuit != nil {
 			r.circuit.RecordFailure()
@@ -252,7 +253,7 @@ func EmitWithContext(ctx context.Context, name string, value float64, labels ...
 	// Extract and append baggage labels
 	allLabels := appendBaggageToLabels(ctx, labels)
 	defer returnLabelSlice(allLabels) // Return to pool when done
-	
+
 	// Try context-specific provider first
 	if provider := FromContext(ctx); provider != nil {
 		provider.RecordMetric(name, value, parseLabels(allLabels...))
@@ -285,19 +286,19 @@ func Shutdown(ctx context.Context) error {
 	if registry == nil {
 		return nil
 	}
-	
+
 	r := registry.(*Registry)
-	
+
 	// Stop cardinality limiter cleanup
 	if r.limiter != nil {
 		r.limiter.Stop()
 	}
-	
+
 	// Shutdown provider
 	if r.provider != nil {
 		return r.provider.Shutdown(ctx)
 	}
-	
+
 	return nil
 }
 

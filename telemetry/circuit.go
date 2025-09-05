@@ -9,12 +9,12 @@ import (
 // TelemetryCircuitBreaker protects telemetry backend from overload
 type TelemetryCircuitBreaker struct {
 	config CircuitConfig
-	
+
 	state           atomic.Value // string: "closed", "open", "half-open"
 	failures        atomic.Int64
 	successes       atomic.Int64
 	lastFailureTime atomic.Value // time.Time
-	
+
 	mu sync.Mutex
 }
 
@@ -31,7 +31,7 @@ func NewTelemetryCircuitBreaker(config CircuitConfig) *TelemetryCircuitBreaker {
 	if !config.Enabled {
 		return nil
 	}
-	
+
 	// Set defaults
 	if config.MaxFailures == 0 {
 		config.MaxFailures = 10
@@ -42,13 +42,13 @@ func NewTelemetryCircuitBreaker(config CircuitConfig) *TelemetryCircuitBreaker {
 	if config.HalfOpenMax == 0 {
 		config.HalfOpenMax = 5
 	}
-	
+
 	cb := &TelemetryCircuitBreaker{
 		config: config,
 	}
 	cb.state.Store("closed")
 	cb.lastFailureTime.Store(time.Time{})
-	
+
 	return cb
 }
 
@@ -57,9 +57,9 @@ func (cb *TelemetryCircuitBreaker) Allow() bool {
 	if cb == nil {
 		return true // No circuit breaker configured
 	}
-	
+
 	state := cb.State()
-	
+
 	switch state {
 	case "open":
 		// Check if we should transition to half-open
@@ -75,11 +75,11 @@ func (cb *TelemetryCircuitBreaker) Allow() bool {
 			return true
 		}
 		return false
-		
+
 	case "half-open":
 		// Allow limited requests in half-open state
 		return cb.successes.Load() < int64(cb.config.HalfOpenMax)
-		
+
 	default: // closed
 		return true
 	}
@@ -93,10 +93,10 @@ func (cb *TelemetryCircuitBreaker) RecordSuccess() {
 	if cb == nil {
 		return
 	}
-	
+
 	cb.successes.Add(1)
 	state := cb.State()
-	
+
 	if state == "half-open" {
 		// Check if we should close the circuit
 		if cb.successes.Load() >= int64(cb.config.HalfOpenMax) {
@@ -115,10 +115,10 @@ func (cb *TelemetryCircuitBreaker) RecordFailure() {
 	if cb == nil {
 		return
 	}
-	
+
 	failures := cb.failures.Add(1)
 	cb.lastFailureTime.Store(time.Now())
-	
+
 	if failures >= int64(cb.config.MaxFailures) {
 		cb.mu.Lock()
 		if cb.state.Load().(string) != "open" {
@@ -142,10 +142,10 @@ func (cb *TelemetryCircuitBreaker) Reset() {
 	if cb == nil {
 		return
 	}
-	
+
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	cb.state.Store("closed")
 	cb.failures.Store(0)
 	cb.successes.Store(0)

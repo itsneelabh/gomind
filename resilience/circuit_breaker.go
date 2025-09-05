@@ -62,10 +62,10 @@ type MetricsCollector interface {
 // noopMetrics is a no-op metrics implementation
 type noopMetrics struct{}
 
-func (n *noopMetrics) RecordSuccess(name string)                        {}
-func (n *noopMetrics) RecordFailure(name string, errorType string)      {}
-func (n *noopMetrics) RecordStateChange(name string, from, to string)   {}
-func (n *noopMetrics) RecordRejection(name string)                      {}
+func (n *noopMetrics) RecordSuccess(name string)                      {}
+func (n *noopMetrics) RecordFailure(name string, errorType string)    {}
+func (n *noopMetrics) RecordStateChange(name string, from, to string) {}
+func (n *noopMetrics) RecordRejection(name string)                    {}
 
 // ErrorClassifier determines which errors should count toward circuit breaker thresholds
 type ErrorClassifier func(error) bool
@@ -75,27 +75,27 @@ func DefaultErrorClassifier(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	// Configuration errors - DON'T count (user error)
 	if core.IsConfigurationError(err) {
 		return false
 	}
-	
+
 	// Not found errors - DON'T count (user error)
 	if core.IsNotFound(err) {
 		return false
 	}
-	
+
 	// State errors - DON'T count (programming error)
 	if core.IsStateError(err) {
 		return false
 	}
-	
+
 	// Context cancellation - DON'T count (client gave up)
 	if errors.Is(err, context.Canceled) || errors.Is(err, core.ErrContextCanceled) {
 		return false
 	}
-	
+
 	// All other errors count as failures (network, timeout, connection issues)
 	return true
 }
@@ -104,40 +104,40 @@ func DefaultErrorClassifier(err error) bool {
 type CircuitBreakerConfig struct {
 	// Name identifies the circuit breaker
 	Name string
-	
+
 	// FailureThreshold is the number of failures before opening (deprecated, use ErrorThreshold)
 	FailureThreshold int
-	
+
 	// RecoveryTimeout is how long to wait before attempting recovery (deprecated, use SleepWindow)
 	RecoveryTimeout time.Duration
-	
+
 	// ErrorThreshold is the error rate (0.0 to 1.0) that triggers opening
 	ErrorThreshold float64
-	
+
 	// VolumeThreshold is the minimum number of requests before evaluation
 	VolumeThreshold int
-	
+
 	// SleepWindow is how long to wait before entering half-open state
 	SleepWindow time.Duration
-	
+
 	// HalfOpenRequests is the number of test requests in half-open state
 	HalfOpenRequests int
-	
+
 	// SuccessThreshold is the success rate needed to close from half-open
 	SuccessThreshold float64
-	
+
 	// WindowSize is the sliding window duration for metrics
 	WindowSize time.Duration
-	
+
 	// BucketCount is the number of buckets in the sliding window
 	BucketCount int
-	
+
 	// ErrorClassifier determines which errors count as failures
 	ErrorClassifier ErrorClassifier
-	
+
 	// Logger for circuit breaker events
 	Logger Logger
-	
+
 	// Metrics collector for monitoring
 	Metrics MetricsCollector
 }
@@ -146,11 +146,11 @@ type CircuitBreakerConfig struct {
 func DefaultConfig() *CircuitBreakerConfig {
 	return &CircuitBreakerConfig{
 		Name:             "default",
-		ErrorThreshold:   0.5,  // 50% error rate
-		VolumeThreshold:  10,   // Need 10 requests minimum
+		ErrorThreshold:   0.5, // 50% error rate
+		VolumeThreshold:  10,  // Need 10 requests minimum
 		SleepWindow:      30 * time.Second,
 		HalfOpenRequests: 5,
-		SuccessThreshold: 0.6,  // 60% success to recover
+		SuccessThreshold: 0.6, // 60% success to recover
 		WindowSize:       60 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
@@ -161,8 +161,8 @@ func DefaultConfig() *CircuitBreakerConfig {
 
 // ExecutionToken tracks in-flight requests to prevent orphaned executions
 type ExecutionToken struct {
-	id        uint64
-	startTime time.Time
+	id         uint64
+	startTime  time.Time
 	isHalfOpen bool
 }
 
@@ -170,39 +170,39 @@ type ExecutionToken struct {
 type CircuitBreaker struct {
 	// Configuration
 	config *CircuitBreakerConfig
-	
+
 	// State management (using atomic for frequently accessed state)
 	state          atomic.Value // CircuitState
 	stateChangedAt atomic.Value // time.Time
 	generation     uint64
-	
+
 	// Metrics tracking
 	window *SlidingWindow
-	
+
 	// Half-open state management with atomic operations
 	halfOpenCount     atomic.Int32
-	halfOpenTotal     atomic.Int32  // Total requests allowed in current half-open period
+	halfOpenTotal     atomic.Int32 // Total requests allowed in current half-open period
 	halfOpenSuccesses atomic.Int32
 	halfOpenFailures  atomic.Int32
 	halfOpenTokens    sync.Map // map[uint64]ExecutionToken for tracking in-flight requests
 	tokenCounter      atomic.Uint64
-	
+
 	// Manual control
 	forceOpen   atomic.Bool
 	forceClosed atomic.Bool
-	
+
 	// Legacy compatibility
 	failureCount atomic.Int32
-	
+
 	// Error type cache to avoid allocations
 	errorTypeCache sync.Map // map[error]string
-	
+
 	// State change listeners
 	listeners []func(name string, from, to CircuitState)
-	
+
 	// Reduced lock contention - only for state transitions
 	mu sync.Mutex
-	
+
 	// Metrics for monitoring
 	executionsInFlight atomic.Int32
 	totalExecutions    atomic.Uint64
@@ -215,11 +215,11 @@ func NewCircuitBreaker(config *CircuitBreakerConfig) (*CircuitBreaker, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid circuit breaker config: %w", err)
 	}
-	
+
 	if config == nil {
 		config = DefaultConfig()
 	}
-	
+
 	// Apply defaults for missing values
 	if config.WindowSize == 0 {
 		config.WindowSize = 60 * time.Second
@@ -242,18 +242,18 @@ func NewCircuitBreaker(config *CircuitBreakerConfig) (*CircuitBreaker, error) {
 	if config.HalfOpenRequests == 0 {
 		config.HalfOpenRequests = 5
 	}
-	
+
 	cb := &CircuitBreaker{
 		config:     config,
 		generation: 0,
 		window:     NewSlidingWindow(config.WindowSize, config.BucketCount, true),
 		listeners:  make([]func(string, CircuitState, CircuitState), 0),
 	}
-	
+
 	// Initialize atomic values
 	cb.state.Store(StateClosed)
 	cb.stateChangedAt.Store(time.Now())
-	
+
 	return cb, nil
 }
 
@@ -271,25 +271,25 @@ func (cb *CircuitBreaker) ExecuteWithTimeout(ctx context.Context, timeout time.D
 		cb.config.Metrics.RecordRejection(cb.config.Name)
 		return fmt.Errorf("circuit breaker '%s' is open: %w", cb.config.Name, core.ErrCircuitBreakerOpen)
 	}
-	
+
 	// Track in-flight execution
 	cb.executionsInFlight.Add(1)
 	defer cb.executionsInFlight.Add(-1)
 	cb.totalExecutions.Add(1)
-	
+
 	// Setup timeout if specified
 	var cancel context.CancelFunc
 	if timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	
+
 	// Execute the function in a goroutine
 	done := make(chan error, 1)
 	go func() {
 		done <- fn()
 	}()
-	
+
 	// Wait for either completion or timeout
 	select {
 	case err := <-done:
@@ -317,18 +317,18 @@ func (cb *CircuitBreaker) startExecution() (ExecutionToken, bool) {
 	if cb.forceOpen.Load() {
 		return ExecutionToken{}, false
 	}
-	
+
 	currentState := cb.state.Load().(CircuitState)
-	
+
 	switch currentState {
 	case StateClosed:
 		// Always allow in closed state
 		return ExecutionToken{
-			id:        cb.tokenCounter.Add(1),
-			startTime: time.Now(),
+			id:         cb.tokenCounter.Add(1),
+			startTime:  time.Now(),
 			isHalfOpen: false,
 		}, true
-		
+
 	case StateOpen:
 		// Check if we should transition to half-open
 		stateChangedAt := cb.stateChangedAt.Load().(time.Time)
@@ -340,12 +340,12 @@ func (cb *CircuitBreaker) startExecution() (ExecutionToken, bool) {
 				cb.transitionToUnlocked(StateHalfOpen)
 			}
 			cb.mu.Unlock()
-			
+
 			// Retry after transition
 			return cb.startExecution()
 		}
 		return ExecutionToken{}, false
-		
+
 	case StateHalfOpen:
 		// Atomically check and increment total requests
 		for {
@@ -361,21 +361,21 @@ func (cb *CircuitBreaker) startExecution() (ExecutionToken, bool) {
 			}
 			// Someone else modified it, retry
 		}
-		
+
 		// Also track concurrent requests
 		cb.halfOpenCount.Add(1)
-		
+
 		token := ExecutionToken{
-			id:        cb.tokenCounter.Add(1),
-			startTime: time.Now(),
+			id:         cb.tokenCounter.Add(1),
+			startTime:  time.Now(),
 			isHalfOpen: true,
 		}
-		
+
 		// Track this token to prevent orphaned requests
 		cb.halfOpenTokens.Store(token.id, token)
-		
+
 		return token, true
-		
+
 	default:
 		return ExecutionToken{}, false
 	}
@@ -387,36 +387,36 @@ func (cb *CircuitBreaker) completeExecution(token ExecutionToken, err error) {
 	if cb.forceClosed.Load() || cb.forceOpen.Load() {
 		return
 	}
-	
+
 	// Clean up half-open token if applicable
 	if token.isHalfOpen {
 		cb.halfOpenTokens.Delete(token.id)
 		cb.halfOpenCount.Add(-1) // Decrement counter when request completes
 	}
-	
+
 	// Record in sliding window
 	if err == nil {
 		cb.window.RecordSuccess()
 		cb.config.Metrics.RecordSuccess(cb.config.Name)
-		
+
 		if token.isHalfOpen {
 			cb.halfOpenSuccesses.Add(1)
 		}
 	} else if cb.config.ErrorClassifier(err) {
 		cb.window.RecordFailure()
-		
+
 		// Cache error type to avoid allocation
 		errorType := cb.getErrorType(err)
 		cb.config.Metrics.RecordFailure(cb.config.Name, errorType)
-		
+
 		// Legacy failure counting
 		cb.failureCount.Add(1)
-		
+
 		if token.isHalfOpen {
 			cb.halfOpenFailures.Add(1)
 		}
 	}
-	
+
 	// Evaluate state
 	cb.evaluateState()
 }
@@ -426,7 +426,7 @@ func (cb *CircuitBreaker) getErrorType(err error) string {
 	if cached, ok := cb.errorTypeCache.Load(err); ok {
 		return cached.(string)
 	}
-	
+
 	// Use type assertion for common errors to avoid fmt.Sprintf
 	switch err.(type) {
 	case *core.FrameworkError:
@@ -449,13 +449,13 @@ func (cb *CircuitBreaker) getErrorType(err error) string {
 // evaluateState checks if state transition is needed
 func (cb *CircuitBreaker) evaluateState() {
 	currentState := cb.state.Load().(CircuitState)
-	
+
 	switch currentState {
 	case StateClosed:
 		// Check if we should open
 		errorRate := cb.window.GetErrorRate()
 		total := cb.window.GetTotal()
-		
+
 		// Use legacy threshold if set
 		if cb.config.FailureThreshold > 0 && int(cb.failureCount.Load()) >= cb.config.FailureThreshold {
 			cb.mu.Lock()
@@ -463,7 +463,7 @@ func (cb *CircuitBreaker) evaluateState() {
 			cb.mu.Unlock()
 			return
 		}
-		
+
 		// Use error rate threshold
 		// Safe comparison: VolumeThreshold is int, total is uint64
 		// #nosec G115 - VolumeThreshold is checked to be > 0 before conversion
@@ -472,16 +472,16 @@ func (cb *CircuitBreaker) evaluateState() {
 			cb.transitionToUnlocked(StateOpen)
 			cb.mu.Unlock()
 		}
-		
+
 	case StateHalfOpen:
 		// Check if we have enough test requests to make a decision
 		successes := cb.halfOpenSuccesses.Load()
 		failures := cb.halfOpenFailures.Load()
 		totalHalfOpen := successes + failures
-		
+
 		if cb.config.HalfOpenRequests > 0 && int(totalHalfOpen) >= cb.config.HalfOpenRequests {
 			successRate := float64(successes) / float64(totalHalfOpen)
-			
+
 			cb.mu.Lock()
 			if successRate >= cb.config.SuccessThreshold {
 				// Enough successes, close the circuit
@@ -507,15 +507,15 @@ func (cb *CircuitBreaker) transitionToUnlocked(newState CircuitState) {
 	if oldState == newState {
 		return
 	}
-	
+
 	cb.state.Store(newState)
 	cb.stateChangedAt.Store(time.Now())
 	cb.generation++
-	
+
 	// Reset half-open counters when entering half-open
 	if newState == StateHalfOpen {
 		cb.halfOpenCount.Store(0)
-		cb.halfOpenTotal.Store(0)  // Reset total count for new half-open period
+		cb.halfOpenTotal.Store(0) // Reset total count for new half-open period
 		cb.halfOpenSuccesses.Store(0)
 		cb.halfOpenFailures.Store(0)
 		// Clear any orphaned tokens
@@ -524,7 +524,7 @@ func (cb *CircuitBreaker) transitionToUnlocked(newState CircuitState) {
 			return true
 		})
 	}
-	
+
 	// Log state change
 	cb.config.Logger.Info("Circuit breaker state changed", map[string]interface{}{
 		"name":       cb.config.Name,
@@ -532,10 +532,10 @@ func (cb *CircuitBreaker) transitionToUnlocked(newState CircuitState) {
 		"to":         newState.String(),
 		"error_rate": cb.window.GetErrorRate(),
 	})
-	
+
 	// Record metrics
 	cb.config.Metrics.RecordStateChange(cb.config.Name, oldState.String(), newState.String())
-	
+
 	// Notify listeners
 	for _, listener := range cb.listeners {
 		go listener(cb.config.Name, oldState, newState)
@@ -558,28 +558,28 @@ func (cb *CircuitBreaker) GetState() string {
 func (cb *CircuitBreaker) GetMetrics() map[string]interface{} {
 	success, failure := cb.window.GetCounts()
 	total := success + failure
-	
+
 	metrics := map[string]interface{}{
-		"name":                cb.config.Name,
-		"state":               cb.GetState(),
-		"generation":          cb.generation,
-		"success":             success,
-		"failure":             failure,
-		"total":               total,
-		"error_rate":          cb.window.GetErrorRate(),
-		"force_open":          cb.forceOpen.Load(),
-		"force_closed":        cb.forceClosed.Load(),
+		"name":                 cb.config.Name,
+		"state":                cb.GetState(),
+		"generation":           cb.generation,
+		"success":              success,
+		"failure":              failure,
+		"total":                total,
+		"error_rate":           cb.window.GetErrorRate(),
+		"force_open":           cb.forceOpen.Load(),
+		"force_closed":         cb.forceClosed.Load(),
 		"executions_in_flight": cb.executionsInFlight.Load(),
-		"total_executions":    cb.totalExecutions.Load(),
-		"rejected_executions": cb.rejectedExecutions.Load(),
+		"total_executions":     cb.totalExecutions.Load(),
+		"rejected_executions":  cb.rejectedExecutions.Load(),
 	}
-	
+
 	currentState := cb.state.Load().(CircuitState)
 	if currentState == StateHalfOpen {
 		metrics["half_open_count"] = cb.halfOpenCount.Load()
 		metrics["half_open_successes"] = cb.halfOpenSuccesses.Load()
 		metrics["half_open_failures"] = cb.halfOpenFailures.Load()
-		
+
 		// Count orphaned tokens
 		orphaned := 0
 		now := time.Now()
@@ -592,7 +592,7 @@ func (cb *CircuitBreaker) GetMetrics() map[string]interface{} {
 		})
 		metrics["orphaned_requests"] = orphaned
 	}
-	
+
 	return metrics
 }
 
@@ -600,7 +600,7 @@ func (cb *CircuitBreaker) GetMetrics() map[string]interface{} {
 func (cb *CircuitBreaker) Reset() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	cb.state.Store(StateClosed)
 	cb.stateChangedAt.Store(time.Now())
 	cb.failureCount.Store(0)
@@ -608,13 +608,13 @@ func (cb *CircuitBreaker) Reset() {
 	cb.halfOpenSuccesses.Store(0)
 	cb.halfOpenFailures.Store(0)
 	cb.window = NewSlidingWindow(cb.config.WindowSize, cb.config.BucketCount, true)
-	
+
 	// Clear tokens
 	cb.halfOpenTokens.Range(func(key, value interface{}) bool {
 		cb.halfOpenTokens.Delete(key)
 		return true
 	})
-	
+
 	cb.config.Logger.Info("Circuit breaker reset", map[string]interface{}{
 		"name": cb.config.Name,
 	})
@@ -624,7 +624,7 @@ func (cb *CircuitBreaker) Reset() {
 func (cb *CircuitBreaker) ForceOpen() {
 	cb.forceOpen.Store(true)
 	cb.forceClosed.Store(false)
-	
+
 	cb.mu.Lock()
 	if cb.state.Load().(CircuitState) != StateOpen {
 		cb.transitionToUnlocked(StateOpen)
@@ -636,7 +636,7 @@ func (cb *CircuitBreaker) ForceOpen() {
 func (cb *CircuitBreaker) ForceClosed() {
 	cb.forceClosed.Store(true)
 	cb.forceOpen.Store(false)
-	
+
 	cb.mu.Lock()
 	if cb.state.Load().(CircuitState) != StateClosed {
 		cb.transitionToUnlocked(StateClosed)
@@ -654,7 +654,7 @@ func (cb *CircuitBreaker) ClearForce() {
 func (cb *CircuitBreaker) CleanupOrphanedRequests(maxAge time.Duration) int {
 	cleaned := 0
 	now := time.Now()
-	
+
 	cb.halfOpenTokens.Range(func(key, value interface{}) bool {
 		token := value.(ExecutionToken)
 		if now.Sub(token.startTime) > maxAge {
@@ -665,7 +665,7 @@ func (cb *CircuitBreaker) CleanupOrphanedRequests(maxAge time.Duration) int {
 		}
 		return true
 	})
-	
+
 	return cleaned
 }
 
@@ -674,39 +674,39 @@ func (c *CircuitBreakerConfig) Validate() error {
 	if c == nil {
 		return errors.New("configuration cannot be nil")
 	}
-	
+
 	if c.Name == "" {
 		return errors.New("circuit breaker name is required")
 	}
-	
+
 	if c.ErrorThreshold < 0 || c.ErrorThreshold > 1 {
 		return fmt.Errorf("error threshold must be between 0 and 1, got %f", c.ErrorThreshold)
 	}
-	
+
 	if c.VolumeThreshold < 0 {
 		return fmt.Errorf("volume threshold must be non-negative, got %d", c.VolumeThreshold)
 	}
-	
+
 	if c.SuccessThreshold < 0 || c.SuccessThreshold > 1 {
 		return fmt.Errorf("success threshold must be between 0 and 1, got %f", c.SuccessThreshold)
 	}
-	
+
 	if c.HalfOpenRequests < 1 {
 		return fmt.Errorf("half-open requests must be at least 1, got %d", c.HalfOpenRequests)
 	}
-	
+
 	if c.SleepWindow < 0 {
 		return fmt.Errorf("sleep window must be non-negative, got %v", c.SleepWindow)
 	}
-	
+
 	if c.WindowSize < 0 {
 		return fmt.Errorf("window size must be non-negative, got %v", c.WindowSize)
 	}
-	
+
 	if c.BucketCount < 1 {
 		return fmt.Errorf("bucket count must be at least 1, got %d", c.BucketCount)
 	}
-	
+
 	return nil
 }
 
@@ -719,13 +719,13 @@ type bucket struct {
 
 // SlidingWindow with time skew protection
 type SlidingWindow struct {
-	buckets       []bucket
-	windowSize    time.Duration
-	bucketSize    time.Duration
-	currentIdx    int
-	lastRotation  time.Time
-	mu            sync.RWMutex
-	monotonic     bool // Use monotonic time to avoid skew
+	buckets      []bucket
+	windowSize   time.Duration
+	bucketSize   time.Duration
+	currentIdx   int
+	lastRotation time.Time
+	mu           sync.RWMutex
+	monotonic    bool // Use monotonic time to avoid skew
 }
 
 // NewSlidingWindow creates a sliding window with time skew protection
@@ -733,15 +733,15 @@ func NewSlidingWindow(windowSize time.Duration, bucketCount int, monotonic bool)
 	if bucketCount <= 0 {
 		bucketCount = 10
 	}
-	
+
 	bucketSize := windowSize / time.Duration(bucketCount)
 	buckets := make([]bucket, bucketCount)
 	now := time.Now()
-	
+
 	for i := range buckets {
 		buckets[i].timestamp = now
 	}
-	
+
 	return &SlidingWindow{
 		buckets:      buckets,
 		windowSize:   windowSize,
@@ -754,7 +754,7 @@ func NewSlidingWindow(windowSize time.Duration, bucketCount int, monotonic bool)
 // rotateBuckets with time skew protection
 func (sw *SlidingWindow) rotateBuckets() {
 	now := time.Now()
-	
+
 	var elapsed time.Duration
 	if sw.monotonic {
 		// Use monotonic time (won't jump backward)
@@ -762,20 +762,20 @@ func (sw *SlidingWindow) rotateBuckets() {
 	} else {
 		elapsed = now.Sub(sw.buckets[sw.currentIdx].timestamp)
 	}
-	
+
 	// Handle time skew - if time went backward, reset
 	if elapsed < 0 {
 		sw.reset()
 		return
 	}
-	
+
 	// Normal rotation
 	if elapsed >= sw.bucketSize {
 		bucketsToRotate := int(elapsed / sw.bucketSize)
 		if bucketsToRotate > len(sw.buckets) {
 			bucketsToRotate = len(sw.buckets)
 		}
-		
+
 		for i := 0; i < bucketsToRotate; i++ {
 			sw.currentIdx = (sw.currentIdx + 1) % len(sw.buckets)
 			sw.buckets[sw.currentIdx] = bucket{
@@ -784,7 +784,7 @@ func (sw *SlidingWindow) rotateBuckets() {
 				failure:   0,
 			}
 		}
-		
+
 		sw.lastRotation = now
 	}
 }
@@ -807,7 +807,7 @@ func (sw *SlidingWindow) reset() {
 func (sw *SlidingWindow) RecordSuccess() {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
-	
+
 	sw.rotateBuckets()
 	atomic.AddUint64(&sw.buckets[sw.currentIdx].success, 1)
 }
@@ -816,7 +816,7 @@ func (sw *SlidingWindow) RecordSuccess() {
 func (sw *SlidingWindow) RecordFailure() {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
-	
+
 	sw.rotateBuckets()
 	atomic.AddUint64(&sw.buckets[sw.currentIdx].failure, 1)
 }
@@ -825,9 +825,9 @@ func (sw *SlidingWindow) RecordFailure() {
 func (sw *SlidingWindow) GetCounts() (success, failure uint64) {
 	sw.mu.RLock()
 	defer sw.mu.RUnlock()
-	
+
 	cutoff := time.Now().Add(-sw.windowSize)
-	
+
 	for i := range sw.buckets {
 		b := &sw.buckets[i]
 		if b.timestamp.After(cutoff) {
@@ -835,7 +835,7 @@ func (sw *SlidingWindow) GetCounts() (success, failure uint64) {
 			failure += atomic.LoadUint64(&b.failure)
 		}
 	}
-	
+
 	return success, failure
 }
 
@@ -906,8 +906,8 @@ func NewCircuitBreakerLegacy(failureThreshold int, recoveryTimeout time.Duration
 		RecoveryTimeout:  recoveryTimeout,
 		SleepWindow:      recoveryTimeout,
 		ErrorThreshold:   0.5,
-		VolumeThreshold:  1, // Set to 1 for backward compatibility with old behavior
-		HalfOpenRequests: 1, // Only allow 1 test request in half-open for simpler behavior
+		VolumeThreshold:  1,   // Set to 1 for backward compatibility with old behavior
+		HalfOpenRequests: 1,   // Only allow 1 test request in half-open for simpler behavior
 		SuccessThreshold: 0.5, // Lower threshold for easier recovery
 		WindowSize:       60 * time.Second,
 		BucketCount:      10,

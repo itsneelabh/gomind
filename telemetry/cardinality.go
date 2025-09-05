@@ -8,8 +8,8 @@ import (
 // CardinalityLimiter prevents unbounded metric cardinality
 type CardinalityLimiter struct {
 	limits map[string]int
-	seen   sync.Map  // Thread-safe: map[metricLabel]map[value]time.Time
-	
+	seen   sync.Map // Thread-safe: map[metricLabel]map[value]time.Time
+
 	// Cleanup control
 	stopChan chan struct{}
 	stopped  sync.Once
@@ -29,32 +29,32 @@ func NewCardinalityLimiter(limits map[string]int) *CardinalityLimiter {
 // CheckAndLimit checks and limits cardinality for a metric label
 func (c *CardinalityLimiter) CheckAndLimit(metric, label, value string) string {
 	key := metric + "." + label
-	
+
 	// Check if we have a limit for this label
 	limit, hasLimit := c.limits[label]
 	if !hasLimit {
 		// No limit defined, pass through
 		return value
 	}
-	
+
 	// Load or create the value map
 	valMapI, _ := c.seen.LoadOrStore(key, &sync.Map{})
 	valMap := valMapI.(*sync.Map)
-	
+
 	// Check current cardinality
 	count := 0
 	valMap.Range(func(k, v interface{}) bool {
 		count++
 		return count < limit
 	})
-	
+
 	if count >= limit {
 		// Check if this value exists
 		if _, exists := valMap.Load(value); !exists {
-			return "other"  // Over limit, use "other"
+			return "other" // Over limit, use "other"
 		}
 	}
-	
+
 	// Store with timestamp for cleanup
 	valMap.Store(value, time.Now())
 	return value
@@ -89,7 +89,7 @@ func (c *CardinalityLimiter) MaxCardinality() int {
 func (c *CardinalityLimiter) cleanupLoop() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:

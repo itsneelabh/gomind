@@ -2,7 +2,7 @@ package resilience
 
 import (
 	"context"
-	
+
 	"github.com/itsneelabh/gomind/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -24,7 +24,7 @@ func NewOTelMetricsCollector(ctx context.Context) *OTelMetricsCollector {
 
 // RecordSuccess records a successful circuit breaker execution
 func (o *OTelMetricsCollector) RecordSuccess(name string) {
-	o.metrics.RecordCounter(o.ctx, telemetry.MetricCircuitBreakerSuccess, 1,
+	_ = o.metrics.RecordCounter(o.ctx, telemetry.MetricCircuitBreakerSuccess, 1,
 		metric.WithAttributes(
 			attribute.String("circuit_breaker", name),
 			attribute.String("result", "success"),
@@ -33,7 +33,7 @@ func (o *OTelMetricsCollector) RecordSuccess(name string) {
 
 // RecordFailure records a failed circuit breaker execution
 func (o *OTelMetricsCollector) RecordFailure(name string, errorType string) {
-	o.metrics.RecordCounter(o.ctx, telemetry.MetricCircuitBreakerFailure, 1,
+	_ = o.metrics.RecordCounter(o.ctx, telemetry.MetricCircuitBreakerFailure, 1,
 		metric.WithAttributes(
 			attribute.String("circuit_breaker", name),
 			attribute.String("error_type", errorType),
@@ -44,13 +44,13 @@ func (o *OTelMetricsCollector) RecordFailure(name string, errorType string) {
 // RecordStateChange records a circuit breaker state transition
 func (o *OTelMetricsCollector) RecordStateChange(name string, from, to string) {
 	// Record the state change as an event/counter
-	o.metrics.RecordCounter(o.ctx, "circuit_breaker.state_change", 1,
+	_ = o.metrics.RecordCounter(o.ctx, "circuit_breaker.state_change", 1,
 		metric.WithAttributes(
 			attribute.String("circuit_breaker", name),
 			attribute.String("from_state", from),
 			attribute.String("to_state", to),
 		))
-	
+
 	// Also update a gauge for current state
 	// This would need a callback registration in practice
 	stateValue := 0.0
@@ -62,8 +62,8 @@ func (o *OTelMetricsCollector) RecordStateChange(name string, from, to string) {
 	case "half_open":
 		stateValue = 0.5
 	}
-	
-	o.metrics.RecordHistogram(o.ctx, "circuit_breaker.state", stateValue,
+
+	_ = o.metrics.RecordHistogram(o.ctx, "circuit_breaker.state", stateValue,
 		metric.WithAttributes(
 			attribute.String("circuit_breaker", name),
 			attribute.String("state", to),
@@ -72,7 +72,7 @@ func (o *OTelMetricsCollector) RecordStateChange(name string, from, to string) {
 
 // RecordRejection records when circuit breaker rejects a request
 func (o *OTelMetricsCollector) RecordRejection(name string) {
-	o.metrics.RecordCounter(o.ctx, telemetry.MetricCircuitBreakerRejected, 1,
+	_ = o.metrics.RecordCounter(o.ctx, telemetry.MetricCircuitBreakerRejected, 1,
 		metric.WithAttributes(
 			attribute.String("circuit_breaker", name),
 			attribute.String("result", "rejected"),
@@ -94,7 +94,7 @@ func (o *OTelMetricsCollector) RegisterStateGauge(name string, stateFunc func() 
 			case "half_open":
 				stateValue = 0.5
 			}
-			
+
 			observer.(metric.Float64Observer).Observe(stateValue,
 				metric.WithAttributes(
 					attribute.String("circuit_breaker", name),

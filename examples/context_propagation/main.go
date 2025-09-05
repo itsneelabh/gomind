@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"github.com/itsneelabh/gomind/telemetry"
@@ -25,13 +25,24 @@ type Response struct {
 	Body       string
 }
 
+// Simulation counters for deterministic behavior
+var (
+	authCounter  atomic.Uint32
+	dbCounter    atomic.Uint32
+	cacheCounter atomic.Uint32
+)
+
 func main() {
 	// Initialize telemetry
 	err := telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
 	if err != nil {
 		log.Fatalf("Failed to initialize telemetry: %v", err)
 	}
-	defer telemetry.Shutdown(context.Background())
+	defer func() {
+		if err := telemetry.Shutdown(context.Background()); err != nil {
+			log.Printf("Failed to shutdown telemetry: %v", err)
+		}
+	}()
 
 	// Simulate handling multiple requests
 	requests := []Request{
@@ -40,7 +51,7 @@ func main() {
 		{ID: "req-003", UserID: "user-789", TenantID: "tenant-abc", Path: "/api/products", Method: "GET"},
 	}
 
-	fmt.Println("=== Context Propagation Example ===\n")
+	fmt.Println("=== Context Propagation Example ===")
 
 	for _, req := range requests {
 		fmt.Printf("Processing request %s\n", req.ID)
@@ -106,7 +117,8 @@ func authenticateUser(ctx context.Context, userID string) error {
 	// Simulate auth check
 	time.Sleep(5 * time.Millisecond)
 
-	if rand.Float32() > 0.1 { // 90% success rate
+	// Deterministic simulation: fail every 10th request
+	if authCounter.Add(1)%10 != 0 { // 90% success rate
 		telemetry.EmitWithContext(ctx, "auth.success", 1)
 		return nil
 	}
@@ -138,7 +150,8 @@ func fetchFromDatabase(ctx context.Context, key string) (string, error) {
 	telemetry.EmitWithContext(ctx, "db.cache.miss", 1)
 
 	// Simulate fetching from database
-	if rand.Float32() > 0.05 { // 95% success rate
+	// Deterministic simulation: fail every 20th request
+	if dbCounter.Add(1)%20 != 0 { // 95% success rate
 		telemetry.EmitWithContext(ctx, "db.query.success", 1)
 		return fmt.Sprintf("data_for_%s", key), nil
 	}
@@ -153,7 +166,9 @@ func checkCache(ctx context.Context, key string) string {
 	telemetry.EmitWithContext(ctx, "cache.lookup", 1)
 
 	// Simulate cache lookup
-	if rand.Float32() > 0.7 { // 30% hit rate
+	// Deterministic simulation: hit every 3rd and 10th request
+	count := cacheCounter.Add(1)
+	if count%3 == 0 || count%10 == 0 { // ~30% hit rate
 		return fmt.Sprintf("cached_%s", key)
 	}
 	return ""

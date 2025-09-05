@@ -9,17 +9,17 @@ type Config struct {
 	ServiceName string
 	Endpoint    string
 	Provider    string // "otel", "prometheus", "statsd"
-	
+
 	// Sampling configuration
 	SamplingRate float64
-	
+
 	// Cardinality control
 	CardinalityLimit  int
 	CardinalityLimits map[string]int // Per-label limits
-	
+
 	// Circuit breaker configuration
 	CircuitBreaker CircuitConfig
-	
+
 	// PII redaction
 	PIIRedaction bool
 	PIIPatterns  []string
@@ -121,6 +121,6 @@ func (c Config) WithOverrides(overrides Config) Config {
 	if len(overrides.PIIPatterns) > 0 {
 		c.PIIPatterns = overrides.PIIPatterns
 	}
-	
+
 	return c
 }

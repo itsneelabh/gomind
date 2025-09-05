@@ -22,12 +22,12 @@ type Agent interface {
 
 // Capability represents a capability that an agent provides
 type Capability struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Endpoint    string              `json:"endpoint"`
-	InputTypes  []string            `json:"input_types"`
-	OutputTypes []string            `json:"output_types"`
-	Handler     http.HandlerFunc    `json:"-"` // Optional custom handler, excluded from JSON
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Endpoint    string           `json:"endpoint"`
+	InputTypes  []string         `json:"input_types"`
+	OutputTypes []string         `json:"output_types"`
+	Handler     http.HandlerFunc `json:"-"` // Optional custom handler, excluded from JSON
 }
 
 // BaseAgent provides the core agent functionality (Tool Builder Kit)
@@ -51,11 +51,11 @@ type BaseAgent struct {
 	// HTTP server
 	server *http.Server
 	mux    *http.ServeMux
-	
+
 	// Handler registration tracking
-	registeredPatterns map[string]bool  // Track registered patterns to prevent duplicates
-	serverStarted      bool             // Track if server has started
-	mu                 sync.RWMutex     // Protect concurrent access
+	registeredPatterns map[string]bool // Track registered patterns to prevent duplicates
+	serverStarted      bool            // Track if server has started
+	mu                 sync.RWMutex    // Protect concurrent access
 }
 
 // NewBaseAgent creates a new base agent with minimal dependencies
@@ -70,24 +70,24 @@ func NewBaseAgentWithConfig(config *Config) *BaseAgent {
 	if config == nil {
 		config = DefaultConfig()
 	}
-	
+
 	// Ensure name is set
 	if config.Name == "" {
 		config.Name = "gomind-agent"
 	}
-	
+
 	// Generate ID if not set
 	if config.ID == "" {
 		config.ID = fmt.Sprintf("%s-%s", config.Name, uuid.New().String()[:8])
 	}
-	
+
 	return &BaseAgent{
 		ID:                 config.ID,
 		Name:               config.Name,
 		Capabilities:       []Capability{},
-		Logger:             &NoOpLogger{},  // Will be initialized based on config
-		Memory:             NewInMemoryStore(),  // Will be initialized based on config
-		Telemetry:          &NoOpTelemetry{},  // Will be initialized based on config
+		Logger:             &NoOpLogger{},      // Will be initialized based on config
+		Memory:             NewInMemoryStore(), // Will be initialized based on config
+		Telemetry:          &NoOpTelemetry{},   // Will be initialized based on config
 		Config:             config,
 		mux:                http.NewServeMux(),
 		registeredPatterns: make(map[string]bool),
@@ -124,7 +124,7 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 				}
 			}
 		}
-		
+
 		// Initialize memory based on config
 		if b.Config.Memory.Provider == "redis" && b.Config.Memory.RedisURL != "" {
 			// TODO: Initialize Redis memory when available
@@ -210,28 +210,28 @@ func (b *BaseAgent) GetCapabilities() []Capability {
 func (b *BaseAgent) HandleFunc(pattern string, handler http.HandlerFunc) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	// Check if server has already started
 	if b.serverStarted {
 		// Keep the exact error message for backward compatibility with tests
 		return fmt.Errorf("cannot register handler for pattern %s: server already started", pattern)
 	}
-	
+
 	// Check for duplicate pattern registration
 	if b.registeredPatterns[pattern] {
 		// Keep the exact error message for backward compatibility with tests
 		return fmt.Errorf("handler already registered for pattern: %s", pattern)
 	}
-	
+
 	// Register the handler
 	b.mux.HandleFunc(pattern, handler)
 	b.registeredPatterns[pattern] = true
-	
+
 	// Log the registration
 	b.Logger.Info("Registered custom handler", map[string]interface{}{
 		"pattern": pattern,
 	})
-	
+
 	return nil
 }
 
@@ -241,16 +241,16 @@ func (b *BaseAgent) HandleFunc(pattern string, handler http.HandlerFunc) error {
 func (b *BaseAgent) RegisterCapability(cap Capability) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	// Auto-generate endpoint if not provided
 	endpoint := cap.Endpoint
 	if endpoint == "" {
 		endpoint = fmt.Sprintf("/api/capabilities/%s", cap.Name)
 	}
-	
+
 	// Update the capability's endpoint for consistency
 	cap.Endpoint = endpoint
-	
+
 	// Append to capabilities list
 	b.Capabilities = append(b.Capabilities, cap)
 
@@ -262,13 +262,13 @@ func (b *BaseAgent) RegisterCapability(cap Capability) {
 		// Use generic handler with telemetry and logging
 		b.mux.HandleFunc(endpoint, b.handleCapabilityRequest(cap))
 	}
-	
+
 	// Track this pattern internally
 	b.registeredPatterns[endpoint] = true
 
 	b.Logger.Info("Registered capability", map[string]interface{}{
-		"name":          cap.Name,
-		"endpoint":      endpoint,
+		"name":           cap.Name,
+		"endpoint":       endpoint,
 		"custom_handler": cap.Handler != nil,
 	})
 }
@@ -332,17 +332,17 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 // Start starts the HTTP server for the agent
 func (b *BaseAgent) Start(port int) error {
 	b.mu.Lock()
-	
+
 	// Check if already started
 	if b.serverStarted {
 		b.mu.Unlock()
 		return fmt.Errorf("server already started")
 	}
-	
+
 	if b.Config != nil && b.Config.Port != 0 {
 		port = b.Config.Port
 	}
-	
+
 	addr := fmt.Sprintf("%s:%d", b.Config.Address, port)
 	if b.Config.Address == "" {
 		addr = fmt.Sprintf(":%d", port)
@@ -399,7 +399,7 @@ func (b *BaseAgent) Start(port int) error {
 	if b.Config.HTTP.CORS.Enabled {
 		handler = CORSMiddleware(&b.Config.HTTP.CORS)(handler)
 	}
-	
+
 	// Always wrap with panic recovery middleware
 	handler = RecoveryMiddleware(b.Logger)(handler)
 
@@ -414,8 +414,8 @@ func (b *BaseAgent) Start(port int) error {
 
 	// Mark server as started (before actually starting to prevent race conditions)
 	b.serverStarted = true
-	b.mu.Unlock()  // Unlock before blocking ListenAndServe call
-	
+	b.mu.Unlock() // Unlock before blocking ListenAndServe call
+
 	b.Logger.Info("Starting HTTP server", map[string]interface{}{
 		"address": addr,
 		"cors":    b.Config.HTTP.CORS.Enabled,
@@ -428,7 +428,7 @@ func (b *BaseAgent) Start(port int) error {
 func (b *BaseAgent) Stop(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	
+
 	if b.server != nil {
 		// Use configured shutdown timeout or context deadline
 		shutdownCtx := ctx
@@ -437,7 +437,7 @@ func (b *BaseAgent) Stop(ctx context.Context) error {
 			shutdownCtx, cancel = context.WithTimeout(ctx, b.Config.HTTP.ShutdownTimeout)
 			defer cancel()
 		}
-		
+
 		// Unregister from discovery if available
 		if b.Discovery != nil && b.Config.Discovery.Enabled {
 			if err := b.Discovery.Unregister(shutdownCtx, b.ID); err != nil {
@@ -449,10 +449,10 @@ func (b *BaseAgent) Stop(ctx context.Context) error {
 				})
 			}
 		}
-		
+
 		// Reset server state
 		b.serverStarted = false
-		
+
 		return b.server.Shutdown(shutdownCtx)
 	}
 	return nil
@@ -476,10 +476,10 @@ func RecoveryMiddleware(logger Logger) func(http.Handler) http.Handler {
 						})
 					} else {
 						// Fallback to standard logging if no logger available
-						fmt.Printf("HTTP handler panic recovered: %v\nPath: %s\nMethod: %s\nStack trace:\n%s\n", 
+						fmt.Printf("HTTP handler panic recovered: %v\nPath: %s\nMethod: %s\nStack trace:\n%s\n",
 							err, r.URL.Path, r.Method, stackTrace)
 					}
-					
+
 					// Return Internal Server Error to client
 					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				}
@@ -502,7 +502,7 @@ func NewFramework(agent Agent, opts ...Option) (*Framework, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
-	
+
 	// If agent is a BaseAgent, update its config
 	if base, ok := agent.(*BaseAgent); ok {
 		base.Config = config
@@ -511,7 +511,7 @@ func NewFramework(agent Agent, opts ...Option) (*Framework, error) {
 			base.ID = config.ID
 		}
 	}
-	
+
 	return &Framework{
 		agent:  agent,
 		config: config,

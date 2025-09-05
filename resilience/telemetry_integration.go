@@ -33,7 +33,7 @@ func (t *TelemetryMetrics) RecordStateChange(name string, from, to string) {
 		"name", name,
 		"from_state", from,
 		"to_state", to)
-	
+
 	// Also update the current state gauge
 	stateValue := 0.0
 	switch to {
@@ -53,27 +53,27 @@ func (t *TelemetryMetrics) RecordRejection(name string) {
 // ExecuteWithTelemetry wraps circuit breaker execution with telemetry
 func ExecuteWithTelemetry(cb *CircuitBreaker, ctx context.Context, fn func() error) error {
 	start := time.Now()
-	
+
 	// Emit the current state before execution
 	state := cb.GetState()
-	telemetry.Emit("circuit_breaker.calls", 1, 
-		"name", cb.config.Name, 
+	telemetry.Emit("circuit_breaker.calls", 1,
+		"name", cb.config.Name,
 		"state", string(state))
-	
+
 	// Execute the function
 	err := cb.Execute(ctx, fn)
-	
+
 	// Record duration
 	duration := float64(time.Since(start).Milliseconds())
 	status := "success"
 	if err != nil {
 		status = "failure"
 	}
-	
+
 	telemetry.Histogram("circuit_breaker.duration_ms", duration,
 		"name", cb.config.Name,
 		"status", status)
-	
+
 	return err
 }
 
@@ -82,7 +82,7 @@ func NewCircuitBreakerWithTelemetry(name string) (*CircuitBreaker, error) {
 	config := DefaultConfig()
 	config.Name = name
 	config.Metrics = NewTelemetryMetrics() // Use telemetry-based metrics
-	
+
 	return NewCircuitBreaker(config)
 }
 
@@ -93,58 +93,58 @@ func RetryWithTelemetry(ctx context.Context, operation string, config *RetryConf
 	}
 	maxAttempts := config.MaxAttempts
 	start := time.Now()
-	
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Track attempt
-		telemetry.Counter("retry.attempts", 
+		telemetry.Counter("retry.attempts",
 			"operation", operation,
 			"attempt_number", fmt.Sprintf("%d", attempt))
-		
+
 		// Execute the function
 		err := fn()
-		
+
 		if err == nil {
 			// Success
 			telemetry.Counter("retry.success",
 				"operation", operation,
 				"final_attempt", fmt.Sprintf("%d", attempt))
-			
+
 			// Record total duration
 			duration := float64(time.Since(start).Milliseconds())
 			telemetry.Histogram("retry.duration_ms", duration,
 				"operation", operation,
 				"status", "success")
-			
+
 			return nil
 		}
-		
+
 		// If this was the last attempt, record failure
 		if attempt == maxAttempts {
 			telemetry.Counter("retry.failures",
 				"operation", operation,
 				"error_type", fmt.Sprintf("%T", err))
-			
+
 			// Record total duration
 			duration := float64(time.Since(start).Milliseconds())
 			telemetry.Histogram("retry.duration_ms", duration,
 				"operation", operation,
 				"status", "failure")
-			
+
 			return err
 		}
-		
+
 		// Calculate and apply backoff
 		if attempt < maxAttempts {
 			delay := config.InitialDelay * time.Duration(float64(attempt-1)*config.BackoffFactor)
 			if delay > config.MaxDelay {
 				delay = config.MaxDelay
 			}
-			
+
 			// Record backoff duration
 			telemetry.Histogram("retry.backoff_ms", float64(delay.Milliseconds()),
 				"operation", operation,
 				"strategy", "exponential")
-			
+
 			// Check context before sleeping
 			select {
 			case <-ctx.Done():
@@ -153,6 +153,6 @@ func RetryWithTelemetry(ctx context.Context, operation string, config *RetryConf
 			}
 		}
 	}
-	
+
 	return fmt.Errorf("retry exhausted after %d attempts", maxAttempts)
 }

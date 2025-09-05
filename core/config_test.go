@@ -15,39 +15,39 @@ import (
 // TestDefaultConfig verifies that DefaultConfig returns valid defaults
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	
+
 	assert.NotNil(t, cfg)
 	assert.Equal(t, "gomind-agent", cfg.Name)
 	assert.Equal(t, 8080, cfg.Port)
 	assert.Equal(t, "default", cfg.Namespace)
-	
+
 	// HTTP defaults
 	assert.Equal(t, 30*time.Second, cfg.HTTP.ReadTimeout)
 	assert.Equal(t, 30*time.Second, cfg.HTTP.WriteTimeout)
 	assert.Equal(t, 120*time.Second, cfg.HTTP.IdleTimeout)
 	assert.True(t, cfg.HTTP.EnableHealthCheck)
 	assert.Equal(t, "/health", cfg.HTTP.HealthCheckPath)
-	
+
 	// CORS defaults (should be disabled for security)
 	assert.False(t, cfg.HTTP.CORS.Enabled)
 	assert.Equal(t, []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}, cfg.HTTP.CORS.AllowedMethods)
-	
+
 	// Discovery defaults (disabled for local dev)
 	assert.False(t, cfg.Discovery.Enabled)
 	assert.Equal(t, "redis", cfg.Discovery.Provider)
-	
+
 	// AI defaults (disabled without key)
 	assert.False(t, cfg.AI.Enabled)
 	assert.Equal(t, "openai", cfg.AI.Provider)
 	assert.Equal(t, "gpt-4", cfg.AI.Model)
-	
+
 	// Telemetry defaults (disabled by default)
 	assert.False(t, cfg.Telemetry.Enabled)
-	
+
 	// Memory defaults
 	assert.Equal(t, "inmemory", cfg.Memory.Provider)
 	assert.Equal(t, 1000, cfg.Memory.MaxSize)
-	
+
 	// Logging defaults
 	assert.Equal(t, "info", cfg.Logging.Level)
 }
@@ -58,23 +58,23 @@ func TestDetectEnvironment(t *testing.T) {
 		// Set Kubernetes environment variable
 		_ = os.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
 		defer func() { _ = os.Unsetenv("KUBERNETES_SERVICE_HOST") }()
-		
+
 		cfg := DefaultConfig()
-		
+
 		assert.True(t, cfg.Kubernetes.Enabled)
 		assert.Equal(t, "0.0.0.0", cfg.Address)
 		assert.True(t, cfg.Discovery.Enabled)
 		assert.Equal(t, "redis://redis.default.svc.cluster.local:6379", cfg.Discovery.RedisURL)
 		assert.Equal(t, "json", cfg.Logging.Format)
 	})
-	
+
 	t.Run("Local environment", func(t *testing.T) {
 		// Ensure no Kubernetes env var
 		_ = os.Unsetenv("KUBERNETES_SERVICE_HOST")
 		_ = os.Unsetenv("GOMIND_DEV_MODE")
-		
+
 		cfg := DefaultConfig()
-		
+
 		assert.False(t, cfg.Kubernetes.Enabled)
 		assert.Equal(t, "localhost", cfg.Address)
 		assert.Equal(t, "redis://localhost:6379", cfg.Discovery.RedisURL)
@@ -106,17 +106,17 @@ func TestLoadFromEnv(t *testing.T) {
 		"GOMIND_MOCK_AI":          "true",
 		"GOMIND_MOCK_DISCOVERY":   "true",
 	}
-	
+
 	// Set environment variables
 	for k, v := range testEnv {
 		_ = os.Setenv(k, v)
 		defer func() { _ = os.Unsetenv(k) }()
 	}
-	
+
 	cfg := DefaultConfig()
 	err := cfg.LoadFromEnv()
 	require.NoError(t, err)
-	
+
 	// Verify values loaded from environment
 	assert.Equal(t, "test-agent", cfg.Name)
 	assert.Equal(t, "test-123", cfg.ID)
@@ -125,21 +125,21 @@ func TestLoadFromEnv(t *testing.T) {
 	assert.Equal(t, "testing", cfg.Namespace)
 	assert.Equal(t, "debug", cfg.Logging.Level)
 	assert.Equal(t, "text", cfg.Logging.Format) // Dev mode sets text format
-	
+
 	// CORS configuration
 	assert.True(t, cfg.HTTP.CORS.Enabled)
 	assert.Equal(t, []string{"https://example.com", "https://*.example.com"}, cfg.HTTP.CORS.AllowedOrigins)
 	assert.True(t, cfg.HTTP.CORS.AllowCredentials)
-	
+
 	// Discovery configuration
 	assert.Equal(t, "redis://test-redis:6379", cfg.Discovery.RedisURL)
 	assert.False(t, cfg.Discovery.CacheEnabled)
-	
+
 	// AI configuration
 	assert.True(t, cfg.AI.Enabled)
 	assert.Equal(t, "sk-test-key", cfg.AI.APIKey)
 	assert.Equal(t, "gpt-4-turbo", cfg.AI.Model)
-	
+
 	// Development configuration
 	assert.True(t, cfg.Development.Enabled)
 	assert.True(t, cfg.Development.MockAI)
@@ -151,7 +151,7 @@ func TestLoadFromFile(t *testing.T) {
 	// Create temporary config file
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "config.json")
-	
+
 	configData := map[string]interface{}{
 		"name":      "file-agent",
 		"port":      8888,
@@ -171,17 +171,17 @@ func TestLoadFromFile(t *testing.T) {
 			"format": "text",
 		},
 	}
-	
+
 	jsonData, err := json.MarshalIndent(configData, "", "  ")
 	require.NoError(t, err)
-	
+
 	err = os.WriteFile(configFile, jsonData, 0644)
 	require.NoError(t, err)
-	
+
 	cfg := DefaultConfig()
 	err = cfg.LoadFromFile(configFile)
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, "file-agent", cfg.Name)
 	assert.Equal(t, 8888, cfg.Port)
 	assert.Equal(t, "file-namespace", cfg.Namespace)
@@ -276,12 +276,12 @@ func TestValidate(t *testing.T) {
 			wantErr: "",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := DefaultConfig()
 			tt.setup(cfg)
-			
+
 			err := cfg.Validate()
 			if tt.wantErr == "" {
 				assert.NoError(t, err)
@@ -300,30 +300,30 @@ func TestFunctionalOptions(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "custom-agent", cfg.Name)
 	})
-	
+
 	t.Run("WithPort", func(t *testing.T) {
 		cfg, err := NewConfig(WithPort(9999))
 		require.NoError(t, err)
 		assert.Equal(t, 9999, cfg.Port)
-		
+
 		// Test invalid port
 		_, err = NewConfig(WithPort(0))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid port")
 	})
-	
+
 	t.Run("WithAddress", func(t *testing.T) {
 		cfg, err := NewConfig(WithAddress("127.0.0.1"))
 		require.NoError(t, err)
 		assert.Equal(t, "127.0.0.1", cfg.Address)
 	})
-	
+
 	t.Run("WithNamespace", func(t *testing.T) {
 		cfg, err := NewConfig(WithNamespace("production"))
 		require.NoError(t, err)
 		assert.Equal(t, "production", cfg.Namespace)
 	})
-	
+
 	t.Run("WithCORS", func(t *testing.T) {
 		origins := []string{"https://example.com", "https://*.example.com"}
 		cfg, err := NewConfig(WithCORS(origins, true))
@@ -332,7 +332,7 @@ func TestFunctionalOptions(t *testing.T) {
 		assert.Equal(t, origins, cfg.HTTP.CORS.AllowedOrigins)
 		assert.True(t, cfg.HTTP.CORS.AllowCredentials)
 	})
-	
+
 	t.Run("WithCORSDefaults", func(t *testing.T) {
 		cfg, err := NewConfig(WithCORSDefaults())
 		require.NoError(t, err)
@@ -340,7 +340,7 @@ func TestFunctionalOptions(t *testing.T) {
 		assert.Equal(t, []string{"*"}, cfg.HTTP.CORS.AllowedOrigins)
 		assert.True(t, cfg.HTTP.CORS.AllowCredentials)
 	})
-	
+
 	t.Run("WithRedisURL", func(t *testing.T) {
 		url := "redis://custom-redis:6379"
 		cfg, err := NewConfig(WithRedisURL(url))
@@ -349,20 +349,20 @@ func TestFunctionalOptions(t *testing.T) {
 		assert.Equal(t, url, cfg.Memory.RedisURL)
 		assert.True(t, cfg.Discovery.Enabled)
 	})
-	
+
 	t.Run("WithDiscovery", func(t *testing.T) {
 		cfg, err := NewConfig(WithDiscovery(true, "custom"))
 		require.NoError(t, err)
 		assert.True(t, cfg.Discovery.Enabled)
 		assert.Equal(t, "custom", cfg.Discovery.Provider)
 	})
-	
+
 	t.Run("WithDiscoveryCacheEnabled", func(t *testing.T) {
 		cfg, err := NewConfig(WithDiscoveryCacheEnabled(false))
 		require.NoError(t, err)
 		assert.False(t, cfg.Discovery.CacheEnabled)
 	})
-	
+
 	t.Run("WithOpenAIAPIKey", func(t *testing.T) {
 		cfg, err := NewConfig(WithOpenAIAPIKey("sk-test"))
 		require.NoError(t, err)
@@ -370,7 +370,7 @@ func TestFunctionalOptions(t *testing.T) {
 		assert.Equal(t, "openai", cfg.AI.Provider)
 		assert.Equal(t, "sk-test", cfg.AI.APIKey)
 	})
-	
+
 	t.Run("WithAI", func(t *testing.T) {
 		cfg, err := NewConfig(WithAI(true, "anthropic", "key"))
 		require.NoError(t, err)
@@ -378,20 +378,20 @@ func TestFunctionalOptions(t *testing.T) {
 		assert.Equal(t, "anthropic", cfg.AI.Provider)
 		assert.Equal(t, "key", cfg.AI.APIKey)
 	})
-	
+
 	t.Run("WithAIModel", func(t *testing.T) {
 		cfg, err := NewConfig(WithAIModel("gpt-4-turbo"))
 		require.NoError(t, err)
 		assert.Equal(t, "gpt-4-turbo", cfg.AI.Model)
 	})
-	
+
 	t.Run("WithTelemetry", func(t *testing.T) {
 		cfg, err := NewConfig(WithTelemetry(true, "http://otel:4317"))
 		require.NoError(t, err)
 		assert.True(t, cfg.Telemetry.Enabled)
 		assert.Equal(t, "http://otel:4317", cfg.Telemetry.Endpoint)
 	})
-	
+
 	t.Run("WithEnableMetrics", func(t *testing.T) {
 		cfg, err := NewConfig(
 			WithTelemetry(true, "http://otel:4317"),
@@ -400,7 +400,7 @@ func TestFunctionalOptions(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, cfg.Telemetry.MetricsEnabled)
 	})
-	
+
 	t.Run("WithEnableTracing", func(t *testing.T) {
 		cfg, err := NewConfig(
 			WithTelemetry(true, "http://otel:4317"),
@@ -409,7 +409,7 @@ func TestFunctionalOptions(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, cfg.Telemetry.TracingEnabled)
 	})
-	
+
 	t.Run("WithOTELEndpoint", func(t *testing.T) {
 		cfg, err := NewConfig(WithOTELEndpoint("http://jaeger:4317"))
 		require.NoError(t, err)
@@ -417,25 +417,25 @@ func TestFunctionalOptions(t *testing.T) {
 		assert.Equal(t, "otel", cfg.Telemetry.Provider)
 		assert.Equal(t, "http://jaeger:4317", cfg.Telemetry.Endpoint)
 	})
-	
+
 	t.Run("WithLogLevel", func(t *testing.T) {
 		cfg, err := NewConfig(WithLogLevel("debug"))
 		require.NoError(t, err)
 		assert.Equal(t, "debug", cfg.Logging.Level)
 	})
-	
+
 	t.Run("WithLogFormat", func(t *testing.T) {
 		cfg, err := NewConfig(WithLogFormat("text"))
 		require.NoError(t, err)
 		assert.Equal(t, "text", cfg.Logging.Format)
 	})
-	
+
 	t.Run("WithMemoryProvider", func(t *testing.T) {
 		cfg, err := NewConfig(WithMemoryProvider("redis"))
 		require.NoError(t, err)
 		assert.Equal(t, "redis", cfg.Memory.Provider)
 	})
-	
+
 	t.Run("WithCircuitBreaker", func(t *testing.T) {
 		cfg, err := NewConfig(WithCircuitBreaker(10, 60*time.Second))
 		require.NoError(t, err)
@@ -443,21 +443,21 @@ func TestFunctionalOptions(t *testing.T) {
 		assert.Equal(t, 10, cfg.Resilience.CircuitBreaker.Threshold)
 		assert.Equal(t, 60*time.Second, cfg.Resilience.CircuitBreaker.Timeout)
 	})
-	
+
 	t.Run("WithRetry", func(t *testing.T) {
 		cfg, err := NewConfig(WithRetry(5, 2*time.Second))
 		require.NoError(t, err)
 		assert.Equal(t, 5, cfg.Resilience.Retry.MaxAttempts)
 		assert.Equal(t, 2*time.Second, cfg.Resilience.Retry.InitialInterval)
 	})
-	
+
 	t.Run("WithKubernetes", func(t *testing.T) {
 		cfg, err := NewConfig(WithKubernetes(true, true))
 		require.NoError(t, err)
 		assert.True(t, cfg.Kubernetes.EnableServiceDiscovery)
 		assert.True(t, cfg.Kubernetes.EnableLeaderElection)
 	})
-	
+
 	t.Run("WithDevelopmentMode", func(t *testing.T) {
 		cfg, err := NewConfig(WithDevelopmentMode(true))
 		require.NoError(t, err)
@@ -466,14 +466,14 @@ func TestFunctionalOptions(t *testing.T) {
 		assert.Equal(t, "text", cfg.Logging.Format)
 		assert.Equal(t, "debug", cfg.Logging.Level)
 	})
-	
+
 	t.Run("WithMockAI", func(t *testing.T) {
 		cfg, err := NewConfig(WithMockAI(true))
 		require.NoError(t, err)
 		assert.True(t, cfg.Development.MockAI)
 		assert.True(t, cfg.AI.Enabled)
 	})
-	
+
 	t.Run("WithMockDiscovery", func(t *testing.T) {
 		cfg, err := NewConfig(WithMockDiscovery(true))
 		require.NoError(t, err)
@@ -487,11 +487,11 @@ func TestConfigPriority(t *testing.T) {
 	// Set environment variable
 	_ = os.Setenv("GOMIND_PORT", "7777")
 	defer func() { _ = os.Unsetenv("GOMIND_PORT") }()
-	
+
 	// Create config with functional option (should override env)
 	cfg, err := NewConfig(WithPort(8888))
 	require.NoError(t, err)
-	
+
 	// Functional option should win over environment variable
 	assert.Equal(t, 8888, cfg.Port)
 }
@@ -511,13 +511,13 @@ func TestParseHelpers(t *testing.T) {
 			{",,,", []string{}},
 			{"a,,b", []string{"a", "b"}},
 		}
-		
+
 		for _, tt := range tests {
 			result := parseStringList(tt.input)
 			assert.Equal(t, tt.expected, result, "input: %s", tt.input)
 		}
 	})
-	
+
 	t.Run("parseBool", func(t *testing.T) {
 		tests := []struct {
 			input    string
@@ -539,7 +539,7 @@ func TestParseHelpers(t *testing.T) {
 			{"", false},
 			{"invalid", false},
 		}
-		
+
 		for _, tt := range tests {
 			result := parseBool(tt.input)
 			assert.Equal(t, tt.expected, result, "input: %s", tt.input)
@@ -552,7 +552,7 @@ func TestConfigWithConfigFile(t *testing.T) {
 	// Create temporary config file
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "test-config.json")
-	
+
 	configData := map[string]interface{}{
 		"name": "file-loaded-agent",
 		"port": 7777,
@@ -562,20 +562,20 @@ func TestConfigWithConfigFile(t *testing.T) {
 			},
 		},
 	}
-	
+
 	jsonData, err := json.MarshalIndent(configData, "", "  ")
 	require.NoError(t, err)
-	
+
 	err = os.WriteFile(configFile, jsonData, 0644)
 	require.NoError(t, err)
-	
+
 	// Load config from file using option
 	cfg, err := NewConfig(
 		WithConfigFile(configFile),
 		WithPort(8888), // This should override the file
 	)
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, "file-loaded-agent", cfg.Name)
 	assert.Equal(t, 8888, cfg.Port) // Option overrides file
 	assert.True(t, cfg.HTTP.CORS.Enabled)
@@ -605,7 +605,7 @@ func BenchmarkLoadFromEnv(b *testing.B) {
 		_ = os.Unsetenv("GOMIND_PORT")
 		_ = os.Unsetenv("GOMIND_CORS_ENABLED")
 	}()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		cfg := DefaultConfig()
@@ -620,7 +620,7 @@ func BenchmarkValidate(b *testing.B) {
 	cfg.Port = 8080
 	cfg.AI.Enabled = true
 	cfg.AI.APIKey = "sk-test"
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = cfg.Validate()
@@ -637,7 +637,7 @@ func ExampleNewConfig() {
 	if err != nil {
 		panic(err)
 	}
-	
+
 	fmt.Printf("Agent: %s on port %d\n", cfg.Name, cfg.Port)
 	// Output: Agent: example-agent on port 8080
 }
@@ -654,8 +654,8 @@ func ExampleNewConfig_development() {
 	if err != nil {
 		panic(err)
 	}
-	
-	fmt.Printf("Development mode: %v, Mock AI: %v\n", 
+
+	fmt.Printf("Development mode: %v, Mock AI: %v\n",
 		cfg.Development.Enabled, cfg.Development.MockAI)
 	// Output: Development mode: true, Mock AI: true
 }
@@ -679,8 +679,8 @@ func ExampleNewConfig_production() {
 	if err != nil {
 		panic(err)
 	}
-	
-	fmt.Printf("Production config: %s in %s namespace\n", 
+
+	fmt.Printf("Production config: %s in %s namespace\n",
 		cfg.Name, cfg.Namespace)
 	// Output: Production config: prod-agent in production namespace
 }

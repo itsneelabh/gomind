@@ -23,7 +23,7 @@ func NewRateLimiter(interval time.Duration) *RateLimiter {
 func (r *RateLimiter) Allow() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	now := time.Now()
 	if now.Sub(r.lastTime) >= r.interval {
 		r.lastTime = now

@@ -18,7 +18,7 @@ type IntelligentAgent struct {
 func NewIntelligentAgent(name string, apiKey string) *IntelligentAgent {
 	base := core.NewBaseAgent(name)
 	logger := base.Logger // Use the base logger
-	
+
 	return &IntelligentAgent{
 		BaseAgent: base,
 		aiClient:  NewOpenAIClient(apiKey, logger),
@@ -28,7 +28,7 @@ func NewIntelligentAgent(name string, apiKey string) *IntelligentAgent {
 // EnableAI adds AI capabilities to an existing BaseAgent
 func EnableAI(agent *core.BaseAgent, apiKey string) {
 	agent.AI = NewOpenAIClient(apiKey, agent.Logger)
-	
+
 	agent.Logger.Info("AI capabilities enabled", map[string]interface{}{
 		"agent": agent.GetName(),
 	})
@@ -41,7 +41,7 @@ func (a *IntelligentAgent) DiscoverAndUseTools(ctx context.Context, userQuery st
 Query: "%s"
 
 List the types of capabilities needed (e.g., "database_query", "calculation", "data_transformation").`, userQuery)
-	
+
 	intentResp, err := a.aiClient.GenerateResponse(ctx, intentPrompt, &core.AIOptions{
 		Model:       "gpt-4",
 		Temperature: 0.3,
@@ -54,22 +54,22 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 			Err:  core.ErrAIOperationFailed,
 		}
 	}
-	
+
 	// 2. Discover available tools using the Discovery service
 	if a.Discovery == nil {
 		return "No discovery service available to find tools", nil
 	}
-	
+
 	// Parse capabilities from AI response (simplified)
 	capabilities := strings.Split(intentResp.Content, "\n")
-	
+
 	var availableTools []*core.ServiceRegistration
 	for _, cap := range capabilities {
 		cap = strings.TrimSpace(strings.ToLower(cap))
 		if cap == "" {
 			continue
 		}
-		
+
 		tools, err := a.Discovery.FindByCapability(ctx, cap)
 		if err != nil {
 			a.Logger.Warn("Failed to find tools for capability", map[string]interface{}{
@@ -78,28 +78,28 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 			})
 			continue
 		}
-		
+
 		availableTools = append(availableTools, tools...)
 	}
-	
+
 	if len(availableTools) == 0 {
 		return "No tools found to handle this request", nil
 	}
-	
+
 	// 3. Use AI to plan tool usage
 	toolList := ""
 	for _, tool := range availableTools {
-		toolList += fmt.Sprintf("- %s: %s (capabilities: %v)\n", 
+		toolList += fmt.Sprintf("- %s: %s (capabilities: %v)\n",
 			tool.Name, tool.ID, tool.Capabilities)
 	}
-	
+
 	planPrompt := fmt.Sprintf(`Given these available tools:
 %s
 
 And this user query: "%s"
 
 Create a plan for which tools to call and in what order.`, toolList, userQuery)
-	
+
 	planResp, err := a.aiClient.GenerateResponse(ctx, planPrompt, &core.AIOptions{
 		Model:       "gpt-4",
 		Temperature: 0.3,
@@ -112,19 +112,19 @@ Create a plan for which tools to call and in what order.`, toolList, userQuery)
 			Err:  core.ErrAIOperationFailed,
 		}
 	}
-	
+
 	// 4. Execute the plan (simplified - in real implementation would call tools via HTTP)
 	a.Logger.Info("Executing AI-generated plan", map[string]interface{}{
 		"plan":       planResp.Content,
 		"tool_count": len(availableTools),
 	})
-	
+
 	// 5. Synthesize results using AI
 	synthesisPrompt := fmt.Sprintf(`Based on the execution plan:
 %s
 
 Generate a response to the original user query: "%s"`, planResp.Content, userQuery)
-	
+
 	finalResp, err := a.aiClient.GenerateResponse(ctx, synthesisPrompt, &core.AIOptions{
 		Model:       "gpt-4",
 		Temperature: 0.7,
@@ -137,7 +137,7 @@ Generate a response to the original user query: "%s"`, planResp.Content, userQue
 			Err:  core.ErrAIOperationFailed,
 		}
 	}
-	
+
 	return finalResp.Content, nil
 }
 
@@ -146,16 +146,16 @@ func Example() {
 	// Level 1: Basic Tool (Core only - 5MB)
 	// tool := core.NewBaseAgent("database-tool")
 	// tool.RegisterCapability(...)
-	
+
 	// Level 2: Intelligent Agent (Core + AI - 10MB)
 	agent := NewIntelligentAgent("smart-agent", "sk-...")
-	
+
 	// The agent can now:
 	// - Understand natural language
 	// - Discover tools dynamically
 	// - Plan tool usage with AI
 	// - Synthesize responses
-	
+
 	ctx := context.Background()
 	response, _ := agent.DiscoverAndUseTools(ctx, "What were the Q3 sales figures?")
 	println(response)

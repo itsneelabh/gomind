@@ -49,7 +49,7 @@ func init() {
 			},
 		},
 	})
-	
+
 	// Discovery service metrics
 	DeclareMetrics("discovery", ModuleConfig{
 		Metrics: []MetricDefinition{
@@ -93,7 +93,7 @@ func init() {
 			},
 		},
 	})
-	
+
 	// Memory/state management metrics
 	DeclareMetrics("memory", ModuleConfig{
 		Metrics: []MetricDefinition{

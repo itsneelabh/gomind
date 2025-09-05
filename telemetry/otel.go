@@ -13,8 +13,8 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/resource"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
@@ -25,15 +25,15 @@ import (
 // It manages both tracing and metrics, exporting them via OTLP/HTTP.
 //
 // Design decisions:
-//  - Uses HTTP instead of gRPC for smaller binary size
-//  - Batches exports to reduce network overhead
-//  - Provides both traces and metrics from a single provider
+//   - Uses HTTP instead of gRPC for smaller binary size
+//   - Batches exports to reduce network overhead
+//   - Provides both traces and metrics from a single provider
 type OTelProvider struct {
-	tracer         trace.Tracer              // For distributed tracing
-	meter          metric.Meter              // For metrics
-	traceProvider  *sdktrace.TracerProvider  // Manages trace export
-	metricProvider *sdkmetric.MeterProvider  // Manages metric export
-	metrics        *MetricInstruments        // Cached metric instruments
+	tracer         trace.Tracer             // For distributed tracing
+	meter          metric.Meter             // For metrics
+	traceProvider  *sdktrace.TracerProvider // Manages trace export
+	metricProvider *sdkmetric.MeterProvider // Manages metric export
+	metrics        *MetricInstruments       // Cached metric instruments
 }
 
 // NewOTelProvider creates a new OpenTelemetry provider using HTTP exporters.
@@ -53,16 +53,16 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 	if endpoint == "localhost:4317" {
 		endpoint = "localhost:4318"
 	}
-	
+
 	// Create resource with consistent schema
 	res := resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceNameKey.String(serviceName),
 		semconv.ServiceVersionKey.String("1.0.0"),
 	)
-	
+
 	ctx := context.Background()
-	
+
 	// Create HTTP trace exporter (instead of gRPC)
 	traceExporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpoint(endpoint),
@@ -71,7 +71,7 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trace exporter for endpoint %s: %w", endpoint, err)
 	}
-	
+
 	// Create HTTP metric exporter (this was missing!)
 	metricExporter, err := otlpmetrichttp.New(ctx,
 		otlpmetrichttp.WithEndpoint(endpoint),
@@ -80,13 +80,13 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create metric exporter for endpoint %s: %w", endpoint, err)
 	}
-	
+
 	// Create trace provider
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(traceExporter),
 		sdktrace.WithResource(res),
 	)
-	
+
 	// Create metric provider with periodic reader (exports metrics every 30s)
 	mp := sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(
@@ -97,12 +97,12 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 		),
 		sdkmetric.WithResource(res),
 	)
-	
+
 	// Set global providers
 	otel.SetTracerProvider(tp)
 	otel.SetMeterProvider(mp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
-	
+
 	provider := &OTelProvider{
 		tracer:         tp.Tracer("gomind-telemetry"),
 		meter:          mp.Meter("gomind-telemetry"),
@@ -110,7 +110,7 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 		metricProvider: mp,
 		metrics:        NewMetricInstruments("gomind-telemetry"),
 	}
-	
+
 	return provider, nil
 }
 
@@ -126,19 +126,19 @@ func (o *OTelProvider) StartSpan(ctx context.Context, name string) (context.Cont
 // semantic correctness for different metric types.
 //
 // Heuristics used:
-//  - Names with "duration", "latency", "time" → Histogram
-//  - Names with "count", "total", "errors" → Counter
-//  - Names with "gauge", "current", "size" → Gauge/Histogram
+//   - Names with "duration", "latency", "time" → Histogram
+//   - Names with "count", "total", "errors" → Counter
+//   - Names with "gauge", "current", "size" → Gauge/Histogram
 func (o *OTelProvider) RecordMetric(name string, value float64, labels map[string]string) {
 	ctx := context.Background()
-	
+
 	// Convert label map to OpenTelemetry attributes
 	// This allocates but is necessary for the OTel API
 	var attrs []attribute.KeyValue
 	for k, v := range labels {
 		attrs = append(attrs, attribute.String(k, v))
 	}
-	
+
 	// Determine metric type based on name patterns
 	// This is a simplified approach - in production you'd want explicit metric type registration
 	switch {
@@ -160,14 +160,14 @@ func (o *OTelProvider) RecordMetric(name string, value float64, labels map[strin
 // contains checks if the metric name contains any of the given substrings.
 // Used for heuristic metric type detection based on naming patterns.
 // Checks both prefix and suffix to handle common naming conventions:
-//  - "request_count" (suffix)
-//  - "duration_ms" (suffix)
-//  - "total_requests" (prefix)
+//   - "request_count" (suffix)
+//   - "duration_ms" (suffix)
+//   - "total_requests" (prefix)
 func contains(name string, substrings ...string) bool {
 	for _, substr := range substrings {
-		if len(name) >= len(substr) && 
-		   (name[len(name)-len(substr):] == substr ||  // Check suffix
-		    name[:len(substr)] == substr) {            // Check prefix
+		if len(name) >= len(substr) &&
+			(name[len(name)-len(substr):] == substr || // Check suffix
+				name[:len(substr)] == substr) { // Check prefix
 			return true
 		}
 	}
@@ -177,30 +177,30 @@ func contains(name string, substrings ...string) bool {
 // Shutdown gracefully shuts down the telemetry provider
 func (o *OTelProvider) Shutdown(ctx context.Context) error {
 	var errs []error
-	
+
 	// Shutdown metrics instruments
 	if err := o.metrics.Shutdown(); err != nil {
 		errs = append(errs, fmt.Errorf("failed to shutdown metrics: %w", err))
 	}
-	
+
 	// Shutdown metric provider (flushes pending metrics)
 	if o.metricProvider != nil {
 		if err := o.metricProvider.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("failed to shutdown metric provider: %w", err))
 		}
 	}
-	
+
 	// Shutdown trace provider
 	if o.traceProvider != nil {
 		if err := o.traceProvider.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("failed to shutdown trace provider: %w", err))
 		}
 	}
-	
+
 	if len(errs) > 0 {
 		return fmt.Errorf("shutdown errors: %v", errs)
 	}
-	
+
 	return nil
 }
 
@@ -243,18 +243,18 @@ func EnableTelemetry(agent *core.BaseAgent, endpoint string) error {
 			endpoint = "localhost:4318" // Default HTTP port
 		}
 	}
-	
+
 	provider, err := NewOTelProvider(agent.GetName(), endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to create telemetry provider: %w", err)
 	}
-	
+
 	agent.Telemetry = provider
-	
+
 	agent.Logger.Info("Telemetry enabled", map[string]interface{}{
 		"endpoint": endpoint,
 		"agent":    agent.GetName(),
 	})
-	
+
 	return nil
 }

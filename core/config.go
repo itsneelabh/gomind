@@ -13,7 +13,7 @@ import (
 // Config holds all configuration options for the GoMind framework.
 // It supports three-layer configuration priority:
 //  1. Default values (lowest priority)
-//  2. Environment variables (medium priority)  
+//  2. Environment variables (medium priority)
 //  3. Functional options (highest priority)
 //
 // The configuration automatically detects the execution environment (Kubernetes vs local)
@@ -36,31 +36,31 @@ type Config struct {
 	Port      int    `json:"port" env:"GOMIND_PORT" default:"8080"`
 	Address   string `json:"address" env:"GOMIND_ADDRESS"`
 	Namespace string `json:"namespace" env:"GOMIND_NAMESPACE" default:"default"`
-	
+
 	// HTTP Server configuration
 	HTTP HTTPConfig `json:"http"`
-	
+
 	// Discovery configuration
 	Discovery DiscoveryConfig `json:"discovery"`
-	
+
 	// AI configuration (optional module)
 	AI AIConfig `json:"ai"`
-	
+
 	// Telemetry configuration (optional module)
 	Telemetry TelemetryConfig `json:"telemetry"`
-	
+
 	// Memory configuration
 	Memory MemoryConfig `json:"memory"`
-	
+
 	// Resilience configuration
 	Resilience ResilienceConfig `json:"resilience"`
-	
+
 	// Logging configuration
 	Logging LoggingConfig `json:"logging"`
-	
+
 	// Development configuration
 	Development DevelopmentConfig `json:"development"`
-	
+
 	// Kubernetes specific configuration
 	Kubernetes KubernetesConfig `json:"kubernetes"`
 }
@@ -68,19 +68,19 @@ type Config struct {
 // HTTPConfig contains HTTP server configuration including timeouts, limits, and CORS settings.
 // All timeout values use time.Duration for flexibility.
 type HTTPConfig struct {
-	ReadTimeout       time.Duration   `json:"read_timeout" env:"GOMIND_HTTP_READ_TIMEOUT" default:"30s"`
-	WriteTimeout      time.Duration   `json:"write_timeout" env:"GOMIND_HTTP_WRITE_TIMEOUT" default:"30s"`
-	IdleTimeout       time.Duration   `json:"idle_timeout" env:"GOMIND_HTTP_IDLE_TIMEOUT" default:"120s"`
-	MaxHeaderBytes    int             `json:"max_header_bytes" env:"GOMIND_HTTP_MAX_HEADER_BYTES" default:"1048576"`
-	ShutdownTimeout   time.Duration   `json:"shutdown_timeout" env:"GOMIND_HTTP_SHUTDOWN_TIMEOUT" default:"10s"`
-	EnableHealthCheck bool            `json:"enable_health_check" env:"GOMIND_HTTP_HEALTH_CHECK" default:"true"`
-	HealthCheckPath   string          `json:"health_check_path" env:"GOMIND_HTTP_HEALTH_PATH" default:"/health"`
-	CORS              CORSConfig      `json:"cors"`
+	ReadTimeout       time.Duration `json:"read_timeout" env:"GOMIND_HTTP_READ_TIMEOUT" default:"30s"`
+	WriteTimeout      time.Duration `json:"write_timeout" env:"GOMIND_HTTP_WRITE_TIMEOUT" default:"30s"`
+	IdleTimeout       time.Duration `json:"idle_timeout" env:"GOMIND_HTTP_IDLE_TIMEOUT" default:"120s"`
+	MaxHeaderBytes    int           `json:"max_header_bytes" env:"GOMIND_HTTP_MAX_HEADER_BYTES" default:"1048576"`
+	ShutdownTimeout   time.Duration `json:"shutdown_timeout" env:"GOMIND_HTTP_SHUTDOWN_TIMEOUT" default:"10s"`
+	EnableHealthCheck bool          `json:"enable_health_check" env:"GOMIND_HTTP_HEALTH_CHECK" default:"true"`
+	HealthCheckPath   string        `json:"health_check_path" env:"GOMIND_HTTP_HEALTH_PATH" default:"/health"`
+	CORS              CORSConfig    `json:"cors"`
 }
 
 // CORSConfig contains Cross-Origin Resource Sharing (CORS) configuration.
 // Supports wildcard domains (e.g., *.example.com) and wildcard ports (e.g., http://localhost:*).
-// 
+//
 // Security note: Be cautious with AllowCredentials=true and ensure AllowedOrigins
 // is properly restricted in production environments.
 type CORSConfig struct {
@@ -97,13 +97,13 @@ type CORSConfig struct {
 // Currently supports Redis as the discovery backend with optional caching.
 // When MockDiscovery is enabled in Development mode, an in-memory discovery is used instead.
 type DiscoveryConfig struct {
-	Enabled          bool          `json:"enabled" env:"GOMIND_DISCOVERY_ENABLED" default:"false"`
-	Provider         string        `json:"provider" env:"GOMIND_DISCOVERY_PROVIDER" default:"redis"`
-	RedisURL         string        `json:"redis_url" env:"GOMIND_REDIS_URL,REDIS_URL"`
-	CacheEnabled     bool          `json:"cache_enabled" env:"GOMIND_DISCOVERY_CACHE" default:"true"`
-	CacheTTL         time.Duration `json:"cache_ttl" env:"GOMIND_DISCOVERY_CACHE_TTL" default:"5m"`
+	Enabled           bool          `json:"enabled" env:"GOMIND_DISCOVERY_ENABLED" default:"false"`
+	Provider          string        `json:"provider" env:"GOMIND_DISCOVERY_PROVIDER" default:"redis"`
+	RedisURL          string        `json:"redis_url" env:"GOMIND_REDIS_URL,REDIS_URL"`
+	CacheEnabled      bool          `json:"cache_enabled" env:"GOMIND_DISCOVERY_CACHE" default:"true"`
+	CacheTTL          time.Duration `json:"cache_ttl" env:"GOMIND_DISCOVERY_CACHE_TTL" default:"5m"`
 	HeartbeatInterval time.Duration `json:"heartbeat_interval" env:"GOMIND_DISCOVERY_HEARTBEAT" default:"10s"`
-	TTL              time.Duration `json:"ttl" env:"GOMIND_DISCOVERY_TTL" default:"30s"`
+	TTL               time.Duration `json:"ttl" env:"GOMIND_DISCOVERY_TTL" default:"30s"`
 }
 
 // AIConfig contains AI client configuration for LLM integration.
@@ -111,15 +111,15 @@ type DiscoveryConfig struct {
 // Supports OpenAI and compatible APIs. When MockAI is enabled in Development mode,
 // returns canned responses without making actual API calls.
 type AIConfig struct {
-	Enabled       bool    `json:"enabled" env:"GOMIND_AI_ENABLED" default:"false"`
-	Provider      string  `json:"provider" env:"GOMIND_AI_PROVIDER" default:"openai"`
-	APIKey        string  `json:"api_key" env:"GOMIND_AI_API_KEY,OPENAI_API_KEY"`
-	BaseURL       string  `json:"base_url" env:"GOMIND_AI_BASE_URL"`
-	Model         string  `json:"model" env:"GOMIND_AI_MODEL" default:"gpt-4"`
-	Temperature   float32 `json:"temperature" env:"GOMIND_AI_TEMPERATURE" default:"0.7"`
-	MaxTokens     int     `json:"max_tokens" env:"GOMIND_AI_MAX_TOKENS" default:"2000"`
+	Enabled       bool          `json:"enabled" env:"GOMIND_AI_ENABLED" default:"false"`
+	Provider      string        `json:"provider" env:"GOMIND_AI_PROVIDER" default:"openai"`
+	APIKey        string        `json:"api_key" env:"GOMIND_AI_API_KEY,OPENAI_API_KEY"`
+	BaseURL       string        `json:"base_url" env:"GOMIND_AI_BASE_URL"`
+	Model         string        `json:"model" env:"GOMIND_AI_MODEL" default:"gpt-4"`
+	Temperature   float32       `json:"temperature" env:"GOMIND_AI_TEMPERATURE" default:"0.7"`
+	MaxTokens     int           `json:"max_tokens" env:"GOMIND_AI_MAX_TOKENS" default:"2000"`
 	Timeout       time.Duration `json:"timeout" env:"GOMIND_AI_TIMEOUT" default:"30s"`
-	RetryAttempts int     `json:"retry_attempts" env:"GOMIND_AI_RETRY_ATTEMPTS" default:"3"`
+	RetryAttempts int           `json:"retry_attempts" env:"GOMIND_AI_RETRY_ATTEMPTS" default:"3"`
 	RetryDelay    time.Duration `json:"retry_delay" env:"GOMIND_AI_RETRY_DELAY" default:"1s"`
 }
 
@@ -127,14 +127,14 @@ type AIConfig struct {
 // This is an optional module - telemetry is only initialized when Enabled=true.
 // Supports OpenTelemetry (OTEL) protocol. The endpoint should be the OTLP receiver address.
 type TelemetryConfig struct {
-	Enabled         bool   `json:"enabled" env:"GOMIND_TELEMETRY_ENABLED" default:"false"`
-	Provider        string `json:"provider" env:"GOMIND_TELEMETRY_PROVIDER" default:"otel"`
-	Endpoint        string `json:"endpoint" env:"GOMIND_TELEMETRY_ENDPOINT,OTEL_EXPORTER_OTLP_ENDPOINT"`
-	ServiceName     string `json:"service_name" env:"GOMIND_TELEMETRY_SERVICE_NAME,OTEL_SERVICE_NAME"`
-	MetricsEnabled  bool   `json:"metrics_enabled" env:"GOMIND_TELEMETRY_METRICS" default:"true"`
-	TracingEnabled  bool   `json:"tracing_enabled" env:"GOMIND_TELEMETRY_TRACING" default:"true"`
-	SamplingRate    float64 `json:"sampling_rate" env:"GOMIND_TELEMETRY_SAMPLING_RATE" default:"1.0"`
-	Insecure        bool   `json:"insecure" env:"GOMIND_TELEMETRY_INSECURE" default:"true"`
+	Enabled        bool    `json:"enabled" env:"GOMIND_TELEMETRY_ENABLED" default:"false"`
+	Provider       string  `json:"provider" env:"GOMIND_TELEMETRY_PROVIDER" default:"otel"`
+	Endpoint       string  `json:"endpoint" env:"GOMIND_TELEMETRY_ENDPOINT,OTEL_EXPORTER_OTLP_ENDPOINT"`
+	ServiceName    string  `json:"service_name" env:"GOMIND_TELEMETRY_SERVICE_NAME,OTEL_SERVICE_NAME"`
+	MetricsEnabled bool    `json:"metrics_enabled" env:"GOMIND_TELEMETRY_METRICS" default:"true"`
+	TracingEnabled bool    `json:"tracing_enabled" env:"GOMIND_TELEMETRY_TRACING" default:"true"`
+	SamplingRate   float64 `json:"sampling_rate" env:"GOMIND_TELEMETRY_SAMPLING_RATE" default:"1.0"`
+	Insecure       bool    `json:"insecure" env:"GOMIND_TELEMETRY_INSECURE" default:"true"`
 }
 
 // MemoryConfig contains state storage configuration.
@@ -213,15 +213,15 @@ type DevelopmentConfig struct {
 // When running in Kubernetes, the framework adjusts defaults for
 // containerized environments (e.g., binding to 0.0.0.0, JSON logging).
 type KubernetesConfig struct {
-	Enabled              bool   `json:"enabled" env:"KUBERNETES_SERVICE_HOST"`
-	ServiceName          string `json:"service_name" env:"GOMIND_K8S_SERVICE_NAME"`
-	PodName              string `json:"pod_name" env:"HOSTNAME"`
-	PodNamespace         string `json:"pod_namespace" env:"GOMIND_K8S_NAMESPACE"`
-	PodIP                string `json:"pod_ip" env:"GOMIND_K8S_POD_IP"`
-	NodeName             string `json:"node_name" env:"GOMIND_K8S_NODE_NAME"`
-	ServiceAccountPath   string `json:"service_account_path" env:"GOMIND_K8S_SA_PATH" default:"/var/run/secrets/kubernetes.io/serviceaccount"`
-	EnableServiceDiscovery bool `json:"enable_service_discovery" env:"GOMIND_K8S_SERVICE_DISCOVERY" default:"true"`
-	EnableLeaderElection bool   `json:"enable_leader_election" env:"GOMIND_K8S_LEADER_ELECTION" default:"false"`
+	Enabled                bool   `json:"enabled" env:"KUBERNETES_SERVICE_HOST"`
+	ServiceName            string `json:"service_name" env:"GOMIND_K8S_SERVICE_NAME"`
+	PodName                string `json:"pod_name" env:"HOSTNAME"`
+	PodNamespace           string `json:"pod_namespace" env:"GOMIND_K8S_NAMESPACE"`
+	PodIP                  string `json:"pod_ip" env:"GOMIND_K8S_POD_IP"`
+	NodeName               string `json:"node_name" env:"GOMIND_K8S_NODE_NAME"`
+	ServiceAccountPath     string `json:"service_account_path" env:"GOMIND_K8S_SA_PATH" default:"/var/run/secrets/kubernetes.io/serviceaccount"`
+	EnableServiceDiscovery bool   `json:"enable_service_discovery" env:"GOMIND_K8S_SERVICE_DISCOVERY" default:"true"`
+	EnableLeaderElection   bool   `json:"enable_leader_election" env:"GOMIND_K8S_LEADER_ELECTION" default:"false"`
 }
 
 // Option is a functional option for configuring the framework.
@@ -250,7 +250,7 @@ func DefaultConfig() *Config {
 	cfg := &Config{
 		Name:      "gomind-agent",
 		Port:      8080,
-		Address:   "",  // Will be set based on environment detection
+		Address:   "", // Will be set based on environment detection
 		Namespace: "default",
 		HTTP: HTTPConfig{
 			ReadTimeout:       30 * time.Second,
@@ -269,7 +269,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Discovery: DiscoveryConfig{
-			Enabled:           false,  // Disabled by default for local development
+			Enabled:           false, // Disabled by default for local development
 			Provider:          "redis",
 			CacheEnabled:      true,
 			CacheTTL:          5 * time.Minute,
@@ -337,10 +337,10 @@ func DefaultConfig() *Config {
 			EnableLeaderElection:   false,
 		},
 	}
-	
+
 	// Detect environment and adjust defaults
 	cfg.DetectEnvironment()
-	
+
 	return cfg
 }
 
@@ -355,27 +355,27 @@ func (c *Config) DetectEnvironment() {
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 		// Kubernetes environment detected
 		c.Kubernetes.Enabled = true
-		c.Address = "0.0.0.0"  // Bind to all interfaces in K8s
-		c.Discovery.Enabled = true  // Enable discovery in K8s
+		c.Address = "0.0.0.0"      // Bind to all interfaces in K8s
+		c.Discovery.Enabled = true // Enable discovery in K8s
 		c.Discovery.RedisURL = "redis://redis.default.svc.cluster.local:6379"
-		c.Logging.Format = "json"  // Structured logs for K8s
+		c.Logging.Format = "json" // Structured logs for K8s
 	} else {
 		// Local development environment
 		c.Address = "localhost"
 		c.Discovery.RedisURL = "redis://localhost:6379"
-		
+
 		// Enable development mode for local
 		if os.Getenv("GOMIND_DEV_MODE") == "" {
 			c.Development.Enabled = true
 			c.Development.PrettyLogs = true
-			c.Logging.Format = "text"  // Human-readable logs
+			c.Logging.Format = "text" // Human-readable logs
 		}
 	}
 }
 
 // LoadFromEnv loads configuration from environment variables.
 // Environment variables take precedence over defaults but are overridden by functional options.
-// 
+//
 // Variable naming convention:
 //   - Framework-specific: GOMIND_<SETTING>
 //   - Standard variables: REDIS_URL, OPENAI_API_KEY, OTEL_EXPORTER_OTLP_ENDPOINT
@@ -400,7 +400,7 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_NAMESPACE"); v != "" {
 		c.Namespace = v
 	}
-	
+
 	// HTTP settings
 	if v := os.Getenv("GOMIND_HTTP_READ_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -412,7 +412,7 @@ func (c *Config) LoadFromEnv() error {
 			c.HTTP.WriteTimeout = d
 		}
 	}
-	
+
 	// CORS settings
 	if v := os.Getenv("GOMIND_CORS_ENABLED"); v != "" {
 		c.HTTP.CORS.Enabled = parseBool(v)
@@ -429,7 +429,7 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_CORS_CREDENTIALS"); v != "" {
 		c.HTTP.CORS.AllowCredentials = parseBool(v)
 	}
-	
+
 	// Discovery settings
 	if v := os.Getenv("GOMIND_DISCOVERY_ENABLED"); v != "" {
 		c.Discovery.Enabled = parseBool(v)
@@ -439,7 +439,7 @@ func (c *Config) LoadFromEnv() error {
 	}
 	if v := os.Getenv("GOMIND_REDIS_URL"); v != "" {
 		c.Discovery.RedisURL = v
-		c.Memory.RedisURL = v  // Also use for memory if not separately configured
+		c.Memory.RedisURL = v // Also use for memory if not separately configured
 	} else if v := os.Getenv("REDIS_URL"); v != "" {
 		c.Discovery.RedisURL = v
 		c.Memory.RedisURL = v
@@ -447,17 +447,17 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_DISCOVERY_CACHE"); v != "" {
 		c.Discovery.CacheEnabled = parseBool(v)
 	}
-	
+
 	// AI settings
 	if v := os.Getenv("GOMIND_AI_ENABLED"); v != "" {
 		c.AI.Enabled = parseBool(v)
 	}
 	if v := os.Getenv("GOMIND_AI_API_KEY"); v != "" {
 		c.AI.APIKey = v
-		c.AI.Enabled = true  // Auto-enable if API key is provided
+		c.AI.Enabled = true // Auto-enable if API key is provided
 	} else if v := os.Getenv("OPENAI_API_KEY"); v != "" {
 		c.AI.APIKey = v
-		c.AI.Enabled = true  // Auto-enable if OpenAI key is present
+		c.AI.Enabled = true // Auto-enable if OpenAI key is present
 	}
 	if v := os.Getenv("GOMIND_AI_MODEL"); v != "" {
 		c.AI.Model = v
@@ -465,26 +465,26 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_AI_BASE_URL"); v != "" {
 		c.AI.BaseURL = v
 	}
-	
+
 	// Telemetry settings
 	if v := os.Getenv("GOMIND_TELEMETRY_ENABLED"); v != "" {
 		c.Telemetry.Enabled = parseBool(v)
 	}
 	if v := os.Getenv("GOMIND_TELEMETRY_ENDPOINT"); v != "" {
 		c.Telemetry.Endpoint = v
-		c.Telemetry.Enabled = true  // Auto-enable if endpoint is provided
+		c.Telemetry.Enabled = true // Auto-enable if endpoint is provided
 	} else if v := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); v != "" {
 		c.Telemetry.Endpoint = v
-		c.Telemetry.Enabled = true  // Auto-enable if OTEL endpoint is present
+		c.Telemetry.Enabled = true // Auto-enable if OTEL endpoint is present
 	}
 	if v := os.Getenv("GOMIND_TELEMETRY_SERVICE_NAME"); v != "" {
 		c.Telemetry.ServiceName = v
 	} else if v := os.Getenv("OTEL_SERVICE_NAME"); v != "" {
 		c.Telemetry.ServiceName = v
 	} else if c.Telemetry.ServiceName == "" {
-		c.Telemetry.ServiceName = c.Name  // Default to agent name
+		c.Telemetry.ServiceName = c.Name // Default to agent name
 	}
-	
+
 	// Memory settings
 	if v := os.Getenv("GOMIND_MEMORY_PROVIDER"); v != "" {
 		c.Memory.Provider = v
@@ -492,7 +492,7 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_MEMORY_REDIS_URL"); v != "" {
 		c.Memory.RedisURL = v
 	}
-	
+
 	// Logging settings
 	if v := os.Getenv("GOMIND_LOG_LEVEL"); v != "" {
 		c.Logging.Level = v
@@ -500,7 +500,7 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_LOG_FORMAT"); v != "" {
 		c.Logging.Format = v
 	}
-	
+
 	// Development settings
 	if v := os.Getenv("GOMIND_DEV_MODE"); v != "" {
 		c.Development.Enabled = parseBool(v)
@@ -522,7 +522,7 @@ func (c *Config) LoadFromEnv() error {
 			c.Logging.Level = "debug"
 		}
 	}
-	
+
 	// Kubernetes settings (auto-detect)
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 		c.Kubernetes.Enabled = true
@@ -548,7 +548,7 @@ func (c *Config) LoadFromEnv() error {
 			c.Kubernetes.NodeName = v
 		}
 	}
-	
+
 	return nil
 }
 
@@ -571,13 +571,13 @@ func (c *Config) LoadFromEnv() error {
 func (c *Config) LoadFromFile(path string) error {
 	// Clean the path to prevent directory traversal attacks
 	cleanPath := filepath.Clean(path)
-	
+
 	// Verify the file has a safe extension
 	ext := filepath.Ext(cleanPath)
 	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
 		return fmt.Errorf("unsupported config file extension %s: %w", ext, ErrInvalidConfiguration)
 	}
-	
+
 	// Check if the path is absolute and within expected directories
 	if !filepath.IsAbs(cleanPath) {
 		// If relative, resolve it relative to current directory
@@ -587,13 +587,13 @@ func (c *Config) LoadFromFile(path string) error {
 		}
 		cleanPath = filepath.Join(wd, cleanPath)
 	}
-	
+
 	// Read the file with the cleaned path
 	data, err := os.ReadFile(filepath.Clean(cleanPath)) // nosec G304 -- path is validated
 	if err != nil {
 		return fmt.Errorf("failed to read config file %s: %w", cleanPath, err)
 	}
-	
+
 	// Parse based on extension
 	switch ext {
 	case ".json":
@@ -605,7 +605,7 @@ func (c *Config) LoadFromFile(path string) error {
 		// For now, return an error for YAML files
 		return fmt.Errorf("YAML config files not yet supported: %w", ErrInvalidConfiguration)
 	}
-	
+
 	return nil
 }
 
@@ -629,7 +629,7 @@ func (c *Config) Validate() error {
 			Err:     ErrInvalidConfiguration,
 		}
 	}
-	
+
 	if c.Name == "" {
 		// Preserve exact message for test compatibility
 		return &FrameworkError{
@@ -639,7 +639,7 @@ func (c *Config) Validate() error {
 			Err:     ErrMissingConfiguration,
 		}
 	}
-	
+
 	if c.AI.Enabled && c.AI.APIKey == "" && !c.Development.MockAI {
 		// Preserve exact message for test compatibility
 		return &FrameworkError{
@@ -649,7 +649,7 @@ func (c *Config) Validate() error {
 			Err:     ErrMissingConfiguration,
 		}
 	}
-	
+
 	if c.Telemetry.Enabled && c.Telemetry.Endpoint == "" {
 		// Preserve exact message for test compatibility
 		return &FrameworkError{
@@ -659,7 +659,7 @@ func (c *Config) Validate() error {
 			Err:     ErrMissingConfiguration,
 		}
 	}
-	
+
 	if c.Discovery.Enabled && c.Discovery.Provider == "redis" && c.Discovery.RedisURL == "" && !c.Development.MockDiscovery {
 		// Preserve exact message for test compatibility
 		return &FrameworkError{
@@ -669,7 +669,7 @@ func (c *Config) Validate() error {
 			Err:     ErrMissingConfiguration,
 		}
 	}
-	
+
 	return nil
 }
 
@@ -770,7 +770,7 @@ func WithCORS(origins []string, credentials bool) Option {
 
 // WithCORSDefaults enables CORS with permissive defaults.
 // Allows all origins, methods, and headers with credentials.
-// 
+//
 // WARNING: This is intended for development only!
 // Never use this in production as it bypasses CORS security.
 func WithCORSDefaults() Option {
@@ -796,7 +796,7 @@ func WithRedisURL(url string) Option {
 	return func(c *Config) error {
 		c.Discovery.RedisURL = url
 		c.Memory.RedisURL = url
-		c.Discovery.Enabled = true  // Auto-enable discovery when Redis is configured
+		c.Discovery.Enabled = true // Auto-enable discovery when Redis is configured
 		return nil
 	}
 }
@@ -828,7 +828,8 @@ func WithDiscoveryCacheEnabled(enabled bool) Option {
 // WithOpenAIAPIKey sets the OpenAI API key and automatically enables AI features.
 // The key should be a valid OpenAI API key starting with "sk-".
 // This is a convenience method equivalent to:
-//   WithAI(true, "openai", key)
+//
+//	WithAI(true, "openai", key)
 //
 // For security, prefer loading the key from environment variables or secrets.
 func WithOpenAIAPIKey(key string) Option {
@@ -918,7 +919,8 @@ func WithEnableTracing(enabled bool) Option {
 
 // WithOTELEndpoint sets the OpenTelemetry endpoint and automatically enables telemetry.
 // This is a convenience method equivalent to:
-//   WithTelemetry(true, endpoint)
+//
+//	WithTelemetry(true, endpoint)
 //
 // The endpoint should be an OTLP receiver address.
 func WithOTELEndpoint(endpoint string) Option {
@@ -1063,7 +1065,7 @@ func WithMockAI(enabled bool) Option {
 	return func(c *Config) error {
 		c.Development.MockAI = enabled
 		if enabled {
-			c.AI.Enabled = true  // Enable AI with mock provider
+			c.AI.Enabled = true // Enable AI with mock provider
 		}
 		return nil
 	}
@@ -1081,7 +1083,7 @@ func WithMockDiscovery(enabled bool) Option {
 	return func(c *Config) error {
 		c.Development.MockDiscovery = enabled
 		if enabled {
-			c.Discovery.Enabled = true  // Enable discovery with mock provider
+			c.Discovery.Enabled = true // Enable discovery with mock provider
 		}
 		return nil
 	}
@@ -1109,23 +1111,23 @@ func WithMockDiscovery(enabled bool) Option {
 func NewConfig(opts ...Option) (*Config, error) {
 	// Start with defaults
 	cfg := DefaultConfig()
-	
+
 	// Load from environment first
 	if err := cfg.LoadFromEnv(); err != nil {
 		return nil, fmt.Errorf("failed to load env config: %w", err)
 	}
-	
+
 	// Apply functional options (these override env vars)
 	for _, opt := range opts {
 		if err := opt(cfg); err != nil {
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
-	
+
 	// Validate final configuration
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
-	
+
 	return cfg, nil
 }

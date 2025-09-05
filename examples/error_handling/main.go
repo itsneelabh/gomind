@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	
+
 	"github.com/itsneelabh/gomind/core"
 )
 
@@ -17,21 +17,21 @@ func main() {
 		log.Println("Agent not found, creating a new one...")
 		// Handle agent not found scenario
 	}
-	
+
 	// Example 2: Using the IsRetryable helper
 	err = callExternalService()
 	if core.IsRetryable(err) {
 		log.Println("Error is retryable, will attempt retry...")
 		// Implement retry logic
 	}
-	
+
 	// Example 3: Using FrameworkError for structured errors
 	err = performOperation()
 	var frameworkErr *core.FrameworkError
 	if errors.As(err, &frameworkErr) {
 		log.Printf("Operation failed: %s in %s", frameworkErr.Op, frameworkErr.Kind)
 	}
-	
+
 	// Example 4: Checking for configuration errors
 	err = validateConfig()
 	if core.IsConfigurationError(err) {
@@ -88,7 +88,7 @@ func (a *MyAgent) Initialize(ctx context.Context) error {
 			Err:     err,
 		}
 	}
-	
+
 	// Custom initialization logic
 	if err := a.setupCustomResources(); err != nil {
 		// Check if it's a known error type
@@ -98,7 +98,7 @@ func (a *MyAgent) Initialize(ctx context.Context) error {
 		}
 		return err
 	}
-	
+
 	return nil
 }
 
