@@ -6,7 +6,7 @@ const (
 	Version = "development"
 
 	// APIVersion is the current API version
-	APIVersion = "v1alpha1"
+	APIVersion = "v1"
 
 	// BuildDate is set during build time
 	BuildDate = "development"

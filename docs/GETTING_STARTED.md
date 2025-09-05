@@ -63,11 +63,8 @@ go mod init my-gomind-project
 ### Step 2: Install GoMind
 
 ```bash
-# Install the latest stable version (recommended)
-go get github.com/itsneelabh/gomind@v0.3.1
-
-# Or install from main branch (latest features)
-# go get github.com/itsneelabh/gomind@main
+# Install from main branch
+go get github.com/itsneelabh/gomind@main
 ```
 
 ### Step 3: Start Redis (required for discovery)
@@ -1279,7 +1276,7 @@ Deep dive into all available features. See the [API Reference](API.md).
 
 ```bash
 # Install GoMind
-go get github.com/itsneelabh/gomind@v0.3.1
+go get github.com/itsneelabh/gomind@main
 
 # Start Redis
 docker run -d --name redis -p 6379:6379 redis:7-alpine
