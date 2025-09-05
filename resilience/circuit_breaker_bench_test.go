@@ -321,6 +321,7 @@ func BenchmarkMutexLockUnlock(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		mu.Lock()
+		// Empty critical section - measuring pure mutex overhead
 		mu.Unlock()
 	}
 }

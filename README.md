@@ -5,9 +5,53 @@
 
 A modular framework for building AI agents in Go with production-grade resilience, observability, and orchestration capabilities built-in from the start.
 
-## What Makes GoMind Different?
+## Why GoMind? The Evolution Towards Production AI Agents
 
-**The Simple Truth**: Many AI agent frameworks are optimized for proof-of-concepts and experimentation. GoMind is built for production deployment from day one.
+### 1. Micro-Agents Are the Future of AI Architecture
+
+**The Paradigm Shift**: Just as microservices revolutionized traditional applications, micro-agents are transforming AI systems. Instead of monolithic AI applications, the future lies in:
+
+- **Specialized Agents**: Each agent masters one domain (data retrieval, analysis, decision-making)
+- **Composable Intelligence**: Combine simple agents to solve complex problems
+- **Independent Scaling**: Scale only the agents that need more resources
+- **Fault Isolation**: One agent failing doesn't crash your entire AI system
+- **Rapid Iteration**: Update individual agents without touching the whole system
+
+### 2. Kubernetes: The Battle-Tested Platform for Micro-Agents
+
+**Why Reinvent the Wheel?** Kubernetes already solved distributed system challenges for microservices. These same solutions apply perfectly to micro-agents:
+
+| Kubernetes Capability | How It Powers Micro-Agents |
+|----------------------|----------------------------|
+| **Auto-scaling** | Spawn more agents based on load |
+| **Health Monitoring** | Restart failed agents automatically |
+| **Load Balancing** | Distribute requests across agent replicas |
+| **Resource Limits** | Prevent runaway agents from consuming all resources |
+| **Rolling Updates** | Deploy new agent versions with zero downtime |
+| **Pod Networking** | Secure communication between agents |
+
+**The GoMind Advantage**: Go applications are Kubernetes-native. Single binary deployments, tiny containers (~16MB), and built-in health checks make Go agents perfect citizens in a Kubernetes cluster.
+
+### 3. Why Go? Language Is No Longer a Barrier
+
+**The AI-Assisted Coding Revolution**: With GitHub Copilot, Claude Code, and Cursor, programming language syntax is no longer a barrier. If you understand programming concepts, AI assistants help you write idiomatic code in any language.
+
+**So Why Choose Go for AI Agents?**
+
+| What You Get with Go | The Reality |
+|---------------------|-------------|
+| **Container Size** | ~16MB (verified with Alpine Linux base) |
+| **Memory Usage** | 10-50MB per agent |
+| **Startup Time** | <1 second |
+| **Deployment** | Single binary - no dependencies |
+| **Concurrency** | Native goroutines - thousands of concurrent operations |
+| **Kubernetes Native** | Built-in health checks, graceful shutdown |
+
+**The Bottom Line**: With AI assistance removing the learning curve, Go gives you production superpowers. You write agents that are faster, smaller, and more reliable.
+
+### 4. What's Missing in Current Frameworks
+
+**The Simple Truth**: Most AI agent frameworks are optimized for demos and experimentation. GoMind is built for production deployment from day one.
 
 ### The Problems We Solve
 
@@ -23,16 +67,56 @@ A modular framework for building AI agents in Go with production-grade resilienc
 🔴 **Common Challenge**: "Add Prometheus, OpenTelemetry, Grafana, configure them all..."
 ✅ **GoMind**: Initialize once, then `telemetry.Counter("task.done")`. Observability built-in.
 
-### Who This Is For
-
-- **You're building production AI agents**, not research prototypes
-- **You care about reliability** - agents that stay up when APIs fail
-- **You want simplicity** - less code, fewer dependencies, cleaner deployment
-- **You need observability** - know what your agents are doing without complex setup
-
 ## How GoMind Works
 
-### Pick What You Need (Modular Design)
+### Architecture - Modular Design for Production
+
+GoMind's architecture is built on independent, composable modules. Start with just the core module and add only what you need - no forced dependencies, no bloat.
+
+```mermaid
+graph TD
+    App["Your Agent Application"]
+    
+    App --> Framework
+    
+    subgraph Framework["GoMind Framework"]
+        Core["<b>CORE MODULE</b><br/>━━━━━━━━━━━━<br/>• BaseAgent<br/>• Discovery<br/>• Capabilities<br/>• Health Checks<br/><i>(Required)</i>"]
+        
+        AI["<b>AI</b><br/>━━━━━━<br/>• LLM Client<br/>• Intelligent Agent<br/>• Embeddings"]
+        
+        Resilience["<b>RESILIENCE</b><br/>━━━━━━<br/>• Circuit Breaker<br/>• Retry Logic<br/>• Timeouts"]
+        
+        Telemetry["<b>TELEMETRY</b><br/>━━━━━━<br/>• Metrics<br/>• Tracing<br/>• Observability"]
+        
+        Orchestration["<b>ORCHESTRATION</b><br/>━━━━━━<br/>• Workflow Engine<br/>• Natural Language<br/>• Multi-Agent"]
+        
+        Core -.->|Optional| AI
+        Core -.->|Optional| Resilience
+        Core -.->|Optional| Telemetry
+        Core -.->|Optional| Orchestration
+    end
+    
+    style Core fill:#0277bd,stroke:#01579b,stroke-width:3px,color:#fff
+    style AI fill:#ef6c00,stroke:#e65100,stroke-width:2px,color:#fff
+    style Resilience fill:#6a1b9a,stroke:#4a148c,stroke-width:2px,color:#fff
+    style Telemetry fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:#fff
+    style Orchestration fill:#ad1457,stroke:#880e4f,stroke-width:2px,color:#fff
+    style App fill:#37474f,stroke:#263238,stroke-width:2px,color:#fff
+```
+
+**Why This Modular Architecture Works**:
+
+- **Core Module (Required)**: Provides the foundation - agent creation, service discovery, health checks
+- **Optional Modules**: Add only what you need:
+  - **AI**: LLM integration for intelligent agents
+  - **Resilience**: Circuit breakers and retry logic for production stability
+  - **Telemetry**: Metrics, tracing, and observability
+  - **Orchestration**: Multi-agent coordination via workflows or natural language
+- **Clean Separation**: Each module has a single responsibility
+- **No Hidden Dependencies**: Modules depend only on Core, not on each other
+- **Incremental Complexity**: Start simple, add modules as your needs grow
+
+### Pick What You Need
 
 ```go
 import (
@@ -498,12 +582,31 @@ func main() {
 
 | What You're Doing | GoMind | Python Frameworks |
 |-------------------|---------|-------------------|
-| **Deploy an agent** | Copy single binary, run | Install Python, pip install 50 packages, pray |
+| **Deploy an agent** | Copy single binary (7-8MB), run | Install Python, pip install 50 packages, pray |
+| **Container image size** | ~16MB (Alpine + Go binary) | 200-900MB (Python + dependencies) |
+| **Memory footprint** | 10-50MB per agent | 100-500MB per agent |
 | **Handle API failures** | Built-in circuit breakers | Add retry library, configure it |
 | **Coordinate agents** | "Analyze this data" (English) | Write orchestration code |
 | **Add observability** | `telemetry.Counter("done")` | Setup Prometheus + Grafana + exporters |
 | **Fix production issue** | Compile-time type safety caught it | Runtime error at 3 AM |
 | **Scale to 100 agents** | Just works (goroutines) | Careful with that GIL |
+
+### Container Image Size Details
+
+**GoMind Agent Images (Using Alpine Linux 3.19 base)**:
+- Base Alpine image: ~8MB
+- Go agent binary: ~7-8MB
+- **Total container size: ~16MB**
+
+Built with:
+- Multi-stage Docker builds (golang:1.25-alpine for building, alpine:3.19 for runtime)
+- CGO_ENABLED=0 for fully static binaries
+- Only ca-certificates added to base Alpine image
+
+Compare to typical Python agent images:
+- Python base image: 100-150MB
+- Dependencies (numpy, pandas, etc.): 200-500MB
+- ML libraries if needed: +300-1000MB
 
 ## When to Use GoMind
 
@@ -518,7 +621,7 @@ func main() {
 - You're doing ML research/experimentation
 - You need cutting-edge Python-only libraries
 - You're prototyping in Jupyter notebooks
-- Your team is Python-only and won't touch Go
+- Complex data science workflows with NumPy/Pandas
 
 ## Installation
 
@@ -560,31 +663,6 @@ spec:
           httpGet:
             path: /health
             port: 8080
-```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────┐
-│           AI Agent Layer                     │
-├─────────────────────────────────────────────┤
-│                                             │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-│  │  Data   │  │Reasoning│  │ Action  │   │
-│  │  Agent  │  │  Agent  │  │  Agent  │   │
-│  └────┬────┘  └────┬────┘  └────┬────┘   │
-│       └────────────┼────────────┘         │
-│                    │                      │
-├─────────────────────────────────────────────┤
-│     Agent Orchestration Layer               │
-│   (Natural Language + Workflow Engine)      │
-├─────────────────────────────────────────────┤
-│        Core Agent Framework                 │
-│   (Base Agent, Discovery, Capabilities)     │
-├─────────────────────────────────────────────┤
-│     Production Infrastructure               │
-│  (Resilience, Telemetry, LLM Integration)  │
-└─────────────────────────────────────────────┘
 ```
 
 ## Module Documentation

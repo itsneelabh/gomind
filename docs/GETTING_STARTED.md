@@ -1,167 +1,87 @@
 # Getting Started with GoMind
 
-Welcome to GoMind! This guide will walk you through building AI-powered agent systems step by step, from installation to production deployment.
-
-## Table of Contents
-- [Prerequisites](#prerequisites)
-- [Core Concepts](#core-concepts)
-- [Installation](#installation)
-- [Quick Start - Your First Agent](#quick-start---your-first-agent)
-- [Building Multi-Agent Systems](#building-multi-agent-systems)
-- [Adding AI Capabilities](#adding-ai-capabilities)
-- [Creating Workflows](#creating-workflows)
-- [Production Patterns](#production-patterns)
-- [Deployment](#deployment)
-- [Troubleshooting](#troubleshooting)
-- [Next Steps](#next-steps)
+Build your first AI agent in 5 minutes, then scale to production.
 
 ## Prerequisites
 
-Before you begin, ensure you have:
-
 ```bash
-# Check Go version (requires 1.21+)
+# Required: Go 1.21+
 go version
 
-# Check Docker (for Redis and optional services)
+# Required: Docker (for Redis)
 docker --version
-
-# Optional: Check for OpenAI API key (for AI features)
-echo $OPENAI_API_KEY
 ```
-
-**Required installations:**
-- **Go 1.21+**: Download from [golang.org](https://golang.org/dl/)
-- **Docker**: Get [Docker Desktop](https://www.docker.com/products/docker-desktop)
-- **Redis**: We'll run it via Docker
-
-**Optional:**
-- **OpenAI API Key**: For AI features, get one at [platform.openai.com](https://platform.openai.com)
-- **Kubernetes**: Use [kind](https://kind.sigs.k8s.io/) or [minikube](https://minikube.sigs.k8s.io/) for local testing
-
-## Core Concepts
-
-GoMind is built around simple, powerful concepts:
-
-| Concept | Description | Example |
-|---------|-------------|---------|
-| **Agents** | Autonomous services that perform specific tasks | Calculator agent, Weather agent |
-| **Capabilities** | Functions that agents expose to others | "calculate", "get_weather" |
-| **Discovery** | How agents find and communicate with each other | Redis-based service registry |
-| **Orchestration** | Coordinating multiple agents to achieve complex goals | AI-driven or workflow-based |
 
 ## Installation
 
-### Step 1: Create a new Go project
-
 ```bash
-mkdir my-gomind-project
-cd my-gomind-project
-go mod init my-gomind-project
-```
+# Create your project
+mkdir my-agent && cd my-agent
+go mod init my-agent
 
-### Step 2: Install GoMind
+# Install GoMind
+go get github.com/itsneelabh/gomind/core@latest
 
-```bash
-# Install from main branch
-go get github.com/itsneelabh/gomind@main
-```
-
-### Step 3: Start Redis (required for discovery)
-
-```bash
-# Start Redis using Docker
+# Start Redis (required for agent discovery registry)
 docker run -d --name redis -p 6379:6379 redis:7-alpine
-
-# Verify Redis is running
-docker exec -it redis redis-cli ping
-# Should output: PONG
 ```
 
-## Quick Start - Your First Agent
+## Your First Agent (2 minutes)
 
-Let's build a simple calculator agent that can perform mathematical operations.
-
-### Create `main.go`:
+Create `main.go`:
 
 ```go
 package main
 
 import (
-    "context"
     "log"
-    
     "github.com/itsneelabh/gomind/core"
 )
 
 func main() {
-    // Create a simple agent with configuration
-    config, err := core.NewConfig(
-        core.WithName("calculator"),
-        core.WithPort(8080),
-        core.WithRedisURL("redis://localhost:6379"),
-        core.WithCORSDefaults(), // Enable CORS for web clients
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
+    // 1. Create an agent
+    agent := core.NewBaseAgent("hello-agent")
     
-    // Create the base agent
-    agent := core.NewBaseAgentWithConfig(config)
-    
-    // Register a capability (what this agent can do)
+    // 2. Tell it what it can do
     agent.RegisterCapability(core.Capability{
-        Name:        "add",
-        Description: "Adds two numbers",
-        Endpoint:    "/api/capabilities/add",
-        InputTypes:  []string{"number", "number"},
-        OutputTypes: []string{"number"},
+        Name:        "greet",
+        Description: "Says hello",
     })
     
-    // Initialize the agent
-    ctx := context.Background()
-    if err := agent.Initialize(ctx); err != nil {
-        log.Fatal(err)
-    }
-    
-    // Start the agent
-    log.Printf("Starting calculator agent on port %d...", config.Port)
-    if err := agent.Start(config.Port); err != nil {
+    // 3. Run it
+    log.Printf("Starting agent on :8080")
+    if err := agent.Start(8080); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-### Run your agent:
+Run it:
 
 ```bash
 go run main.go
+# Output: Starting agent on :8080
 ```
 
-You should see:
-```
-2025/01/20 10:00:00 Starting calculator agent on port 8080...
-```
-
-### Test your agent:
+Test it:
 
 ```bash
-# Check if it's healthy
+# Check health
 curl http://localhost:8080/health
-# Output: {"status":"healthy","agent":"calculator","id":"calculator-abc123"}
+# Output: {"status":"healthy","agent":"hello-agent"}
 
-# See its capabilities
+# See capabilities
 curl http://localhost:8080/api/capabilities
-# Output: [{"name":"add","description":"Adds two numbers",...}]
+# Output: [{"name":"greet","description":"Says hello"}]
 ```
 
-Great! You've created your first agent. But it doesn't actually add numbers yet. Let's fix that.
+🎉 **Congratulations!** You have a running agent. Let's make it do something useful.
 
-## Building a Functional Calculator Agent
+## Building a Real Agent (5 minutes)
 
-Now let's create a calculator that actually works. We'll use a more structured approach:
+Let's create a calculator agent that actually works.
 
-### Create `calculator/main.go`:
+Create `calculator.go`:
 
 ```go
 package main
@@ -172,237 +92,107 @@ import (
     "fmt"
     "log"
     "net/http"
-    "os"
-    "os/signal"
-    "strconv"
     "strings"
-    "syscall"
     
     "github.com/itsneelabh/gomind/core"
 )
 
-// CalculatorAgent performs mathematical operations
 type CalculatorAgent struct {
     *core.BaseAgent
-    server *http.Server
-}
-
-// NewCalculatorAgent creates a new calculator agent
-func NewCalculatorAgent() (*CalculatorAgent, error) {
-    // Create configuration
-    config, err := core.NewConfig(
-        core.WithName("calculator"),
-        core.WithPort(8080),
-        core.WithRedisURL("redis://localhost:6379"),
-        core.WithCORSDefaults(),
-        core.WithDevelopmentMode(), // Enable development features
-    )
-    if err != nil {
-        return nil, fmt.Errorf("failed to create config: %w", err)
-    }
-    
-    // Create base agent
-    baseAgent := core.NewBaseAgentWithConfig(config)
-    
-    // Register capabilities
-    baseAgent.RegisterCapability(core.Capability{
-        Name:        "calculate",
-        Description: "Evaluates mathematical expressions",
-        Endpoint:    "/api/calculate",
-        InputTypes:  []string{"expression"},
-        OutputTypes: []string{"result"},
-    })
-    
-    return &CalculatorAgent{
-        BaseAgent: baseAgent,
-    }, nil
-}
-
-// Calculate evaluates a mathematical expression
-func (c *CalculatorAgent) Calculate(expression string) (float64, error) {
-    // Simple parser for basic operations (production would use a proper parser)
-    expression = strings.TrimSpace(expression)
-    
-    // Try to parse as simple "a op b" format
-    var a, b float64
-    var op string
-    
-    // Try different operators
-    operators := []string{"+", "-", "*", "/", "plus", "minus", "times", "divided by"}
-    found := false
-    
-    for _, operator := range operators {
-        if strings.Contains(expression, operator) {
-            parts := strings.Split(expression, operator)
-            if len(parts) == 2 {
-                var err error
-                a, err = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-                if err != nil {
-                    continue
-                }
-                b, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-                if err != nil {
-                    continue
-                }
-                op = operator
-                found = true
-                break
-            }
-        }
-    }
-    
-    if !found {
-        return 0, fmt.Errorf("invalid expression format")
-    }
-    
-    // Normalize operator
-    switch op {
-    case "+", "plus":
-        return a + b, nil
-    case "-", "minus":
-        return a - b, nil
-    case "*", "times":
-        return a * b, nil
-    case "/", "divided by":
-        if b == 0 {
-            return 0, fmt.Errorf("division by zero")
-        }
-        return a / b, nil
-    default:
-        return 0, fmt.Errorf("unknown operator: %s", op)
-    }
-}
-
-// Start initializes and starts the agent with custom HTTP handlers
-func (c *CalculatorAgent) Start(ctx context.Context) error {
-    // Initialize the base agent
-    if err := c.BaseAgent.Initialize(ctx); err != nil {
-        return fmt.Errorf("failed to initialize: %w", err)
-    }
-    
-    // Create HTTP mux for custom endpoints
-    mux := http.NewServeMux()
-    
-    // Add health check
-    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{
-            "status": "healthy",
-            "agent":  c.BaseAgent.GetName(),
-            "id":     c.BaseAgent.GetID(),
-        })
-    })
-    
-    // Add capabilities endpoint
-    mux.HandleFunc("/api/capabilities", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(c.BaseAgent.GetCapabilities())
-    })
-    
-    // Add calculate endpoint
-    mux.HandleFunc("/api/calculate", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        var request struct {
-            Expression string `json:"expression"`
-        }
-        
-        if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-            http.Error(w, "Invalid request", http.StatusBadRequest)
-            return
-        }
-        
-        result, err := c.Calculate(request.Expression)
-        if err != nil {
-            w.Header().Set("Content-Type", "application/json")
-            w.WriteHeader(http.StatusBadRequest)
-            json.NewEncoder(w).Encode(map[string]string{
-                "error": err.Error(),
-            })
-            return
-        }
-        
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]interface{}{
-            "result":     result,
-            "expression": request.Expression,
-        })
-    })
-    
-    // Create and start server
-    c.server = &http.Server{
-        Addr:    fmt.Sprintf(":%d", c.BaseAgent.Config.Port),
-        Handler: mux,
-    }
-    
-    log.Printf("Calculator agent starting on port %d", c.BaseAgent.Config.Port)
-    return c.server.ListenAndServe()
-}
-
-// Stop gracefully shuts down the agent
-func (c *CalculatorAgent) Stop(ctx context.Context) error {
-    if c.server != nil {
-        return c.server.Shutdown(ctx)
-    }
-    return nil
 }
 
 func main() {
-    // Create agent
-    agent, err := NewCalculatorAgent()
+    // Create calculator agent
+    agent := core.NewBaseAgent("calculator")
+    
+    // Connect to agent discovery registry (optional but recommended)
+    discovery, err := core.NewRedisDiscovery("redis://localhost:6379")
     if err != nil {
-        log.Fatal(err)
+        log.Printf("Warning: No discovery registry, agent running standalone")
+    } else {
+        agent.Discovery = discovery
+        log.Printf("Agent registered in discovery registry")
     }
     
-    // Setup graceful shutdown
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+    // Register this agent's capabilities
+    agent.RegisterCapability(core.Capability{
+        Name:        "add",
+        Description: "Addition capability",
+    })
     
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+    agent.RegisterCapability(core.Capability{
+        Name:        "multiply",
+        Description: "Multiplication capability",
+    })
     
-    go func() {
-        <-sigChan
-        log.Println("Shutting down agent...")
-        if err := agent.Stop(ctx); err != nil {
-            log.Printf("Error during shutdown: %v", err)
-        }
-        cancel()
-    }()
+    // Add custom HTTP handler for calculations
+    // Note: We should ideally register this with the agent's handler
+    agent.RegisterCapability(core.Capability{
+        Name:        "calculate",
+        Description: "Performs calculations",
+        Endpoint:    "/calculate",
+        Handler:     handleCalculate,
+    })
     
     // Start agent
-    if err := agent.Start(ctx); err != nil && err != http.ErrServerClosed {
+    log.Printf("Calculator agent starting on :8080")
+    if err := agent.Start(8080); err != nil {
         log.Fatal(err)
     }
 }
+
+func handleCalculate(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    
+    var req struct {
+        Operation string  `json:"operation"`
+        A         float64 `json:"a"`
+        B         float64 `json:"b"`
+    }
+    
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    
+    var result float64
+    switch strings.ToLower(req.Operation) {
+    case "add":
+        result = req.A + req.B
+    case "multiply":
+        result = req.A * req.B
+    default:
+        http.Error(w, "Unknown operation", http.StatusBadRequest)
+        return
+    }
+    
+    json.NewEncoder(w).Encode(map[string]float64{
+        "result": result,
+    })
+}
 ```
 
-### Test the calculator:
+Test it:
 
 ```bash
-# Run the agent
-go run calculator/main.go
+# Run the calculator
+go run calculator.go
 
-# In another terminal, test it:
-curl -X POST http://localhost:8080/api/calculate \
+# Calculate something
+curl -X POST http://localhost:8080/calculate \
   -H "Content-Type: application/json" \
-  -d '{"expression":"10 + 5"}'
-# Output: {"expression":"10 + 5","result":15}
-
-curl -X POST http://localhost:8080/api/calculate \
-  -H "Content-Type: application/json" \
-  -d '{"expression":"100 / 4"}'
-# Output: {"expression":"100 / 4","result":25}
+  -d '{"operation":"add","a":10,"b":5}'
+# Output: {"result":15}
 ```
 
-## Building Multi-Agent Systems
+## Multi-Agent Coordination (5 minutes)
 
-Now let's create an assistant agent that discovers and uses the calculator:
+Now let's create an assistant agent that discovers and coordinates with the calculator agent.
 
-### Create `assistant/main.go`:
+Create `assistant.go`:
 
 ```go
 package main
@@ -412,643 +202,198 @@ import (
     "context"
     "encoding/json"
     "fmt"
-    "io"
     "log"
     "net/http"
-    "os"
-    "os/signal"
-    "strings"
-    "syscall"
     
     "github.com/itsneelabh/gomind/core"
 )
 
-type AssistantAgent struct {
+type Assistant struct {
     *core.BaseAgent
     discovery core.Discovery
-    server    *http.Server
 }
 
-func NewAssistantAgent() (*AssistantAgent, error) {
-    config, err := core.NewConfig(
-        core.WithName("assistant"),
-        core.WithPort(8081), // Different port from calculator
-        core.WithRedisURL("redis://localhost:6379"),
-        core.WithCORSDefaults(),
-    )
-    if err != nil {
-        return nil, err
-    }
+func main() {
+    // Create assistant agent on different port
+    agent := core.NewBaseAgent("assistant")
+    agent.Config.Port = 8081
     
-    baseAgent := core.NewBaseAgentWithConfig(config)
-    
-    // Setup discovery
+    // Setup discovery to find other agents
     discovery, err := core.NewRedisDiscovery("redis://localhost:6379")
     if err != nil {
-        log.Printf("Warning: Could not connect to Redis, using mock discovery")
-        discovery = core.NewMockDiscovery()
+        log.Fatal("Redis required for multi-agent: ", err)
+    }
+    agent.Discovery = discovery
+    
+    assistant := &Assistant{
+        BaseAgent: agent,
+        discovery: discovery,
     }
     
-    // Register capabilities
-    baseAgent.RegisterCapability(core.Capability{
-        Name:        "assist",
-        Description: "Natural language assistance using other agents",
-        Endpoint:    "/api/assist",
-        InputTypes:  []string{"query"},
-        OutputTypes: []string{"response"},
+    // Register this assistant agent's capability
+    agent.RegisterCapability(core.Capability{
+        Name:        "solve_math",
+        Description: "Coordinates with calculator agent to solve problems",
     })
     
-    return &AssistantAgent{
-        BaseAgent: baseAgent,
-        discovery: discovery,
-    }, nil
+    // Register the solve capability with custom handler
+    agent.RegisterCapability(core.Capability{
+        Name:        "solve",
+        Description: "Solves problems using other agents",
+        Endpoint:    "/solve",
+        Handler:     assistant.handleSolve,
+    })
+    
+    // Start on configured port
+    log.Printf("Assistant starting on :%d", config.Port)
+    if err := agent.Start(config.Port); err != nil {
+        log.Fatal(err)
+    }
 }
 
-func (a *AssistantAgent) CallCalculator(expression string) (float64, error) {
+func (a *Assistant) handleSolve(w http.ResponseWriter, r *http.Request) {
+    var req struct {
+        Problem string `json:"problem"`
+    }
+    
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+    
+    // Find calculator agent
     ctx := context.Background()
-    
-    // Find calculator service
-    services, err := a.discovery.FindByCapability(ctx, "calculate")
-    if err != nil {
-        return 0, fmt.Errorf("discovery error: %w", err)
+    agents, err := a.discovery.FindByCapability(ctx, "add")
+    if err != nil || len(agents) == 0 {
+        http.Error(w, "Calculator not available", http.StatusServiceUnavailable)
+        return
     }
     
-    if len(services) == 0 {
-        return 0, fmt.Errorf("calculator service not available")
+    // Connect to the first available calculator agent
+    calculatorAgent := agents[0]
+    calcURL := fmt.Sprintf("http://%s:%d/calculate", calculatorAgent.Address, calculatorAgent.Port)
+    
+    // For demo, we'll just add 10 + 20
+    payload := map[string]interface{}{
+        "operation": "add",
+        "a":         10,
+        "b":         20,
     }
     
-    // Use first available service
-    service := services[0]
-    url := fmt.Sprintf("http://%s:%d/api/calculate", service.Address, service.Port)
-    
-    // Prepare request
-    reqBody, _ := json.Marshal(map[string]string{
-        "expression": expression,
-    })
-    
-    // Make HTTP call
-    resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBody))
+    body, _ := json.Marshal(payload)
+    resp, err := http.Post(calcURL, "application/json", bytes.NewBuffer(body))
     if err != nil {
-        return 0, fmt.Errorf("failed to call calculator: %w", err)
+        http.Error(w, "Failed to call calculator", http.StatusInternalServerError)
+        return
     }
     defer resp.Body.Close()
     
-    // Parse response
-    body, _ := io.ReadAll(resp.Body)
-    var result struct {
-        Result float64 `json:"result"`
-        Error  string  `json:"error"`
+    var result map[string]float64
+    json.NewDecoder(resp.Body).Decode(&result)
+    
+    response := map[string]interface{}{
+        "problem": req.Problem,
+        "answer":  result["result"],
+        "solved_by": calculatorAgent.ID,  // Which agent helped
     }
     
-    if err := json.Unmarshal(body, &result); err != nil {
-        return 0, fmt.Errorf("failed to parse response: %w", err)
-    }
-    
-    if result.Error != "" {
-        return 0, fmt.Errorf("calculator error: %s", result.Error)
-    }
-    
-    return result.Result, nil
-}
-
-func (a *AssistantAgent) ProcessQuery(query string) (string, error) {
-    query = strings.ToLower(query)
-    
-    // Check if this is a math question
-    mathKeywords := []string{"calculate", "compute", "what is", "how much", "solve"}
-    isMath := false
-    for _, keyword := range mathKeywords {
-        if strings.Contains(query, keyword) {
-            isMath = true
-            break
-        }
-    }
-    
-    if isMath {
-        // Extract expression from query
-        expression := query
-        for _, keyword := range mathKeywords {
-            expression = strings.ReplaceAll(expression, keyword, "")
-        }
-        expression = strings.TrimSpace(expression)
-        expression = strings.Trim(expression, "?")
-        
-        // Try to calculate
-        result, err := a.CallCalculator(expression)
-        if err != nil {
-            return fmt.Sprintf("I couldn't calculate that: %v", err), nil
-        }
-        
-        return fmt.Sprintf("The answer is: %.2f", result), nil
-    }
-    
-    // Default response
-    return "I can help you with calculations. Try asking 'What is 10 + 5?'", nil
-}
-
-func (a *AssistantAgent) Start(ctx context.Context) error {
-    // Initialize base agent
-    if err := a.BaseAgent.Initialize(ctx); err != nil {
-        return err
-    }
-    
-    // Setup HTTP handlers
-    mux := http.NewServeMux()
-    
-    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{
-            "status": "healthy",
-            "agent":  a.BaseAgent.GetName(),
-        })
-    })
-    
-    mux.HandleFunc("/api/assist", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        var request struct {
-            Query string `json:"query"`
-        }
-        
-        if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-            http.Error(w, "Invalid request", http.StatusBadRequest)
-            return
-        }
-        
-        response, err := a.ProcessQuery(request.Query)
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{
-            "response": response,
-        })
-    })
-    
-    // Start server
-    a.server = &http.Server{
-        Addr:    fmt.Sprintf(":%d", a.BaseAgent.Config.Port),
-        Handler: mux,
-    }
-    
-    log.Printf("Assistant agent starting on port %d", a.BaseAgent.Config.Port)
-    return a.server.ListenAndServe()
-}
-
-func (a *AssistantAgent) Stop(ctx context.Context) error {
-    if a.server != nil {
-        return a.server.Shutdown(ctx)
-    }
-    return nil
-}
-
-func main() {
-    agent, err := NewAssistantAgent()
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    ctx := context.Background()
-    
-    // Graceful shutdown
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-    
-    go func() {
-        <-sigChan
-        log.Println("Shutting down...")
-        agent.Stop(ctx)
-        os.Exit(0)
-    }()
-    
-    if err := agent.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
+    json.NewEncoder(w).Encode(response)
 }
 ```
 
-### Test multi-agent communication:
+Test multi-agent coordination:
 
 ```bash
 # Terminal 1: Run calculator
-go run calculator/main.go
+go run calculator.go
 
 # Terminal 2: Run assistant
-go run assistant/main.go
+go run assistant.go
 
-# Terminal 3: Test the assistant
-curl -X POST http://localhost:8081/api/assist \
+# Terminal 3: Test
+curl -X POST http://localhost:8081/solve \
   -H "Content-Type: application/json" \
-  -d '{"query":"What is 25 + 75?"}'
-# Output: {"response":"The answer is: 100.00"}
+  -d '{"problem":"What is 10 + 20?"}'
+# Output: {"answer":30,"problem":"What is 10 + 20?","solved_by":"calculator-agent-abc123"}
 ```
 
-## Adding AI Capabilities
+## Adding Production Features to Your Agents
 
-Let's enhance our assistant with OpenAI integration:
-
-### Create `ai-assistant/main.go`:
+### 1. Resilience (Circuit Breakers)
 
 ```go
-package main
+import "github.com/itsneelabh/gomind/resilience"
 
-import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "log"
-    "net/http"
-    "os"
-    
-    "github.com/itsneelabh/gomind/ai"
-    "github.com/itsneelabh/gomind/core"
+// Wrap external calls with circuit breaker
+cb := resilience.NewCircuitBreaker(resilience.DefaultConfig())
+
+err := cb.Execute(ctx, func() error {
+    // Your risky operation
+    return callExternalAPI()
+})
+```
+
+### 2. Observability (Metrics)
+
+```go
+import "github.com/itsneelabh/gomind/telemetry"
+
+// Initialize once
+telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
+
+// Use anywhere
+telemetry.Counter("requests.processed", "agent", "calculator")
+telemetry.Histogram("response.time", 234.5, "endpoint", "/calculate")
+```
+
+### 3. AI Integration
+
+```go
+import "github.com/itsneelabh/gomind/ai"
+
+// Create intelligent agent (has tool discovery capabilities)
+agent := ai.NewIntelligentAgent("ai-assistant", os.Getenv("OPENAI_API_KEY"))
+
+// Use the intelligent agent's tool discovery
+response, err := agent.DiscoverAndUseTools(ctx, "Explain quantum computing")
+```
+
+### 4. Orchestration
+
+```go
+import "github.com/itsneelabh/gomind/orchestration"
+
+// Natural language orchestration
+aiClient := ai.NewOpenAIClient(os.Getenv("OPENAI_API_KEY"), nil)
+orchestrator := orchestration.NewAIOrchestrator(
+    orchestration.DefaultConfig(),
+    discovery,
+    aiClient,
 )
 
-type AIAssistant struct {
-    *ai.IntelligentAgent
-    server *http.Server
-}
-
-func NewAIAssistant() (*AIAssistant, error) {
-    // Get API key from environment
-    apiKey := os.Getenv("OPENAI_API_KEY")
-    if apiKey == "" {
-        return nil, fmt.Errorf("OPENAI_API_KEY environment variable not set")
-    }
-    
-    // Create intelligent agent with AI capabilities
-    intelligentAgent := ai.NewIntelligentAgent("ai-assistant", apiKey)
-    
-    // Configure the agent
-    config, _ := core.NewConfig(
-        core.WithName("ai-assistant"),
-        core.WithPort(8082),
-        core.WithRedisURL("redis://localhost:6379"),
-    )
-    intelligentAgent.BaseAgent.Config = config
-    
-    // Register capability
-    intelligentAgent.RegisterCapability(core.Capability{
-        Name:        "ai_assist",
-        Description: "AI-powered assistance using GPT-4",
-        Endpoint:    "/api/ai-assist",
-        InputTypes:  []string{"prompt"},
-        OutputTypes: []string{"response"},
-    })
-    
-    return &AIAssistant{
-        IntelligentAgent: intelligentAgent,
-    }, nil
-}
-
-func (a *AIAssistant) ProcessWithAI(prompt string) (string, error) {
-    ctx := context.Background()
-    
-    // First, try to discover and use relevant tools
-    toolResponse, err := a.DiscoverAndUseTools(ctx, prompt)
-    if err == nil && toolResponse != "" {
-        return toolResponse, nil
-    }
-    
-    // Fallback to direct AI response
-    aiOptions := &core.AIOptions{
-        Model:        "gpt-4",
-        Temperature:  0.7,
-        MaxTokens:    500,
-        SystemPrompt: "You are a helpful assistant in a multi-agent system.",
-    }
-    
-    response, err := a.AI.GenerateResponse(ctx, prompt, aiOptions)
-    if err != nil {
-        return "", fmt.Errorf("AI error: %w", err)
-    }
-    
-    return response.Content, nil
-}
-
-func (a *AIAssistant) Start(ctx context.Context) error {
-    // Initialize agent
-    if err := a.Initialize(ctx); err != nil {
-        return err
-    }
-    
-    // Setup HTTP handlers
-    mux := http.NewServeMux()
-    
-    mux.HandleFunc("/api/ai-assist", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        var request struct {
-            Prompt string `json:"prompt"`
-        }
-        
-        if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-            http.Error(w, "Invalid request", http.StatusBadRequest)
-            return
-        }
-        
-        response, err := a.ProcessWithAI(request.Prompt)
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{
-            "response": response,
-        })
-    })
-    
-    // Start server
-    a.server = &http.Server{
-        Addr:    fmt.Sprintf(":%d", a.BaseAgent.Config.Port),
-        Handler: mux,
-    }
-    
-    log.Printf("AI Assistant starting on port %d", a.BaseAgent.Config.Port)
-    return a.server.ListenAndServe()
-}
-
-func main() {
-    agent, err := NewAIAssistant()
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    ctx := context.Background()
-    if err := agent.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-}
-```
-
-### Test AI capabilities:
-
-```bash
-# Set your OpenAI API key
-export OPENAI_API_KEY="your-api-key-here"
-
-# Run the AI assistant
-go run ai-assistant/main.go
-
-# Test it
-curl -X POST http://localhost:8082/api/ai-assist \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Explain quantum computing in simple terms"}'
-```
-
-## Creating Workflows
-
-For complex multi-step processes, use the workflow engine:
-
-### Create a workflow YAML file `workflow.yaml`:
-
-```yaml
-name: data-processing
-version: "1.0"
-description: Process data through multiple agents
-
-inputs:
-  data:
-    type: string
-    required: true
-    description: Data to process
-
-steps:
-  - name: validate
-    agent: validator
-    action: validate_data
-    inputs:
-      data: ${inputs.data}
-    timeout: 10s
-    
-  - name: transform
-    agent: transformer  
-    action: transform_data
-    inputs:
-      data: ${steps.validate.output}
-    depends_on: [validate]
-    
-  - name: analyze
-    agent: analyzer
-    action: analyze_data
-    inputs:
-      data: ${steps.transform.output}
-    depends_on: [transform]
-    
-  - name: store
-    agent: storage
-    action: store_result
-    inputs:
-      result: ${steps.analyze.output}
-    depends_on: [analyze]
-    retry:
-      max_attempts: 3
-      backoff: exponential
-
-outputs:
-  result: ${steps.store.output}
-  status: "completed"
-
-on_error:
-  strategy: continue
-```
-
-### Execute workflow in code:
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-    
-    "github.com/itsneelabh/gomind/core"
-    "github.com/itsneelabh/gomind/orchestration"
+response, err := orchestrator.ProcessRequest(ctx, 
+    "Get weather for NYC and analyze if good for outdoor events",
+    nil,
 )
-
-func main() {
-    // Setup discovery
-    discovery, err := core.NewRedisDiscovery("redis://localhost:6379")
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    // Create workflow engine
-    engine := orchestration.NewWorkflowEngine(discovery)
-    
-    // Load workflow from file
-    yamlData, err := os.ReadFile("workflow.yaml")
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    // Parse workflow
-    workflow, err := engine.ParseWorkflowYAML(yamlData)
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    // Execute workflow
-    inputs := map[string]interface{}{
-        "data": "sample data to process",
-    }
-    
-    ctx := context.Background()
-    execution, err := engine.ExecuteWorkflow(ctx, workflow, inputs)
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    // Check results
-    fmt.Printf("Workflow completed: %s\n", execution.Status)
-    fmt.Printf("Result: %v\n", execution.Outputs["result"])
-}
-```
-
-## Production Patterns
-
-### 1. Resilience Pattern
-
-Add circuit breakers and retries for production reliability:
-
-```go
-import (
-    "github.com/itsneelabh/gomind/resilience"
-)
-
-func CallServiceWithResilience(url string, data []byte) ([]byte, error) {
-    // Create circuit breaker
-    cb := resilience.NewCircuitBreaker(5, 30*time.Second)
-    
-    // Configure retry
-    retryConfig := resilience.DefaultRetryConfig()
-    retryConfig.MaxAttempts = 3
-    retryConfig.InitialDelay = 100 * time.Millisecond
-    
-    var response []byte
-    err := resilience.RetryWithCircuitBreaker(
-        context.Background(),
-        retryConfig,
-        cb,
-        func() error {
-            resp, err := http.Post(url, "application/json", bytes.NewBuffer(data))
-            if err != nil {
-                return err
-            }
-            defer resp.Body.Close()
-            
-            if resp.StatusCode >= 500 {
-                return fmt.Errorf("server error: %d", resp.StatusCode)
-            }
-            
-            response, err = io.ReadAll(resp.Body)
-            return err
-        },
-    )
-    
-    return response, err
-}
-```
-
-### 2. Observability Pattern
-
-Add distributed tracing for monitoring:
-
-```go
-import (
-    "github.com/itsneelabh/gomind/telemetry"
-)
-
-func SetupTelemetry(serviceName string) (*telemetry.OTelProvider, error) {
-    // Create telemetry provider
-    provider, err := telemetry.NewOTelProvider(
-        serviceName,
-        "localhost:4317", // OTLP collector endpoint
-    )
-    if err != nil {
-        return nil, err
-    }
-    
-    return provider, nil
-}
-
-// Use in your agent
-func (a *MyAgent) ProcessWithTracing(ctx context.Context, data string) error {
-    // Start a span
-    ctx, span := a.telemetry.StartSpan(ctx, "process_data")
-    defer span.End()
-    
-    // Add attributes
-    span.SetAttribute("data.length", len(data))
-    span.SetAttribute("agent.name", a.GetName())
-    
-    // Do work
-    result, err := a.process(data)
-    if err != nil {
-        span.RecordError(err)
-        return err
-    }
-    
-    span.SetAttribute("result.size", len(result))
-    return nil
-}
-```
-
-### 3. Configuration Pattern
-
-Use environment variables for production config:
-
-```go
-func LoadConfigFromEnv() (*core.Config, error) {
-    port := 8080
-    if p := os.Getenv("GOMIND_PORT"); p != "" {
-        port, _ = strconv.Atoi(p)
-    }
-    
-    redisURL := os.Getenv("REDIS_URL")
-    if redisURL == "" {
-        redisURL = "redis://localhost:6379"
-    }
-    
-    logLevel := os.Getenv("LOG_LEVEL")
-    if logLevel == "" {
-        logLevel = "info"
-    }
-    
-    return core.NewConfig(
-        core.WithName(os.Getenv("AGENT_NAME")),
-        core.WithPort(port),
-        core.WithRedisURL(redisURL),
-        core.WithLogLevel(logLevel),
-        core.WithNamespace(os.Getenv("NAMESPACE")),
-    )
-}
 ```
 
 ## Deployment
 
-### Docker Deployment
-
-Create a `Dockerfile`:
+### Docker (Single Binary ~16MB)
 
 ```dockerfile
 # Build stage
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum* ./
 RUN go mod download
+
+# Copy source code
 COPY . .
+
+# Build static binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o agent .
 
 # Runtime stage
@@ -1056,57 +401,42 @@ FROM alpine:3.19
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 COPY --from=builder /app/agent .
+EXPOSE 8080
 CMD ["./agent"]
 ```
 
-Build and run:
-
-```bash
-# Build image
-docker build -t my-agent:v1 .
-
-# Run container
-docker run -d \
-  --name my-agent \
-  -p 8080:8080 \
-  -e REDIS_URL=redis://host.docker.internal:6379 \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  my-agent:v1
-```
-
-### Kubernetes Deployment
-
-Create `k8s-deployment.yaml`:
+### Kubernetes
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: calculator-agent
-  namespace: gomind
+  name: my-agent
+  labels:
+    app: my-agent
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: calculator-agent
+      app: my-agent
   template:
     metadata:
       labels:
-        app: calculator-agent
+        app: my-agent
     spec:
       containers:
       - name: agent
-        image: my-registry/calculator-agent:v1
+        image: my-agent:latest
         ports:
         - containerPort: 8080
           name: http
         env:
-        - name: AGENT_NAME
-          value: "calculator"
         - name: REDIS_URL
-          value: "redis://redis.gomind.svc.cluster.local:6379"
-        - name: LOG_LEVEL
-          value: "info"
+          value: "redis://redis:6379"
+        - name: GOMIND_AGENT_NAME
+          value: "my-agent"
+        - name: GOMIND_PORT
+          value: "8080"
         livenessProbe:
           httpGet:
             path: /health
@@ -1121,224 +451,262 @@ spec:
           periodSeconds: 5
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "10Mi"    # Go agents typically use 10-20MB
+            cpu: "50m"       # 0.05 CPU cores
           limits:
-            memory: "256Mi"
-            cpu: "500m"
+            memory: "50Mi"    # Limit to 50MB
+            cpu: "200m"      # Allow burst to 0.2 CPU cores
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: calculator-agent
-  namespace: gomind
+  name: my-agent
 spec:
   selector:
-    app: calculator-agent
+    app: my-agent
   ports:
   - port: 80
     targetPort: 8080
-    name: http
+    protocol: TCP
   type: ClusterIP
 ```
 
-Deploy to Kubernetes:
+## Common Agent Patterns
 
-```bash
-# Create namespace
-kubectl create namespace gomind
+### Pattern 1: Agent Discovery
 
-# Deploy Redis first
-kubectl apply -n gomind -f redis-deployment.yaml
-
-# Deploy your agent
-kubectl apply -f k8s-deployment.yaml
-
-# Check status
-kubectl get pods -n gomind
-kubectl logs -n gomind -l app=calculator-agent
-```
-
-## Troubleshooting
-
-### Common Issues and Solutions
-
-#### 1. Agent not registering with Redis
-
-**Problem:** Agent starts but doesn't appear in discovery.
-
-**Solution:**
-```bash
-# Check Redis connectivity
-redis-cli ping
-
-# Check registrations
-redis-cli KEYS "agents:*"
-
-# Debug mode
-export LOG_LEVEL=debug
-go run main.go
-```
-
-#### 2. Cannot find other agents
-
-**Problem:** Agents can't discover each other.
-
-**Solution:**
 ```go
-// Add debug logging
-services, err := discovery.FindByCapability(ctx, "calculate")
-log.Printf("Found %d services with capability 'calculate'", len(services))
-for _, svc := range services {
-    log.Printf("Service: %s at %s:%d", svc.Name, svc.Address, svc.Port)
+// Register your agent
+discovery, _ := core.NewRedisDiscovery("redis://localhost:6379")
+agent.Discovery = discovery
+
+// Find other agents
+services, _ := discovery.FindByCapability(ctx, "calculate")
+for _, service := range services {
+    fmt.Printf("Found: %s at %s:%d\n", service.Name, service.Address, service.Port)
 }
 ```
 
-#### 3. High latency between agents
+### Pattern 2: Agent Lifecycle Management
 
-**Problem:** Slow response times in multi-agent systems.
-
-**Solutions:**
-- Enable connection pooling
-- Add caching for discovery results
-- Use circuit breakers to fail fast
-- Monitor with distributed tracing
-
-#### 4. Memory leaks
-
-**Problem:** Agent memory usage grows over time.
-
-**Solution:**
 ```go
-// Add pprof for profiling
-import _ "net/http/pprof"
+import (
+    "os"
+    "os/signal"
+    "syscall"
+)
 
 func main() {
-    // Enable profiling endpoint
+    agent := core.NewBaseAgent("my-agent")
+    
+    // Handle agent shutdown gracefully
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+    
     go func() {
-        log.Println(http.ListenAndServe("localhost:6060", nil))
+        <-sigChan
+        log.Println("Agent shutting down gracefully...")
+        agent.Stop(context.Background())
+        os.Exit(0)
     }()
     
-    // Your agent code...
+    agent.Start(8080)
+}
+```
+
+### Pattern 3: Inter-Agent Error Handling
+
+```go
+// Always check agent discovery registry
+discovery, err := core.NewRedisDiscovery(redisURL)
+if err != nil {
+    log.Printf("Agent discovery not available: %v", err)
+    // Agent can run standalone or use mock discovery
+    discovery = core.NewMockDiscovery()
 }
 
-// Profile memory
-// go tool pprof http://localhost:6060/debug/pprof/heap
+// Check if required agents are available
+agents, err := discovery.FindByCapability(ctx, "capability")
+if err != nil {
+    return fmt.Errorf("agent discovery failed: %w", err)
+}
+if len(agents) == 0 {
+    return fmt.Errorf("no agents with required capability found")
+}
 ```
-
-### Debug Commands
-
-```bash
-# Check agent health
-curl http://localhost:8080/health
-
-# List capabilities
-curl http://localhost:8080/api/capabilities
-
-# Check Redis
-redis-cli
-> KEYS agents:*
-> HGETALL agents:registry
-
-# View logs
-docker logs my-agent
-
-# Kubernetes debugging
-kubectl describe pod <pod-name> -n gomind
-kubectl logs <pod-name> -n gomind
-kubectl exec -it <pod-name> -n gomind -- sh
-```
-
-## Next Steps
-
-Now that you've built your first agents, explore these advanced topics:
-
-### 1. Build Complex AI Orchestrations
-Learn to coordinate multiple AI agents for complex tasks. See the [Orchestration Module README](../orchestration/README.md).
-
-### 2. Add Production Monitoring
-Implement comprehensive observability with OpenTelemetry. See the [Telemetry Module README](../telemetry/README.md).
-
-### 3. Implement Advanced Resilience
-Add sophisticated fault tolerance patterns. See the [Resilience Module README](../resilience/README.md).
-
-### 4. Explore the Full API
-Deep dive into all available features. See the [API Reference](API.md).
-
-### 5. Join the Community
-- Report issues: [GitHub Issues](https://github.com/itsneelabh/gomind/issues)
-- Contribute: Fork and submit PRs
-- Discuss: Join discussions in issues
 
 ## Quick Reference
 
 ### Essential Commands
 
 ```bash
-# Install GoMind
-go get github.com/itsneelabh/gomind@main
+# Install GoMind for agents
+go get github.com/itsneelabh/gomind/core@latest
 
-# Start Redis
+# Run Redis for agent discovery
 docker run -d --name redis -p 6379:6379 redis:7-alpine
 
-# Run agent
-go run main.go
+# Build your agent
+CGO_ENABLED=0 go build -o agent
 
-# Test endpoints
+# Test agent health
 curl http://localhost:8080/health
-curl http://localhost:8080/api/capabilities
 
-# Build for production
-CGO_ENABLED=0 GOOS=linux go build -o agent
-
-# Docker operations
-docker build -t my-agent:v1 .
-docker run -d -p 8080:8080 my-agent:v1
-
-# Kubernetes operations
-kubectl apply -f deployment.yaml
-kubectl get pods
-kubectl logs -f <pod-name>
-```
-
-### Configuration Options
-
-```go
-// All available options
-config, err := core.NewConfig(
-    core.WithName("my-agent"),
-    core.WithPort(8080),
-    core.WithAddress("0.0.0.0"),
-    core.WithNamespace("production"),
-    core.WithRedisURL("redis://localhost:6379"),
-    core.WithCORS(corsConfig),
-    core.WithCORSDefaults(),
-    core.WithLogLevel("info"),
-    core.WithLogFormat("json"),
-    core.WithDevelopmentMode(),
-    core.WithMockDiscovery(),
-    core.WithOpenAIAPIKey("sk-..."),
-    core.WithOTELEndpoint("localhost:4317"),
-)
+# Dockerize your agent
+docker build -t my-agent .
+docker run -p 8080:8080 my-agent
 ```
 
 ### Environment Variables
 
 ```bash
 # Core configuration
-export AGENT_NAME="my-agent"
-export GOMIND_PORT="8080"
-export REDIS_URL="redis://localhost:6379"
-export LOG_LEVEL="info"
-export NAMESPACE="default"
+GOMIND_AGENT_NAME=my-agent
+GOMIND_PORT=8080
+REDIS_URL=redis://localhost:6379
 
-# AI configuration
-export OPENAI_API_KEY="sk-..."
-
-# Telemetry
-export OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317"
+# Optional
+OPENAI_API_KEY=sk-...
+LOG_LEVEL=debug
+GOMIND_NAMESPACE=default
 ```
+
+### Module Imports
+
+```go
+// Core (always needed for agents)
+import "github.com/itsneelabh/gomind/core"
+
+// Optional modules for agent capabilities
+import "github.com/itsneelabh/gomind/ai"          // AI-powered agents
+import "github.com/itsneelabh/gomind/resilience"  // Agent resilience
+import "github.com/itsneelabh/gomind/telemetry"   // Agent metrics & tracing
+import "github.com/itsneelabh/gomind/orchestration" // Multi-agent orchestration
+```
+
+## Common Gotchas
+
+### Health endpoint returns 404
+**Problem**: `/health` endpoint not working
+**Solution**: Health endpoint should work by default with `NewBaseAgent()` after recent fixes
+
+### Custom handlers not working
+**Problem**: HTTP handlers registered with `http.HandleFunc` aren't accessible
+**Solution**: Use `agent.RegisterCapability()` with `Handler` field:
+```go
+agent.RegisterCapability(core.Capability{
+    Name:     "custom",
+    Endpoint: "/custom",
+    Handler:  yourHandlerFunc,
+})
+```
+
+### Can't access AI methods
+**Problem**: `agent.GenerateResponse` doesn't exist on IntelligentAgent
+**Solution**: Use `agent.DiscoverAndUseTools()` or access via `EnableAI()`:
+```go
+// For tool discovery
+agent := ai.NewIntelligentAgent(name, apiKey)
+result, _ := agent.DiscoverAndUseTools(ctx, query)
+
+// For direct AI calls
+baseAgent := core.NewBaseAgent("my-agent")
+ai.EnableAI(baseAgent, apiKey)
+response, _ := baseAgent.AI.GenerateResponse(ctx, prompt, nil)
+```
+
+## Troubleshooting
+
+### Agent won't start
+```bash
+# Check port availability
+lsof -i :8080
+
+# Check Redis
+redis-cli ping
+```
+
+### Can't find other agents
+```bash
+# Check Redis registrations
+redis-cli KEYS "agents:*"
+
+# Enable debug logging
+LOG_LEVEL=debug go run main.go
+```
+
+### High memory usage
+```go
+// Add profiling
+import _ "net/http/pprof"
+go func() {
+    log.Println(http.ListenAndServe("localhost:6060", nil))
+}()
+// Profile: go tool pprof http://localhost:6060/debug/pprof/heap
+```
+
+## API Quick Reference
+
+### Creating Agents
+```go
+// Simple pattern
+agent := core.NewBaseAgent("agent-name")
+
+// Or with custom config
+config := core.DefaultConfig()
+config.Name = "agent-name"
+config.Port = 8080
+agent := core.NewBaseAgentWithConfig(config)
+```
+
+### Registering Capabilities
+```go
+agent.RegisterCapability(core.Capability{
+    Name:        "capability-name",
+    Description: "What it does",
+    Endpoint:    "/api/endpoint",  // Optional, auto-generated if empty
+    Handler:     customHandler,     // Optional custom handler
+})
+```
+
+### Agent Discovery Registry
+```go
+// Register this agent in the discovery registry
+discovery, _ := core.NewRedisDiscovery("redis://localhost:6379")
+agent.Discovery = discovery
+
+// Discover other agents by their capabilities
+agents, _ := discovery.FindByCapability(ctx, "calculate")
+for _, agent := range agents {
+    fmt.Printf("Found %s agent at %s:%d\n", agent.Name, agent.Address, agent.Port)
+}
+```
+
+### Starting Your Agent
+```go
+// Initialize agent (registers with discovery)
+agent.Initialize(ctx)
+
+// Start the agent's HTTP server
+agent.Start(port)  // Blocks until shutdown
+```
+
+## Next Steps
+
+**You've learned the basics!** Now explore:
+
+1. **[AI Module](../ai/README.md)** - Build intelligent AI-powered agents
+2. **[Orchestration Module](../orchestration/README.md)** - Coordinate multi-agent systems
+3. **[Resilience Module](../resilience/README.md)** - Make agents fault-tolerant
+4. **[Telemetry Module](../telemetry/README.md)** - Monitor agent behavior and performance
+5. **[API Reference](API.md)** - Complete agent framework API
+
+## Need Help?
+
+- 📖 Read module-specific READMEs for deep dives
+- 🐛 Report issues on [GitHub](https://github.com/itsneelabh/gomind/issues)
+- 💡 Check [examples/](../examples/) for working code
 
 ---
 
-**Congratulations!** 🎉 You're now ready to build production-grade multi-agent systems with GoMind. Start simple, iterate, and scale as needed. Happy building!
+**Happy Building!** 🚀 Start simple, add modules as needed, scale to production.
