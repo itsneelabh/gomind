@@ -215,6 +215,7 @@ type DevelopmentConfig struct {
 type KubernetesConfig struct {
 	Enabled                bool   `json:"enabled" env:"KUBERNETES_SERVICE_HOST"`
 	ServiceName            string `json:"service_name" env:"GOMIND_K8S_SERVICE_NAME"`
+	ServicePort            int    `json:"service_port" env:"GOMIND_K8S_SERVICE_PORT" default:"80"`
 	PodName                string `json:"pod_name" env:"HOSTNAME"`
 	PodNamespace           string `json:"pod_namespace" env:"GOMIND_K8S_NAMESPACE"`
 	PodIP                  string `json:"pod_ip" env:"GOMIND_K8S_POD_IP"`
@@ -332,6 +333,7 @@ func DefaultConfig() *Config {
 			PrettyLogs:    false,
 		},
 		Kubernetes: KubernetesConfig{
+			ServicePort:            80,
 			ServiceAccountPath:     "/var/run/secrets/kubernetes.io/serviceaccount",
 			EnableServiceDiscovery: true,
 			EnableLeaderElection:   false,
@@ -540,6 +542,11 @@ func (c *Config) LoadFromEnv() error {
 		}
 		if v := os.Getenv("GOMIND_K8S_SERVICE_NAME"); v != "" {
 			c.Kubernetes.ServiceName = v
+		}
+		if v := os.Getenv("GOMIND_K8S_SERVICE_PORT"); v != "" {
+			if port, err := strconv.Atoi(v); err == nil && port > 0 && port <= 65535 {
+				c.Kubernetes.ServicePort = port
+			}
 		}
 		if v := os.Getenv("GOMIND_K8S_POD_IP"); v != "" {
 			c.Kubernetes.PodIP = v

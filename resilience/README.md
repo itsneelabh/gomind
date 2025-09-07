@@ -833,10 +833,10 @@ func (c *Client) Call(ctx context.Context) error {
 - Idempotent operations
 
 **Use Both when:**
-- Mission-critical services
-- Payment processing
+- Mission-critical tools and agents
+- Payment processing components
 - High-availability requirements
-- Production microservices
+- Production distributed systems
 
 ### The Power of Resilience
 

@@ -502,7 +502,7 @@ func TestCircuitBreakerVolumeThreshold(t *testing.T) {
 
 	// Generate 5 failures (100% error rate but below volume threshold)
 	for i := 0; i < 5; i++ {
-		cb.Execute(context.Background(), func() error {
+		_ = cb.Execute(context.Background(), func() error {
 			return errors.New("test error")
 		})
 	}
@@ -514,7 +514,7 @@ func TestCircuitBreakerVolumeThreshold(t *testing.T) {
 
 	// Add 5 more failures to reach volume threshold
 	for i := 0; i < 5; i++ {
-		cb.Execute(context.Background(), func() error {
+		_ = cb.Execute(context.Background(), func() error {
 			return errors.New("test error")
 		})
 	}
@@ -582,7 +582,7 @@ func TestErrorClassifierCustom(t *testing.T) {
 
 	// Non-critical errors should not count
 	for i := 0; i < 5; i++ {
-		cb.Execute(context.Background(), func() error {
+		_ = cb.Execute(context.Background(), func() error {
 			return errors.New("minor")
 		})
 	}
@@ -594,7 +594,7 @@ func TestErrorClassifierCustom(t *testing.T) {
 
 	// Critical errors should count
 	for i := 0; i < 3; i++ {
-		cb.Execute(context.Background(), func() error {
+		_ = cb.Execute(context.Background(), func() error {
 			return errors.New("critical")
 		})
 	}

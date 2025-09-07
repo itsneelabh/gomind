@@ -1,385 +1,543 @@
 # GoMind Core Module
 
-The core module provides the fundamental building blocks for the GoMind framework. It contains essential interfaces, base agent implementation, configuration management, and basic discovery capabilities. This module is designed to be lightweight (8MB) and serves as the foundation for all other GoMind modules.
+Welcome to the foundation of intelligent agent systems! This guide will walk you through everything step-by-step, like a friendly mentor sitting right next to you. ☕
 
-## Table of Contents
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Components](#components)
-- [Configuration](#configuration)
-- [Examples](#examples)
-- [API Reference](#api-reference)
+## 🎯 What Is This Module and Why Should You Care?
 
-## Features
+Let me explain this in the simplest way possible.
 
-- **Lightweight Foundation**: Minimal dependencies, ~8MB footprint
-- **Base Agent Implementation**: Ready-to-use agent with HTTP server, discovery, and state management
-- **Service Discovery**: Built-in support for Redis-based and mock discovery
-- **Configuration Management**: Flexible configuration with builder pattern
-- **CORS Support**: Built-in CORS middleware for web applications
-- **Memory Storage**: In-memory and Redis-backed state storage
-- **Extensible Interfaces**: Clean interfaces for logging, telemetry, AI, and discovery
+### The Coffee Shop Analogy
 
-## Installation
+Imagine you're running a coffee shop. You have different workers:
+- **The Barista** makes coffee
+- **The Cashier** takes orders  
+- **The Baker** makes pastries
+- **The Cleaner** keeps things tidy
+
+Now, imagine if these workers could:
+1. **Find each other automatically** (like having each other's phone numbers)
+2. **Remember important things** (like regular customers' favorite drinks)
+3. **Handle problems gracefully** (if the coffee machine breaks, they know what to do)
+4. **Work together seamlessly** (cashier tells barista what to make)
+
+**That's exactly what the GoMind Core module does for your code!** It helps you build intelligent components that can work independently or together.
+
+### The Two Types of Components: Tools and Agents
+
+In GoMind, we have two fundamental building blocks:
+
+#### 🔧 Tools (Passive Components)
+Think of **Tools** like the appliances in your kitchen:
+- A **toaster** toasts bread (doesn't make coffee)
+- A **blender** blends ingredients (doesn't cook them)
+- A **microwave** heats food (doesn't wash dishes)
+
+Tools in GoMind:
+- **Do ONE thing well** (like Unix commands: `ls`, `grep`, `sort`)
+- **Register themselves** ("I'm a calculator, I can add and multiply")
+- **Respond to requests** (process input, return output)
+- **Are stateless** (don't maintain conversation context)
+- **CANNOT discover or call other components** (they're passive)
+
+```go
+// Tools are created with NewTool()
+calculator := core.NewTool("calculator")
+```
+
+#### 🤖 Agents (Active Orchestrators)
+Think of **Agents** like the human workers who USE the tools:
+- A **chef** uses multiple kitchen tools to create a meal
+- A **barista** uses the coffee machine, grinder, and steamer
+- A **manager** coordinates multiple workers
+
+Agents in GoMind:
+- **Can discover both tools and other agents**
+- **Orchestrate complex workflows**
+- **Make intelligent decisions** (often using AI)
+- **Coordinate multiple components**
+- **Maintain context and state**
+
+```go
+// Agents are created with NewBaseAgent()
+orchestrator := core.NewBaseAgent("orchestrator")
+```
+
+### The Critical Architectural Rule
+
+⚠️ **IMPORTANT** ⚠️  
+**Tools are passive - they NEVER call or discover other components.**  
+**Agents are active - they CAN discover and orchestrate everything.**
+
+This separation ensures:
+- Clean architecture
+- Predictable behavior
+- Easy testing
+- Clear responsibility boundaries
+
+### Anti-Pattern vs Correct Pattern
+
+**❌ WRONG: Tool trying to discover:**
+```go
+// Tools should NEVER do this!
+func (t *BadTool) Handler(w http.ResponseWriter, r *http.Request) {
+    // Compile error! Tools don't have Discovery
+    other, _ := t.Discovery.FindByCapability("something") // WON'T COMPILE!
+}
+```
+
+**✅ RIGHT: Tool just does its job:**
+```go
+func (t *GoodTool) Handler(w http.ResponseWriter, r *http.Request) {
+    // Process input, return output
+    result := t.calculate(input)
+    json.NewEncoder(w).Encode(result)
+}
+```
+
+**✅ RIGHT: Agent orchestrating tools:**
+```go
+func (a *SmartAgent) Orchestrate(ctx context.Context) {
+    // Agents CAN discover
+    tools, _ := a.Discover(ctx, core.DiscoveryFilter{
+        Type: core.ComponentTypeTool,
+    })
+    // ... coordinate the tools
+}
+```
+
+### The Magic of Discovery (Redis Registry)
+
+How do components find each other? Through a **registry** - think of it like a company directory.
+
+**Redis** is our registry. It keeps track of:
+- Which tools and agents are running
+- Where they're located (their addresses)
+- What they can do (their capabilities)
+- Whether they're healthy (still working)
+
+But here's the key difference:
+- **Tools** can only REGISTER themselves ("I exist!")
+- **Agents** can both REGISTER and DISCOVER ("Who's available?")
+
+### Why This Matters for AI Applications
+
+With the rise of AI and Large Language Models (LLMs), we need:
+- **Discoverable tools** that AI can find and use
+- **Intelligent agents** that can orchestrate tools
+- **Clear boundaries** between passive tools and active orchestrators
+- **Scalable architecture** where each component does one thing well
+
+## 🎨 What's Included (and What's Not)
+
+### ✅ Core Module Includes:
+- **Component framework** - Both Tool and Agent base implementations
+- **Discovery system** - Registry for tools, Discovery for agents
+- **HTTP server** - Automatic server setup with health checks
+- **Memory interface** - For state storage (in-memory by default)
+- **Configuration** - Environment-based config with validation
+- **Kubernetes support** - Automatic Service DNS resolution
+- **Error handling** - Comprehensive error types and recovery
+
+### ❌ NOT Included (Bring Your Own):
+- **AI/LLM integration** - Add via the `ai` module
+- **Workflow orchestration** - Add via the `orchestration` module  
+- **Distributed tracing** - Add via the `telemetry` module
+- **Circuit breakers** - Add via the `resilience` module
+- **Actual business logic** - That's your job! 😊
+
+### 🤖 Adding AI Support (Optional)
+
+Want AI-powered components? It's easy!
+
+```go
+// AI-enhanced Tool (passive, but uses AI internally)
+translator := ai.NewAITool("translator", apiKey)
+
+// AI-powered Agent (can orchestrate AND use AI)
+assistant := ai.NewAIAgent("assistant", apiKey)
+```
+
+## 🚀 Quick Start: Your First Components
+
+### Prerequisites
+- Go 1.21 or later
+- Basic Go knowledge (packages, functions, structs)
+- Redis (optional, for discovery between components)
+
+### Installation
 
 ```bash
 go get github.com/itsneelabh/gomind/core
 ```
 
-## Quick Start
-
-### Creating a Simple Agent
+### Example 1: Creating a Tool (Passive Component)
 
 ```go
 package main
 
 import (
     "context"
-    "log"
+    "encoding/json"
+    "net/http"
+    
     "github.com/itsneelabh/gomind/core"
 )
 
 func main() {
-    // Create a simple agent
-    agent := core.NewBaseAgent("my-agent")
+    // Create a tool (passive component)
+    calculator := core.NewTool("calculator")
     
-    // Add capabilities
-    agent.AddCapability(core.Capability{
-        Name:        "greet",
-        Description: "Greets the user",
-        Endpoint:    "/api/greet",
+    // Register what it can do
+    calculator.RegisterCapability(core.Capability{
+        Name:        "add",
+        Description: "Adds two numbers",
+        Endpoint:    "/add",
+        Handler: func(w http.ResponseWriter, r *http.Request) {
+            // Parse input
+            var input struct {
+                A float64 `json:"a"`
+                B float64 `json:"b"`
+            }
+            json.NewDecoder(r.Body).Decode(&input)
+            
+            // Calculate (tools just do their job)
+            result := input.A + input.B
+            
+            // Return result
+            json.NewEncoder(w).Encode(map[string]float64{
+                "result": result,
+            })
+        },
     })
     
-    // Create framework and run
-    framework, err := core.NewFramework(agent, core.WithPort(8080))
-    if err != nil {
-        log.Fatal(err)
-    }
+    // Initialize and start
+    ctx := context.Background()
+    calculator.Initialize(ctx)
+    calculator.Start(ctx, 8080)
     
-    if err := framework.Run(context.Background()); err != nil {
-        log.Fatal(err)
-    }
+    // Tool is now running at http://localhost:8080
+    // It CANNOT discover or call other components
+    select {} // Keep running
 }
 ```
 
-### Using Configuration Options
-
-```go
-// Create agent with custom configuration
-config := core.NewConfig(
-    core.WithName("stock-analyzer"),
-    core.WithPort(8081),
-    core.WithNamespace("financial"),
-    core.WithRedisURL("redis://localhost:6379"),
-    core.WithCORSDefaults(),
-)
-
-agent := core.NewBaseAgentWithConfig(config)
-```
-
-## Components
-
-### 1. Agent Interface
-
-The core `Agent` interface that all agents must implement:
-
-```go
-type Agent interface {
-    Initialize(ctx context.Context) error
-    GetID() string
-    GetName() string
-    GetCapabilities() []Capability
-}
-```
-
-### 2. BaseAgent
-
-The `BaseAgent` provides a complete implementation with:
-- HTTP server with health checks
-- Service discovery registration
-- State management
-- Capability management
-- Extensible HTTP routing
-
-### 3. Capability
-
-Represents a capability that an agent provides:
-
-```go
-type Capability struct {
-    Name        string   // Unique capability name
-    Description string   // Human-readable description
-    Endpoint    string   // HTTP endpoint path
-    InputTypes  []string // Expected input types
-    OutputTypes []string // Output types produced
-}
-```
-
-### 4. Discovery Interface
-
-Service discovery abstraction:
-
-```go
-type Discovery interface {
-    Register(ctx context.Context, registration *ServiceRegistration) error
-    Unregister(ctx context.Context, serviceID string) error
-    FindService(ctx context.Context, serviceName string) ([]*ServiceRegistration, error)
-    FindByCapability(ctx context.Context, capability string) ([]*ServiceRegistration, error)
-    UpdateHealth(ctx context.Context, serviceID string, status HealthStatus) error
-}
-```
-
-### 5. Memory Interface
-
-State storage abstraction:
-
-```go
-type Memory interface {
-    Get(ctx context.Context, key string) (string, error)
-    Set(ctx context.Context, key string, value string, ttl time.Duration) error
-    Delete(ctx context.Context, key string) error
-    Exists(ctx context.Context, key string) (bool, error)
-}
-```
-
-## Configuration
-
-The module uses a flexible configuration system with builder pattern:
-
-### Configuration Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `WithName(name)` | Set agent name | "gomind-agent" |
-| `WithPort(port)` | Set HTTP server port | 8080 |
-| `WithAddress(addr)` | Set bind address | "0.0.0.0" |
-| `WithNamespace(ns)` | Set namespace | "default" |
-| `WithRedisURL(url)` | Configure Redis discovery | "" |
-| `WithCORS(config)` | Configure CORS | disabled |
-| `WithCORSDefaults()` | Enable CORS with defaults | - |
-| `WithDevelopmentMode()` | Enable development mode | false |
-| `WithMockDiscovery()` | Use mock discovery | false |
-
-### Configuration File
-
-You can also load configuration from a YAML file:
-
-```yaml
-# config.yaml
-name: my-agent
-port: 8080
-namespace: production
-discovery:
-  enabled: true
-  provider: redis
-  redis_url: redis://localhost:6379
-cors:
-  enabled: true
-  allowed_origins: ["*"]
-  allowed_methods: ["GET", "POST", "PUT", "DELETE"]
-logging:
-  level: info
-  format: json
-```
-
-```go
-config, err := core.LoadConfig("config.yaml")
-agent := core.NewBaseAgentWithConfig(config)
-```
-
-## Examples
-
-### 1. Agent with Redis Discovery
+### Example 2: Creating an Agent (Active Orchestrator)
 
 ```go
 package main
 
 import (
     "context"
+    "fmt"
+    
     "github.com/itsneelabh/gomind/core"
 )
 
 func main() {
-    // Create discovery service
-    discovery, _ := core.NewRedisDiscovery("redis://localhost:6379")
+    // Create an agent (active orchestrator)
+    orchestrator := core.NewBaseAgent("orchestrator")
     
-    // Create agent with discovery
-    agent := core.NewBaseAgent("analytics-agent")
-    agent.Discovery = discovery
-    
-    // Add capabilities
-    agent.AddCapability(core.Capability{
-        Name:        "analyze_data",
-        Description: "Analyzes data patterns",
-        Endpoint:    "/api/analyze",
-    })
-    
-    // Run with framework
-    framework, _ := core.NewFramework(agent, 
-        core.WithPort(8080),
-        core.WithDiscovery(discovery),
+    // Configure with discovery capability
+    framework, _ := core.NewFramework(orchestrator,
+        core.WithRedisURL("redis://localhost:6379"),
+        core.WithDiscovery(true),
     )
     
-    framework.Run(context.Background())
+    // Initialize
+    ctx := context.Background()
+    framework.Initialize(ctx)
+    
+    // Agents CAN discover components
+    go func() {
+        // Find all available tools
+        tools, _ := orchestrator.Discover(ctx, core.DiscoveryFilter{
+            Type: core.ComponentTypeTool,
+        })
+        
+        fmt.Printf("Found %d tools\n", len(tools))
+        for _, tool := range tools {
+            fmt.Printf("- %s at %s:%d\n", tool.Name, tool.Address, tool.Port)
+        }
+        
+        // Find other agents
+        agents, _ := orchestrator.Discover(ctx, core.DiscoveryFilter{
+            Type: core.ComponentTypeAgent,
+        })
+        
+        fmt.Printf("Found %d agents\n", len(agents))
+    }()
+    
+    // Start the agent
+    framework.Run(ctx)
 }
 ```
 
-### 2. Agent with State Management
+## 📚 Understanding Component Registration and Discovery
+
+### How Tools Register Themselves
+
+Tools announce their existence but can't look for others:
 
 ```go
-// Using memory for state management
-agent := core.NewBaseAgent("stateful-agent")
+tool := core.NewTool("weather-tool")
 
-// Store state
-ctx := context.Background()
-agent.Memory.Set(ctx, "user:123", `{"name":"John","score":100}`, 1*time.Hour)
+// Tools only get Registry (not Discovery)
+// They can register but not discover
+framework, _ := core.NewFramework(tool,
+    core.WithRedisURL("redis://localhost:6379"),
+    core.WithDiscovery(true), // Enables registration
+)
 
-// Retrieve state
-data, _ := agent.Memory.Get(ctx, "user:123")
-
-// Check existence
-exists, _ := agent.Memory.Exists(ctx, "user:123")
+// The tool is now in the registry
+// Other agents can find it, but it can't find others
 ```
 
-### 3. Custom HTTP Handlers
+### How Agents Discover Components
+
+Agents can find both tools and other agents:
 
 ```go
-agent := core.NewBaseAgent("api-agent")
+agent := core.NewBaseAgent("coordinator")
 
-// Add custom HTTP handler
-agent.HandleFunc("/api/custom", func(w http.ResponseWriter, r *http.Request) {
-    // Your custom logic here
-    json.NewEncoder(w).Encode(map[string]string{
-        "status": "success",
-        "message": "Custom endpoint",
+// Agents get full Discovery interface
+// Find tools for specific tasks
+weatherTools, _ := agent.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeTool,
+    Capabilities: []string{"weather_forecast"},
+})
+
+// Find other agents for delegation
+aiAgents, _ := agent.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeAgent,
+    Capabilities: []string{"natural_language_processing"},
+})
+```
+
+## 🏗️ Architecture Patterns
+
+### Pattern 1: Tool Collection with Agent Coordinator
+
+```
+┌─────────────────────────────────────────┐
+│           Orchestrator Agent            │
+│         (Discovers & Coordinates)       │
+└────────────────┬────────────────────────┘
+                 │ Discovers
+    ┌────────────┼────────────┬───────────┐
+    ▼            ▼            ▼           ▼
+┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+│Calculator││ Weather  ││Database ││Translator│
+│  Tool    ││  Tool    ││  Tool   ││  Tool    │
+└─────────┘ └─────────┘ └─────────┘ └─────────┘
+```
+
+### Pattern 2: Hierarchical Agents
+
+```
+┌─────────────────────────────────────────┐
+│          Master Agent (AI-Powered)      │
+└────────────────┬────────────────────────┘
+                 │ Discovers & Delegates
+    ┌────────────┼────────────┐
+    ▼            ▼            ▼
+┌─────────┐ ┌─────────┐ ┌─────────┐
+│  Data   ││Analytics ││ Report   │
+│  Agent  ││  Agent   ││  Agent   │
+└────┬────┘ └────┬────┘ └────┬────┘
+     │           │           │
+  [Tools]    [Tools]     [Tools]
+```
+
+## 🚀 Advanced Features
+
+### Kubernetes Support
+
+Both Tools and Agents work seamlessly in Kubernetes:
+
+```go
+// Configuration automatically detects Kubernetes
+config := core.DefaultConfig()
+config.Kubernetes.ServiceName = "calculator-tool"
+config.Kubernetes.ServicePort = 80
+
+tool := core.NewToolWithConfig(config)
+// Registers as: calculator-tool.namespace.svc.cluster.local:80
+```
+
+### Component Filtering
+
+Agents can filter discoveries by multiple criteria:
+
+```go
+// Find specific tools
+mathTools, _ := agent.Discover(ctx, core.DiscoveryFilter{
+    Type:         core.ComponentTypeTool,
+    Capabilities: []string{"add", "multiply"},
+    Name:         "calculator",
+})
+
+// Find agents in specific namespace
+productionAgents, _ := agent.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeAgent,
+    Metadata: map[string]interface{}{
+        "environment": "production",
+    },
+})
+```
+
+## 🎓 Best Practices
+
+### 1. Choose the Right Component Type
+
+**Use a Tool when:**
+- Building a single-purpose function
+- Creating a stateless processor
+- Implementing a pure calculation or transformation
+- Building something that responds to requests
+
+**Use an Agent when:**
+- Orchestrating multiple components
+- Making decisions based on discovery
+- Implementing workflows
+- Building something that initiates actions
+
+### 2. Keep Tools Simple
+
+```go
+// ✅ GOOD: Tool does one thing
+type CalculatorTool struct {
+    *core.BaseTool
+}
+
+func (c *CalculatorTool) Add(a, b float64) float64 {
+    return a + b
+}
+
+// ❌ BAD: Tool trying to do too much
+type BadTool struct {
+    *core.BaseTool
+}
+
+func (b *BadTool) ProcessOrder() {
+    // Trying to calculate, save to DB, send email...
+    // This should be an Agent orchestrating multiple tools!
+}
+```
+
+### 3. Use Agents for Coordination
+
+```go
+// ✅ GOOD: Agent orchestrating tools
+type OrderAgent struct {
+    *core.BaseAgent
+}
+
+func (o *OrderAgent) ProcessOrder(ctx context.Context, order Order) error {
+    // Find calculator tool
+    calc, _ := o.Discover(ctx, core.DiscoveryFilter{
+        Type: core.ComponentTypeTool,
+        Name: "calculator",
     })
-})
-
-// Add capability for discovery
-agent.AddCapability(core.Capability{
-    Name:     "custom_endpoint",
-    Endpoint: "/api/custom",
-})
+    // Call it for tax calculation
+    
+    // Find database tool
+    db, _ := o.Discover(ctx, core.DiscoveryFilter{
+        Type: core.ComponentTypeTool,
+        Name: "database",
+    })
+    // Call it to save order
+    
+    // Find email tool
+    email, _ := o.Discover(ctx, core.DiscoveryFilter{
+        Type: core.ComponentTypeTool,
+        Name: "email",
+    })
+    // Call it to send confirmation
+    
+    return nil
+}
 ```
 
-### 4. Agent with Mock Discovery (Development)
+## 🎯 Common Patterns and Solutions
 
+### Pattern: AI-Enhanced Tool
 ```go
-// Perfect for development and testing
-agent := core.NewBaseAgent("dev-agent")
-discovery := core.NewMockDiscovery()
-
-// Register some mock services
-discovery.Register(context.Background(), &core.ServiceRegistration{
-    ID:           "mock-1",
-    Name:         "mock-service",
-    Capabilities: []string{"test"},
+// A tool that uses AI internally but doesn't orchestrate
+translator := ai.NewAITool("translator", apiKey)
+translator.RegisterCapability(core.Capability{
+    Name: "translate",
+    Description: "Translates text using AI",
+    Handler: translateHandler,
 })
-
-agent.Discovery = discovery
+// Can use AI but can't discover other components
 ```
 
-## API Reference
-
-### BaseAgent Methods
-
-| Method | Description |
-|--------|-------------|
-| `Initialize(ctx)` | Initialize the agent and its components |
-| `GetID()` | Get the unique agent ID |
-| `GetName()` | Get the agent name |
-| `GetCapabilities()` | Get list of capabilities |
-| `AddCapability(cap)` | Add a new capability |
-| `HandleFunc(path, handler)` | Register HTTP handler |
-| `Start(ctx)` | Start the HTTP server |
-| `Stop(ctx)` | Stop the agent gracefully |
-
-### Framework Methods
-
-| Method | Description |
-|--------|-------------|
-| `NewFramework(agent, opts...)` | Create new framework instance |
-| `Run(ctx)` | Run the agent with all components |
-| `Shutdown(ctx)` | Graceful shutdown |
-
-### Discovery Methods
-
-| Method | Description |
-|--------|-------------|
-| `Register(ctx, registration)` | Register service |
-| `Unregister(ctx, serviceID)` | Unregister service |
-| `FindService(ctx, name)` | Find services by name |
-| `FindByCapability(ctx, cap)` | Find services by capability |
-| `UpdateHealth(ctx, id, status)` | Update service health |
-
-### Memory Methods
-
-| Method | Description |
-|--------|-------------|
-| `Get(ctx, key)` | Get value by key |
-| `Set(ctx, key, value, ttl)` | Set value with TTL |
-| `Delete(ctx, key)` | Delete key |
-| `Exists(ctx, key)` | Check if key exists |
-
-## Best Practices
-
-1. **Use Configuration Options**: Leverage the builder pattern for clean configuration
-2. **Implement Graceful Shutdown**: Always handle context cancellation
-3. **Register Capabilities**: Make your agent discoverable by registering capabilities
-4. **Use Namespaces**: Organize agents in different namespaces for better isolation
-5. **Enable Health Checks**: The built-in `/health` endpoint helps with monitoring
-6. **Handle Errors**: Always check and handle errors appropriately
-
-## Testing
-
-The module includes comprehensive test utilities:
-
+### Pattern: Workflow Agent
 ```go
-// Use mock discovery for testing
-discovery := core.NewMockDiscovery()
-
-// Use in-memory store for testing
-memory := core.NewInMemoryStore()
-
-// Create test agent
-agent := core.NewBaseAgent("test-agent")
-agent.Discovery = discovery
-agent.Memory = memory
-
-// Test your agent logic
+// An agent that orchestrates a complex workflow
+workflow := core.NewBaseAgent("workflow-engine")
+// Can discover and coordinate multiple tools and agents
 ```
 
-## Performance Considerations
-
-- **Lightweight**: Core module adds only ~8MB to your binary
-- **Efficient Discovery**: Redis discovery uses caching to minimize network calls
-- **Connection Pooling**: HTTP client reuses connections
-- **Graceful Shutdown**: Proper cleanup of resources
-
-## Migration Guide
-
-If you're migrating from the monolithic framework:
-
+### Pattern: Gateway Agent
 ```go
-// Old way
-import "github.com/itsneelabh/gomind"
-
-// New way
-import "github.com/itsneelabh/gomind/core"
-
-// The API remains largely the same
-agent := core.NewBaseAgent("my-agent")  // Previously gomind.NewBaseAgent
+// An agent that acts as a gateway to multiple tools
+gateway := core.NewBaseAgent("api-gateway")
+// Discovers available tools and routes requests
 ```
 
-## Contributing
+## 🔍 Debugging and Monitoring
 
-Contributions are welcome! The core module is designed to be:
-- Minimal and focused
-- Well-tested
-- Backward compatible
-- Clear and documented
+### Check Component Registration
 
-## License
+```bash
+# See what's registered in Redis
+redis-cli KEYS "gomind:*"
 
-See the main GoMind repository for license information.
+# Check specific component
+redis-cli GET "gomind:services:calculator-tool-abc123"
+```
+
+### Component Health Checks
+
+All components automatically provide health endpoints:
+- Tools: `http://localhost:8080/health`
+- Agents: `http://localhost:8090/health`
+
+## 📊 Performance Considerations
+
+### Tools are Lightweight
+- Minimal overhead (~5MB binary)
+- No discovery overhead
+- Fast startup
+- Perfect for serverless/FaaS
+
+### Agents are Feature-Rich
+- Full discovery capability (~10MB binary)
+- Can coordinate complex workflows
+- Suitable for long-running orchestrators
+- Ideal for AI-powered coordination
+
+## 🎉 Summary
+
+The GoMind Core module provides two fundamental building blocks:
+
+1. **Tools** - Passive components that do one thing well
+2. **Agents** - Active orchestrators that discover and coordinate
+
+This clear separation enables:
+- Clean, maintainable architecture
+- Predictable component behavior
+- Easy testing and debugging
+- Scalable AI-powered systems
+
+Remember: **Tools work, Agents think!**
+
+## 📚 Next Steps
+
+- Explore the [AI Module](../ai/README.md) for AI-enhanced components
+- Learn about [Orchestration](../orchestration/README.md) for complex workflows
+- Add [Telemetry](../telemetry/README.md) for observability
+- Implement [Resilience](../resilience/README.md) for production readiness
+
+Happy building! 🚀

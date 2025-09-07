@@ -29,7 +29,7 @@ type AgentCatalog struct {
 
 // AgentInfo contains complete information about an agent
 type AgentInfo struct {
-	Registration *core.ServiceRegistration
+	Registration *core.ServiceInfo // Updated to use ServiceInfo
 	Capabilities []EnhancedCapability
 	LastUpdated  time.Time
 }

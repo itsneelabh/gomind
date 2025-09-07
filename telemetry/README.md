@@ -6,11 +6,11 @@ Production-grade observability with zero-friction integration and progressive di
 
 1. [What Does This Module Do?](#-what-does-this-module-do)
 2. [Quick Start](#-quick-start)
-3. [**Using Telemetry with GoMind Agents** ⭐](#-using-telemetry-with-gomind-agents)
-   - Complete working examples
+3. [**Using Telemetry with GoMind Tools and Agents** ⭐](#-using-telemetry-with-gomind-tools-and-agents)
+   - Complete working examples for both Tools and Agents
    - Step-by-step integration guide
    - Where to add telemetry in your code
-   - Common patterns for agents
+   - Common patterns for both component types
 4. [How It Works](#-how-it-works)
 5. [Metric Types Explained](#-metric-types-explained)
 6. [Context Propagation](#-context-propagation-distributed-tracing)
@@ -63,11 +63,11 @@ telemetry.Emit("user.login", 1.0, "status", "success", "country", "US")
 // 3. That's it! Metrics are now flowing to your backend
 ```
 
-## 🤖 Using Telemetry with GoMind Agents
+## 🤖 Using Telemetry with GoMind Tools and Agents
 
 ### ✅ Getting Started Checklist
 
-Follow this checklist to add telemetry to your GoMind agents:
+Follow this checklist to add telemetry to your GoMind tools and agents:
 
 1. **[ ] Initialize telemetry in main.go**
    ```go
@@ -80,10 +80,15 @@ Follow this checklist to add telemetry to your GoMind agents:
    docker run -p 4318:4318 otel/opentelemetry-collector:latest
    ```
 
-3. **[ ] Add metrics to your agent methods**
+3. **[ ] Add metrics to your tool/agent methods**
    ```go
-   telemetry.Counter("my_agent.operations")
-   telemetry.Histogram("my_agent.duration_ms", duration)
+   // For Tools (passive components)
+   telemetry.Counter("my_tool.operations")
+   telemetry.Histogram("my_tool.duration_ms", duration)
+   
+   // For Agents (active orchestrators)
+   telemetry.Counter("my_agent.orchestrations")
+   telemetry.Histogram("my_agent.workflow_duration_ms", duration)
    ```
 
 4. **[ ] Check metrics are flowing**
@@ -97,9 +102,9 @@ Follow this checklist to add telemetry to your GoMind agents:
    telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
    ```
 
-### Complete Agent Example - From Zero to Production
+### Complete Examples - From Zero to Production
 
-Here's a complete, working example of how to add telemetry to your GoMind agents:
+Here are complete, working examples of how to add telemetry to both GoMind tools and agents:
 
 #### Step 1: Create Your Main Application
 
@@ -118,9 +123,9 @@ import (
 
 func main() {
     // STEP 1: Initialize telemetry ONCE in your main function
-    // This sets up the global telemetry system for ALL agents
+    // This sets up the global telemetry system for ALL tools and agents
     config := telemetry.UseProfile(telemetry.ProfileDevelopment)
-    config.ServiceName = "my-agent-system"  // Name your overall system
+    config.ServiceName = "my-system"  // Name your overall system
     
     err := telemetry.Initialize(config)
     if err != nil {
@@ -135,11 +140,15 @@ func main() {
         log.Println("Telemetry shutdown complete")
     }()
     
-    // STEP 2: Create your agents - they'll automatically use telemetry
-    stockAgent := NewStockAnalyzer()
-    weatherAgent := NewWeatherAgent()
+    // STEP 2: Create your components - they'll automatically use telemetry
+    // Tools (passive components that respond to requests)
+    calculatorTool := NewCalculatorTool()
+    weatherTool := NewWeatherTool()
     
-    // STEP 3: Use your agents - metrics flow automatically
+    // Agents (active orchestrators that discover and coordinate)
+    orchestratorAgent := NewOrchestratorAgent()
+    
+    // STEP 3: Use your components - metrics flow automatically
     ctx := context.Background()
     
     // Example: Process a request with context
@@ -147,19 +156,98 @@ func main() {
         "request_id", "req-123",
         "user_id", "user-456")
     
-    result, err := stockAgent.AnalyzeStock(ctx, "AAPL")
+    // Example: Tool usage
+    calcResult, _ := calculatorTool.Add(ctx, 5, 3)
+    
+    // Example: Agent orchestration
+    report, err := orchestratorAgent.GenerateReport(ctx, "AAPL")
     if err != nil {
         log.Printf("Error: %v", err)
     }
     
-    log.Printf("Analysis result: %v", result)
+    log.Printf("Calculator result: %v", calcResult)
+    log.Printf("Report: %v", report)
 }
 ```
 
-#### Step 2: Create an Agent with Built-in Telemetry
+#### Step 2: Create a Tool with Built-in Telemetry
 
 ```go
-// stock_agent.go - Your custom agent implementation
+// calculator_tool.go - A passive tool that performs calculations
+package main
+
+import (
+    "context"
+    "time"
+    
+    "github.com/itsneelabh/gomind/core"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+type CalculatorTool struct {
+    *core.BaseTool  // Tools are passive components
+}
+
+func NewCalculatorTool() *CalculatorTool {
+    // Create base tool
+    tool := &CalculatorTool{
+        BaseTool: core.NewTool("calculator"),
+    }
+    
+    // Register this tool's metrics (optional but recommended)
+    telemetry.DeclareMetrics("calculator", telemetry.ModuleConfig{
+        Metrics: []telemetry.MetricDefinition{
+            {
+                Name:   "calculator.operation.duration_ms",
+                Type:   "histogram",
+                Help:   "Time to perform calculation in milliseconds",
+                Labels: []string{"operation", "status"},
+                Unit:   "milliseconds",
+            },
+            {
+                Name:   "calculator.operations.count",
+                Type:   "counter",
+                Help:   "Number of calculations performed",
+                Labels: []string{"operation", "status"},
+            },
+        },
+    })
+    
+    return tool
+}
+
+// Tools are passive - they only respond to requests
+func (ct *CalculatorTool) Add(ctx context.Context, a, b float64) (float64, error) {
+    // Track the start time for latency measurement
+    start := time.Now()
+    
+    // Track that we're starting a calculation
+    telemetry.Counter("calculator.operations.count", 
+        "operation", "add",
+        "status", "started")
+    
+    // Perform the calculation (tools just do their job)
+    result := a + b
+    
+    // Track successful completion
+    telemetry.Counter("calculator.operations.count",
+        "operation", "add",
+        "status", "success")
+    
+    // Track the duration
+    duration := time.Since(start).Milliseconds()
+    telemetry.Histogram("calculator.operation.duration_ms", float64(duration),
+        "operation", "add",
+        "status", "success")
+    
+    return result, nil
+}
+```
+
+#### Step 3: Create an Agent with Built-in Telemetry
+
+```go
+// orchestrator_agent.go - An active agent that orchestrates tools
 package main
 
 import (
@@ -171,31 +259,30 @@ import (
     "github.com/itsneelabh/gomind/telemetry"
 )
 
-type StockAnalyzer struct {
-    *core.BaseAgent
+type OrchestratorAgent struct {
+    *core.BaseAgent  // Agents are active orchestrators
 }
 
-func NewStockAnalyzer() *StockAnalyzer {
+func NewOrchestratorAgent() *OrchestratorAgent {
     // Create base agent
-    agent := &StockAnalyzer{
-        BaseAgent: core.NewBaseAgent("stock-analyzer"),
+    agent := &OrchestratorAgent{
+        BaseAgent: core.NewBaseAgent("orchestrator"),
     }
     
-    // Register this agent's metrics (optional but recommended)
-    telemetry.DeclareMetrics("stock-analyzer", telemetry.ModuleConfig{
+    // Register this agent's metrics
+    telemetry.DeclareMetrics("orchestrator", telemetry.ModuleConfig{
         Metrics: []telemetry.MetricDefinition{
             {
-                Name:   "stock.analysis.duration_ms",
+                Name:   "orchestrator.workflow.duration_ms",
                 Type:   "histogram",
-                Help:   "Time to analyze stock in milliseconds",
-                Labels: []string{"symbol", "status"},
-                Unit:   "milliseconds",
+                Help:   "Time to complete workflow in milliseconds",
+                Labels: []string{"workflow", "status"},
             },
             {
-                Name:   "stock.analysis.count",
-                Type:   "counter",
-                Help:   "Number of stock analyses performed",
-                Labels: []string{"symbol", "status"},
+                Name:   "orchestrator.tools.discovered",
+                Type:   "gauge",
+                Help:   "Number of tools discovered",
+                Labels: []string{"type"},
             },
         },
     })
@@ -203,75 +290,62 @@ func NewStockAnalyzer() *StockAnalyzer {
     return agent
 }
 
-func (sa *StockAnalyzer) AnalyzeStock(ctx context.Context, symbol string) (interface{}, error) {
+// Agents can discover and orchestrate tools
+func (oa *OrchestratorAgent) GenerateReport(ctx context.Context, symbol string) (interface{}, error) {
     // Track the start time for latency measurement
     start := time.Now()
     
-    // Track that we're starting an analysis
-    telemetry.Counter("stock.analysis.count", 
-        "symbol", symbol,
+    // Track workflow start
+    telemetry.Counter("orchestrator.workflow.count", 
+        "workflow", "generate_report",
         "status", "started")
     
     // Add context for distributed tracing
     ctx = telemetry.WithBaggage(ctx,
-        "operation", "stock_analysis",
+        "operation", "generate_report",
         "symbol", symbol)
     
-    // Simulate some work
-    time.Sleep(100 * time.Millisecond)
+    // Discover available tools (agents can discover, tools cannot)
+    tools, err := oa.Discover(ctx, core.DiscoveryFilter{
+        Type: core.ComponentTypeTool,
+    })
     
-    // Check if this is a valid symbol
-    if symbol == "" {
-        // Track the error
-        telemetry.Counter("stock.analysis.count",
-            "symbol", "unknown",
-            "status", "error")
-        
-        telemetry.Counter("stock.errors",
-            "type", "invalid_symbol",
-            "agent", "stock-analyzer")
-        
-        return nil, fmt.Errorf("invalid symbol")
+    if err != nil {
+        telemetry.Counter("orchestrator.errors",
+            "type", "discovery_failed")
+        return nil, err
     }
     
-    // Simulate fetching data
-    price := 150.25
+    // Track discovered tools
+    telemetry.Gauge("orchestrator.tools.discovered", float64(len(tools)),
+        "type", "all")
+    
+    // Orchestrate multiple tools (example)
+    // ... call calculator tool, weather tool, etc.
     
     // Track successful completion
-    telemetry.Counter("stock.analysis.count",
-        "symbol", symbol,
+    telemetry.Counter("orchestrator.workflow.count",
+        "workflow", "generate_report",
         "status", "success")
     
     // Track the duration
     duration := time.Since(start).Milliseconds()
-    telemetry.Histogram("stock.analysis.duration_ms", float64(duration),
-        "symbol", symbol,
+    telemetry.Histogram("orchestrator.workflow.duration_ms", float64(duration),
+        "workflow", "generate_report",
         "status", "success")
-    
-    // Track business metrics
-    telemetry.EmitWithContext(ctx, "stock.price", price,
-        "symbol", symbol,
-        "currency", "USD")
-    
-    // Log with context (telemetry context flows through)
-    sa.Logger.Info("Stock analyzed", map[string]interface{}{
-        "symbol": symbol,
-        "price":  price,
-        "duration_ms": duration,
-    })
     
     return map[string]interface{}{
         "symbol": symbol,
-        "price":  price,
+        "tools_used": len(tools),
         "timestamp": time.Now(),
     }, nil
 }
 ```
 
-#### Step 3: Multi-Agent Orchestration with Telemetry
+#### Step 4: Multi-Component Orchestration with Telemetry
 
 ```go
-// orchestrator.go - Coordinate multiple agents with telemetry
+// advanced_orchestrator.go - Coordinate multiple tools and agents
 package main
 
 import (
@@ -282,13 +356,16 @@ import (
     "github.com/itsneelabh/gomind/telemetry"
 )
 
-type Orchestrator struct {
-    stockAgent   *StockAnalyzer
-    weatherAgent *WeatherAgent
-    newsAgent    *NewsAgent
+type AdvancedOrchestrator struct {
+    // Tools (passive components)
+    calculatorTool *CalculatorTool
+    weatherTool    *WeatherTool
+    
+    // Agents (active orchestrators)
+    analysisAgent  *AnalysisAgent
 }
 
-func (o *Orchestrator) GenerateReport(ctx context.Context, symbol string, city string) error {
+func (o *AdvancedOrchestrator) GenerateComplexReport(ctx context.Context, symbol string, city string) error {
     // Start tracking the overall operation
     start := time.Now()
     
@@ -299,57 +376,57 @@ func (o *Orchestrator) GenerateReport(ctx context.Context, symbol string, city s
     
     telemetry.Counter("report.generation.started")
     
-    // Track concurrent operations
-    telemetry.Gauge("concurrent_operations", 3, "type", "report_generation")
-    defer telemetry.Gauge("concurrent_operations", -3, "type", "report_generation")
+    // Track concurrent operations (mix of tools and agents)
+    telemetry.Gauge("concurrent_operations", 3, "type", "mixed_orchestration")
+    defer telemetry.Gauge("concurrent_operations", -3, "type", "mixed_orchestration")
     
-    // Run agents in parallel
+    // Run tools and agents in parallel
     var wg sync.WaitGroup
-    var stockErr, weatherErr, newsErr error
-    var stockResult, weatherResult, newsResult interface{}
+    var calcErr, weatherErr, analysisErr error
+    var calcResult, weatherResult, analysisResult interface{}
     
     wg.Add(3)
     
-    // Stock analysis
+    // Calculator tool (passive component)
     go func() {
         defer wg.Done()
-        telemetry.Counter("agent.invocation", "agent", "stock", "status", "started")
-        stockResult, stockErr = o.stockAgent.AnalyzeStock(ctx, symbol)
+        telemetry.Counter("component.invocation", "type", "tool", "name", "calculator", "status", "started")
+        calcResult, calcErr = o.calculatorTool.Calculate(ctx, 100, 50)
         
-        if stockErr != nil {
-            telemetry.Counter("agent.invocation", "agent", "stock", "status", "error")
+        if calcErr != nil {
+            telemetry.Counter("component.invocation", "type", "tool", "name", "calculator", "status", "error")
         } else {
-            telemetry.Counter("agent.invocation", "agent", "stock", "status", "success")
+            telemetry.Counter("component.invocation", "type", "tool", "name", "calculator", "status", "success")
         }
     }()
     
-    // Weather analysis
+    // Weather tool (passive component)
     go func() {
         defer wg.Done()
-        telemetry.Counter("agent.invocation", "agent", "weather", "status", "started")
-        weatherResult, weatherErr = o.weatherAgent.GetWeather(ctx, city)
+        telemetry.Counter("component.invocation", "type", "tool", "name", "weather", "status", "started")
+        weatherResult, weatherErr = o.weatherTool.GetWeather(ctx, city)
         
         if weatherErr != nil {
-            telemetry.Counter("agent.invocation", "agent", "weather", "status", "error")
+            telemetry.Counter("component.invocation", "type", "tool", "name", "weather", "status", "error")
         } else {
-            telemetry.Counter("agent.invocation", "agent", "weather", "status", "success")
+            telemetry.Counter("component.invocation", "type", "tool", "name", "weather", "status", "success")
         }
     }()
     
-    // News analysis
+    // Analysis agent (active orchestrator)
     go func() {
         defer wg.Done()
-        telemetry.Counter("agent.invocation", "agent", "news", "status", "started")
-        newsResult, newsErr = o.newsAgent.GetNews(ctx, symbol)
+        telemetry.Counter("component.invocation", "type", "agent", "name", "analysis", "status", "started")
+        analysisResult, analysisErr = o.analysisAgent.Analyze(ctx, symbol)
         
-        if newsErr != nil {
-            telemetry.Counter("agent.invocation", "agent", "news", "status", "error")
+        if analysisErr != nil {
+            telemetry.Counter("component.invocation", "type", "agent", "name", "analysis", "status", "error")
         } else {
-            telemetry.Counter("agent.invocation", "agent", "news", "status", "success")
+            telemetry.Counter("component.invocation", "type", "agent", "name", "analysis", "status", "success")
         }
     }()
     
-    // Wait for all agents to complete
+    // Wait for all tools and agents to complete
     wg.Wait()
     
     // Track completion time
@@ -357,7 +434,7 @@ func (o *Orchestrator) GenerateReport(ctx context.Context, symbol string, city s
     telemetry.Histogram("report.generation.duration_ms", float64(duration))
     
     // Check for errors
-    if stockErr != nil || weatherErr != nil || newsErr != nil {
+    if calcErr != nil || weatherErr != nil || analysisErr != nil {
         telemetry.Counter("report.generation.completed", "status", "partial_failure")
         // Handle errors...
     } else {
@@ -371,7 +448,7 @@ func (o *Orchestrator) GenerateReport(ctx context.Context, symbol string, city s
 }
 ```
 
-### Where to Add Telemetry in Your Agent Code
+### Where to Add Telemetry in Your Component Code
 
 Here's a visual guide showing exactly where to add telemetry calls:
 
@@ -380,12 +457,35 @@ Here's a visual guide showing exactly where to add telemetry calls:
 // │         INITIALIZATION              │
 // └─────────────────────────────────────┘
 func main() {
-    // ↓ Initialize telemetry FIRST, before creating agents
+    // ↓ Initialize telemetry FIRST, before creating any components
     telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
     defer telemetry.Shutdown(context.Background())
     
-    // ↓ Then create your agents
+    // ↓ Then create your tools and agents
+    tool := NewMyTool()
     agent := NewMyAgent()
+}
+
+// ┌─────────────────────────────────────┐
+// │         TOOL CREATION               │
+// └─────────────────────────────────────┘
+func NewMyTool() *MyTool {
+    tool := &MyTool{
+        BaseTool: core.NewTool("my-tool"),  // Tools are passive
+    }
+    
+    // ↓ Declare your tool's metrics
+    telemetry.DeclareMetrics("my-tool", telemetry.ModuleConfig{
+        Metrics: []telemetry.MetricDefinition{
+            {
+                Name: "my_tool.operations",
+                Type: "counter",
+                Help: "Number of operations performed",
+            },
+        },
+    })
+    
+    return tool
 }
 
 // ┌─────────────────────────────────────┐
@@ -393,16 +493,16 @@ func main() {
 // └─────────────────────────────────────┘
 func NewMyAgent() *MyAgent {
     agent := &MyAgent{
-        BaseAgent: core.NewBaseAgent("my-agent"),
+        BaseAgent: core.NewBaseAgent("my-agent"),  // Agents orchestrate
     }
     
-    // ↓ Declare your agent's metrics (optional but recommended)
+    // ↓ Declare your agent's metrics
     telemetry.DeclareMetrics("my-agent", telemetry.ModuleConfig{
         Metrics: []telemetry.MetricDefinition{
             {
-                Name: "my_agent.operations",
+                Name: "my_agent.orchestrations",
                 Type: "counter",
-                Help: "Number of operations performed",
+                Help: "Number of orchestrations performed",
             },
         },
     })
@@ -411,18 +511,40 @@ func NewMyAgent() *MyAgent {
 }
 
 // ┌─────────────────────────────────────┐
-// │         AGENT METHODS               │
+// │         COMPONENT METHODS           │
 // └─────────────────────────────────────┘
-func (a *MyAgent) DoWork(ctx context.Context, input string) error {
-    // ↓ Track start of operation
+// Tool method (passive - just responds)
+func (t *MyTool) Process(ctx context.Context, input string) (string, error) {
     start := time.Now()
-    telemetry.Counter("my_agent.operations", "status", "started")
+    telemetry.Counter("my_tool.operations", "status", "started")
+    
+    // Tools just process and return
+    result := processInput(input)
+    
+    telemetry.Counter("my_tool.operations", "status", "success")
+    telemetry.Histogram("my_tool.duration_ms", 
+        float64(time.Since(start).Milliseconds()))
+    
+    return result, nil
+}
+
+// Agent method (active - orchestrates)
+func (a *MyAgent) Orchestrate(ctx context.Context, input string) error {
+    // ↓ Track start of orchestration
+    start := time.Now()
+    telemetry.Counter("my_agent.orchestrations", "status", "started")
     
     // ↓ Add context for tracing
     ctx = telemetry.WithBaggage(ctx, "input_type", "text")
     
-    // ↓ Your business logic here
-    result, err := processInput(input)
+    // ↓ Discover and orchestrate tools
+    tools, _ := a.Discover(ctx, core.DiscoveryFilter{
+        Type: core.ComponentTypeTool,
+    })
+    telemetry.Gauge("my_agent.tools_discovered", float64(len(tools)))
+    
+    // ↓ Orchestrate the tools
+    result, err := orchestrateTools(tools, input)
     
     if err != nil {
         // ↓ Track errors
@@ -431,7 +553,7 @@ func (a *MyAgent) DoWork(ctx context.Context, input string) error {
     }
     
     // ↓ Track success and timing
-    telemetry.Counter("my_agent.operations", "status", "success")
+    telemetry.Counter("my_agent.orchestrations", "status", "success")
     telemetry.Histogram("my_agent.duration_ms", 
         float64(time.Since(start).Milliseconds()))
     
@@ -442,73 +564,93 @@ func (a *MyAgent) DoWork(ctx context.Context, input string) error {
 }
 ```
 
-### Common Telemetry Patterns for Agents
+### Common Telemetry Patterns for Tools and Agents
 
-#### Pattern 1: Track Agent Lifecycle
+#### Pattern 1: Track Component Lifecycle
 ```go
-func (a *MyAgent) Initialize(ctx context.Context) error {
-    telemetry.Counter("agent.lifecycle", "agent", a.Name, "event", "initialize")
+// For Tools
+func (t *MyTool) Initialize(ctx context.Context) error {
+    telemetry.Counter("component.lifecycle", "type", "tool", "name", t.Name, "event", "initialize")
     // ... initialization code ...
     return nil
 }
 
-func (a *MyAgent) Shutdown(ctx context.Context) error {
-    telemetry.Counter("agent.lifecycle", "agent", a.Name, "event", "shutdown")
-    // ... cleanup code ...
+// For Agents
+func (a *MyAgent) Initialize(ctx context.Context) error {
+    telemetry.Counter("component.lifecycle", "type", "agent", "name", a.Name, "event", "initialize")
+    // ... initialization code ...
     return nil
 }
 ```
 
 #### Pattern 2: Track Resource Usage
 ```go
-func (a *MyAgent) ProcessBatch(items []Item) {
-    // Track batch size
-    telemetry.Histogram("agent.batch_size", float64(len(items)), 
-        "agent", a.Name)
-    
-    // Track memory usage
-    var m runtime.MemStats
-    runtime.ReadMemStats(&m)
-    telemetry.Gauge("agent.memory_mb", float64(m.Alloc/1024/1024),
-        "agent", a.Name)
-    
+// Tools track their processing
+func (t *MyTool) ProcessBatch(items []Item) {
+    telemetry.Histogram("tool.batch_size", float64(len(items)), 
+        "tool", t.Name)
     // Process items...
+}
+
+// Agents track orchestration complexity
+func (a *MyAgent) OrchestrateWorkflow(ctx context.Context) {
+    // Track number of components being orchestrated
+    tools, _ := a.Discover(ctx, core.DiscoveryFilter{Type: core.ComponentTypeTool})
+    telemetry.Histogram("agent.components_orchestrated", float64(len(tools)), 
+        "agent", a.Name)
+    
+    // Orchestrate...
 }
 ```
 
-#### Pattern 3: Track External API Calls
+#### Pattern 3: Track Tool vs Agent Operations
 ```go
-func (a *MyAgent) CallExternalAPI(ctx context.Context, endpoint string) error {
+// Tools track simple operations
+func (t *MyTool) CallAPI(ctx context.Context, endpoint string) error {
     start := time.Now()
     
-    // Track API call
+    // Track API call from tool
     telemetry.Counter("external_api.calls", 
-        "agent", a.Name,
+        "component_type", "tool",
+        "component_name", t.Name,
         "endpoint", endpoint)
     
     resp, err := http.Get(endpoint)
     
-    // Track response time
-    telemetry.Histogram("external_api.latency_ms",
-        float64(time.Since(start).Milliseconds()),
-        "agent", a.Name,
-        "endpoint", endpoint,
-        "status_code", fmt.Sprintf("%d", resp.StatusCode))
-    
-    if err != nil {
-        telemetry.Counter("external_api.errors",
-            "agent", a.Name,
-            "endpoint", endpoint)
-    }
-    
+    // ... make the call ...
     return err
+}
+
+// Agents track orchestration
+func (a *MyAgent) OrchestrateCalls(ctx context.Context) error {
+    start := time.Now()
+    
+    // Track orchestration
+    telemetry.Counter("orchestration.started", 
+        "agent", a.Name)
+    
+    // Discover and use multiple tools
+    tools, _ := a.Discover(ctx, core.DiscoveryFilter{Type: core.ComponentTypeTool})
+    
+    // Track orchestration complexity
+    telemetry.Histogram("orchestration.complexity",
+        float64(len(tools)),
+        "agent", a.Name)
+    
+    // ... orchestrate tools ...
+    
+    telemetry.Histogram("orchestration.duration_ms",
+        float64(time.Since(start).Milliseconds()),
+        "agent", a.Name)
+    
+    return nil
 }
 ```
 
-### Testing Your Agent's Telemetry
+### Testing Your Component's Telemetry
 
 ```go
-// agent_test.go - Test that your agent emits metrics correctly
+// component_test.go - Test that your tools and agents emit metrics correctly
 package main
 
 import (
@@ -519,22 +661,33 @@ import (
     "github.com/itsneelabh/gomind/telemetry"
 )
 
-func TestAgentTelemetry(t *testing.T) {
+func TestComponentTelemetry(t *testing.T) {
     // Initialize telemetry for testing
     telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
     defer telemetry.Shutdown(context.Background())
     
-    // Create your agent
-    agent := NewStockAnalyzer()
+    // Test Tool telemetry
+    tool := NewCalculatorTool()
+    
+    // Test Agent telemetry
+    agent := NewOrchestratorAgent()
     
     // Get initial metrics
     healthBefore := telemetry.GetHealth()
     
-    // Run your agent
+    // Run your components
     ctx := context.Background()
-    _, err := agent.AnalyzeStock(ctx, "AAPL")
+    
+    // Test tool
+    _, err := tool.Add(ctx, 5, 3)
     if err != nil {
-        t.Fatalf("Unexpected error: %v", err)
+        t.Fatalf("Tool error: %v", err)
+    }
+    
+    // Test agent
+    _, err = agent.GenerateReport(ctx, "AAPL")
+    if err != nil {
+        t.Fatalf("Agent error: %v", err)
     }
     
     // Check metrics were emitted
@@ -880,18 +1033,24 @@ func main() {
     telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
     defer telemetry.Shutdown(context.Background())
     
-    // Then create agents
+    // Then create tools and agents
+    tool := NewMyTool()
     agent := NewMyAgent()
 }
 ```
 
-### Q: Do I need to pass telemetry to each agent?
-**A:** No! Once initialized, telemetry is globally available. All agents can call `telemetry.Emit()` directly:
+### Q: Do I need to pass telemetry to each tool and agent?
+**A:** No! Once initialized, telemetry is globally available. All tools and agents can call `telemetry.Emit()` directly:
 
 ```go
-// No need to pass telemetry around
-func (a *MyAgent) DoWork() {
-    telemetry.Counter("work.done")  // Works automatically!
+// Tools can use it
+func (t *MyTool) Process() {
+    telemetry.Counter("tool.processed")  // Works automatically!
+}
+
+// Agents can use it
+func (a *MyAgent) Orchestrate() {
+    telemetry.Counter("agent.orchestrated")  // Works automatically!
 }
 ```
 
@@ -912,15 +1071,25 @@ telemetry.Gauge("queue.size", 42)  // Current queue size
 telemetry.Emit("custom.metric", 3.14)
 ```
 
-### Q: How do I track errors?
-**A:** Use counters with error labels:
+### Q: How do I track errors in tools vs agents?
+**A:** Use counters with component type labels:
 
 ```go
+// In a Tool
 if err != nil {
-    // Track the error
-    telemetry.Counter("my_agent.errors", 
-        "type", "database_timeout",
-        "severity", "high")
+    telemetry.Counter("errors", 
+        "component_type", "tool",
+        "component_name", "calculator",
+        "error_type", "invalid_input")
+    return err
+}
+
+// In an Agent
+if err != nil {
+    telemetry.Counter("errors",
+        "component_type", "agent",
+        "component_name", "orchestrator",
+        "error_type", "discovery_failed")
     return err
 }
 ```
