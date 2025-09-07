@@ -1,148 +1,53 @@
 package ai
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
 )
 
-// OpenAIClient implements core.AIClient for OpenAI
-type OpenAIClient struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
-	logger     core.Logger
-}
-
-// NewOpenAIClient creates a new OpenAI client
-func NewOpenAIClient(apiKey string, logger ...core.Logger) *OpenAIClient {
-	if apiKey == "" {
-		apiKey = os.Getenv("OPENAI_API_KEY")
+// NewClient creates an AI client using registered providers
+func NewClient(opts ...AIOption) (core.AIClient, error) {
+	// Default configuration
+	config := &AIConfig{
+		Provider:    string(ProviderAuto),
+		MaxRetries:  3,
+		Timeout:     30 * time.Second,
+		Temperature: 0.7,
+		MaxTokens:   1000,
 	}
-
-	var log core.Logger
-	if len(logger) > 0 {
-		log = logger[0]
-	} else {
-		log = &core.NoOpLogger{}
+	
+	// Apply options
+	for _, opt := range opts {
+		opt(config)
 	}
-
-	return &OpenAIClient{
-		apiKey:  apiKey,
-		baseURL: "https://api.openai.com/v1",
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		logger: log,
-	}
-}
-
-// GenerateResponse generates a response using OpenAI
-func (c *OpenAIClient) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
-	if c.apiKey == "" {
-		return nil, fmt.Errorf("OpenAI API key not configured")
-	}
-
-	// Default options
-	if options == nil {
-		options = &core.AIOptions{
-			Model:       "gpt-4",
-			Temperature: 0.7,
-			MaxTokens:   1000,
+	
+	// Auto-detection logic
+	if config.Provider == string(ProviderAuto) {
+		provider, err := detectBestProvider()
+		if err != nil {
+			return nil, fmt.Errorf("no AI provider available: %w", err)
 		}
+		config.Provider = provider
 	}
-
-	// Build messages
-	messages := []map[string]string{}
-
-	if options.SystemPrompt != "" {
-		messages = append(messages, map[string]string{
-			"role":    "system",
-			"content": options.SystemPrompt,
-		})
+	
+	// Get provider from registry
+	factory, exists := GetProvider(config.Provider)
+	if !exists {
+		return nil, fmt.Errorf("provider '%s' not registered. Import _ \"github.com/itsneelabh/gomind/ai/providers/%s\"", 
+			config.Provider, config.Provider)
 	}
+	
+	// Create client using provider factory
+	return factory.Create(config), nil
+}
 
-	messages = append(messages, map[string]string{
-		"role":    "user",
-		"content": prompt,
-	})
-
-	// Build request
-	reqBody := map[string]interface{}{
-		"model":       options.Model,
-		"messages":    messages,
-		"temperature": options.Temperature,
-		"max_tokens":  options.MaxTokens,
-	}
-
-	jsonData, err := json.Marshal(reqBody)
+// MustNewClient creates a new AI client and panics on error
+func MustNewClient(opts ...AIOption) core.AIClient {
+	client, err := NewClient(opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		panic(fmt.Sprintf("failed to create AI client: %v", err))
 	}
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	// Send request
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	// Read response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var openAIResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		} `json:"usage"`
-		Model string `json:"model"`
-	}
-
-	if err := json.Unmarshal(body, &openAIResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if len(openAIResp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from OpenAI")
-	}
-
-	return &core.AIResponse{
-		Content: openAIResp.Choices[0].Message.Content,
-		Model:   openAIResp.Model,
-		Usage: core.TokenUsage{
-			PromptTokens:     openAIResp.Usage.PromptTokens,
-			CompletionTokens: openAIResp.Usage.CompletionTokens,
-			TotalTokens:      openAIResp.Usage.TotalTokens,
-		},
-	}, nil
+	return client
 }

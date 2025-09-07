@@ -17,18 +17,40 @@ type IntelligentAgent struct {
 // NewIntelligentAgent creates a new agent with AI capabilities
 func NewIntelligentAgent(name string, apiKey string) *IntelligentAgent {
 	base := core.NewBaseAgent(name)
-	logger := base.Logger // Use the base logger
+
+	// Create AI client using the new API
+	aiClient, err := NewClient(
+		WithProvider("openai"),
+		WithAPIKey(apiKey),
+	)
+	if err != nil {
+		// Fall back to no AI if creation fails
+		base.Logger.Error("Failed to create AI client", map[string]interface{}{
+			"error": err.Error(),
+		})
+		aiClient = nil
+	}
 
 	return &IntelligentAgent{
 		BaseAgent: base,
-		aiClient:  NewOpenAIClient(apiKey, logger),
+		aiClient:  aiClient,
 	}
 }
 
 // EnableAI adds AI capabilities to an existing BaseAgent
 func EnableAI(agent *core.BaseAgent, apiKey string) {
-	agent.AI = NewOpenAIClient(apiKey, agent.Logger)
-
+	aiClient, err := NewClient(
+		WithProvider("openai"),
+		WithAPIKey(apiKey),
+	)
+	if err != nil {
+		agent.Logger.Error("Failed to enable AI", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+	
+	agent.AI = aiClient
 	agent.Logger.Info("AI capabilities enabled", map[string]interface{}{
 		"agent": agent.GetName(),
 	})

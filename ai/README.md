@@ -1,318 +1,702 @@
 # GoMind AI Module
 
-The AI module provides basic artificial intelligence capabilities for the GoMind framework, currently focusing on OpenAI integration. This module enables agents to leverage GPT models for generating responses and building intelligent agent behaviors.
+Multi-provider LLM integration with automatic detection, universal compatibility, and extensible architecture.
 
-## Table of Contents
-- [Current Features](#current-features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Components](#components)
-- [Examples](#examples)
-- [API Reference](#api-reference)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
+## 🎯 What Does This Module Do?
 
-## Current Features
+Think of this module as your **universal translator for AI services**. Just like how a power adapter lets you plug your laptop into outlets worldwide, this module lets your agents talk to any AI service - OpenAI, Anthropic, Google, or even your company's private LLM.
 
-✅ **Implemented:**
-- OpenAI GPT integration (GPT-3.5, GPT-4)
-- Basic response generation with customizable parameters
-- System prompt support
-- Token usage tracking
-- Intelligent agent pattern with AI-powered tool discovery
-- Integration with GoMind's discovery service
+It's the bridge between your agents and the world of AI, handling all the complexity so you can focus on building great features.
 
-⚠️ **Limitations:**
-- Only OpenAI provider currently supported
-- No streaming support
-- No conversation memory management
-- No prompt templates or builders
-- Basic error handling without retries
+### Real-World Analogy: The Universal Remote
 
-## Installation
+Remember universal TV remotes? One remote controls any TV brand. That's exactly what this module does for AI:
 
-```bash
-go get github.com/itsneelabh/gomind/ai
-```
-
-## Quick Start
-
-### Basic OpenAI Client Usage
+- **Without this module**: Write different code for each AI provider (OpenAI code, Anthropic code, etc.)
+- **With this module**: Write once, use ANY provider with a single configuration change
 
 ```go
-package main
+// Monday: Using OpenAI
+client, _ := ai.NewClient(ai.WithProvider("openai"))
 
-import (
-    "context"
-    "fmt"
-    "log"
-    
-    "github.com/itsneelabh/gomind/ai"
-    "github.com/itsneelabh/gomind/core"
+// Tuesday: Switch to Anthropic
+client, _ := ai.NewClient(ai.WithProvider("anthropic"))
+
+// Wednesday: Use your company's internal LLM
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),  // Uses OpenAI-compatible interface
+    ai.WithBaseURL("https://llm.company.internal/v1"),
 )
 
-func main() {
-    // Create OpenAI client (uses OPENAI_API_KEY env var if not provided)
-    client := ai.NewOpenAIClient("your-api-key")
-    
-    // Generate a response
-    response, err := client.GenerateResponse(
-        context.Background(),
-        "What is the capital of France?",
-        &core.AIOptions{
-            Model:       "gpt-4",        // or "gpt-3.5-turbo"
-            Temperature: 0.7,            // 0.0 to 1.0
-            MaxTokens:   1000,           // max tokens to generate
-            SystemPrompt: "You are a helpful assistant.",
-        },
+// Your code doesn't change! Same interface, different providers
+response, _ := client.GenerateResponse(ctx, "Hello AI!", nil)
+```
+
+## 🚀 Quick Start
+
+### Installation
+
+```go
+import "github.com/itsneelabh/gomind/ai"
+```
+
+### The Simplest Thing That Works
+
+```go
+// Zero configuration - just works!
+client, _ := ai.NewClient()
+
+// Ask a question
+response, _ := client.GenerateResponse(
+    context.Background(),
+    "What is the meaning of life?",
+    nil,
+)
+
+fmt.Println(response.Content)
+// Output: "The meaning of life is a philosophical question..."
+```
+
+That's it! The module automatically:
+1. Checks your environment for API keys
+2. Finds the best available provider
+3. Configures everything for you
+4. Returns the response
+
+## 🧠 How It Works
+
+### The Magic of Auto-Detection
+
+The module is like a smart assistant that checks what's available:
+
+```
+Your Code: ai.NewClient()
+          ↓
+Module thinks: "Let me check what's available..."
+          ↓
+1. Checks: OPENAI_API_KEY exists? → Use OpenAI ✓
+2. Checks: ANTHROPIC_API_KEY exists? → Use Anthropic ✓
+3. Checks: GROQ_API_KEY exists? → Configure OpenAI provider for Groq ✓
+4. Checks: Local Ollama running? → Use local model ✓
+          ↓
+Auto-configures the best option
+          ↓
+Ready to use!
+```
+
+### The Universal Provider Pattern
+
+Here's the brilliant part - we have ONE OpenAI-compatible implementation that works with 20+ services:
+
+```
+┌──────────────────────────────────────────┐
+│         Your Application Code             │
+│         client.GenerateResponse()         │
+└────────────────┬─────────────────────────┘
+                 │
+        ┌────────▼────────┐
+        │   AI Module     │
+        │                 │
+        │ "One Interface  │
+        │  To Rule       │
+        │  Them All"     │
+        └────────┬────────┘
+                 │
+    ┌────────────┼───────────────┐
+    │            │               │
+┌───▼──┐    ┌────▼────┐    ┌────▼────┐
+│OpenAI│    │Anthropic│    │ Gemini  │
+│      │    │ (Native)│    │(Native) │
+└──┬───┘    └─────────┘    └─────────┘
+   │
+   └─► Works with 20+ services:
+       OpenAI, Groq, DeepSeek, xAI,
+       Ollama, vLLM, llama.cpp,
+       Any OpenAI-compatible API!
+```
+
+## 📚 Core Concepts Explained
+
+### The Provider Registry - Plugin Architecture
+
+The registry is like a plugin system that keeps track of all available providers:
+
+```go
+// Providers register themselves automatically when imported
+import (
+    _ "github.com/itsneelabh/gomind/ai/providers/openai"    // Universal provider
+    _ "github.com/itsneelabh/gomind/ai/providers/anthropic" // Native Anthropic
+    _ "github.com/itsneelabh/gomind/ai/providers/gemini"    // Native Gemini
+    _ "mycompany/providers/internal_llm"                    // Your custom provider
+)
+
+// Now you can use any of them
+client, _ := ai.NewClient(ai.WithProvider("internal_llm"))
+```
+
+### Universal OpenAI Provider - One Implementation, Many Services
+
+The OpenAI provider is special - it's designed to work with ANY OpenAI-compatible API:
+
+```go
+// All these services use the SAME "openai" provider:
+
+// Original OpenAI
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),
+    ai.WithAPIKey("sk-..."),
+)
+
+// Groq (ultra-fast inference)
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),  // Same provider!
+    ai.WithBaseURL("https://api.groq.com/openai/v1"),
+    ai.WithAPIKey("gsk-..."),
+)
+
+// DeepSeek (reasoning models)
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),  // Same provider!
+    ai.WithBaseURL("https://api.deepseek.com"),
+    ai.WithAPIKey("..."),
+)
+
+// Local Ollama
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),  // Same provider!
+    ai.WithBaseURL("http://localhost:11434/v1"),
+    // No API key needed for local
+)
+
+// Your company's OpenAI-compatible API
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),  // Same provider!
+    ai.WithBaseURL("https://llm.company.internal/v1"),
+    ai.WithAPIKey("internal-key"),
+)
+```
+
+## 🎮 Three Ways to Use AI
+
+### Method 1: Zero Configuration (Auto-Pilot)
+
+Perfect for getting started - the module figures everything out:
+
+```go
+// Just set an environment variable
+export OPENAI_API_KEY=sk-...
+
+// In your code - that's it!
+client, _ := ai.NewClient()
+response, _ := client.GenerateResponse(ctx, "Hello!", nil)
+```
+
+**Behind the scenes:**
+1. Checks environment variables
+2. Finds available API keys
+3. Auto-configures the appropriate provider
+4. Ready to use!
+
+### Method 2: Explicit Provider (You Choose)
+
+When you want a specific provider:
+
+```go
+// Use native Anthropic implementation
+client, _ := ai.NewClient(
+    ai.WithProvider("anthropic"),
+    ai.WithAPIKey("sk-ant-..."),
+    ai.WithModel("claude-3-sonnet-20240229"),
+)
+
+// Use native Gemini implementation
+client, _ := ai.NewClient(
+    ai.WithProvider("gemini"),
+    ai.WithAPIKey("..."),
+    ai.WithModel("gemini-pro"),
+)
+
+// Use AWS Bedrock (requires build tag)
+client, _ := ai.NewClient(
+    ai.WithProvider("bedrock"),
+    ai.WithRegion("us-east-1"),
+)
+```
+
+### Method 3: Multi-Provider Strategy (Advanced)
+
+Use different providers for different purposes in your application:
+
+```go
+type AISystem struct {
+    primary   core.AIClient  // Your main provider
+    fallback  core.AIClient  // Backup provider
+    local     core.AIClient  // For sensitive data
+}
+
+func NewAISystem() *AISystem {
+    // Primary: OpenAI for general use
+    primary, _ := ai.NewClient(
+        ai.WithProvider("openai"),
+        ai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
     )
     
-    if err != nil {
-        log.Fatal(err)
+    // Fallback: Another OpenAI-compatible service
+    fallback, _ := ai.NewClient(
+        ai.WithProvider("openai"),
+        ai.WithBaseURL("https://api.groq.com/openai/v1"),
+        ai.WithAPIKey(os.Getenv("GROQ_API_KEY")),
+    )
+    
+    // Local: For sensitive data
+    local, _ := ai.NewClient(
+        ai.WithProvider("openai"),
+        ai.WithBaseURL("http://localhost:11434/v1"),
+    )
+    
+    return &AISystem{primary, fallback, local}
+}
+
+func (s *AISystem) Process(ctx context.Context, prompt string, sensitive bool) (*core.AIResponse, error) {
+    if sensitive {
+        // Use local model for sensitive data
+        return s.local.GenerateResponse(ctx, prompt, nil)
     }
     
-    fmt.Printf("Response: %s\n", response.Content)
-    fmt.Printf("Model used: %s\n", response.Model)
-    fmt.Printf("Tokens used: %d\n", response.Usage.TotalTokens)
+    // Try primary first
+    response, err := s.primary.GenerateResponse(ctx, prompt, nil)
+    if err != nil {
+        // Fallback on error
+        return s.fallback.GenerateResponse(ctx, prompt, nil)
+    }
+    
+    return response, nil
 }
+```
+
+## 🔧 Provider Configuration
+
+### Environment Variables - Set and Forget
+
+The module automatically detects and configures based on environment:
+
+```bash
+# Native providers (each has its own implementation)
+export OPENAI_API_KEY=sk-...          # OpenAI
+export ANTHROPIC_API_KEY=sk-ant-...   # Anthropic Claude
+export GEMINI_API_KEY=...             # Google Gemini
+
+# OpenAI-compatible services (auto-configured with the universal provider)
+export GROQ_API_KEY=gsk-...           # Automatically configures Groq endpoint
+export DEEPSEEK_API_KEY=...           # Automatically configures DeepSeek endpoint
+export XAI_API_KEY=...                # Automatically configures xAI endpoint
+
+# Custom OpenAI-compatible endpoint
+export OPENAI_BASE_URL=https://llm.company.internal/v1
+export OPENAI_API_KEY=internal-key
+
+# AWS Bedrock (requires -tags bedrock during build)
+export AWS_REGION=us-east-1
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+```
+
+### Configuration Options - Fine Control
+
+```go
+client, _ := ai.NewClient(
+    // Provider selection
+    ai.WithProvider("openai"),           // Which provider implementation
+    ai.WithAPIKey("your-key"),          // Authentication
+    ai.WithBaseURL("https://..."),      // Custom endpoint (OpenAI provider only)
+    
+    // Model configuration
+    ai.WithModel("gpt-4"),               // Which model to use
+    ai.WithTemperature(0.7),            // Creativity (0=deterministic, 1=creative)
+    ai.WithMaxTokens(2000),             // Response length limit
+    
+    // Connection settings
+    ai.WithTimeout(60 * time.Second),   // Request timeout
+    ai.WithMaxRetries(3),               // Retry failed requests
+    
+    // Custom headers (if needed)
+    ai.WithHeaders(map[string]string{
+        "X-Custom-Header": "value",
+    }),
+    
+    // AWS-specific (for Bedrock)
+    ai.WithRegion("us-west-2"),
+    ai.WithAWSCredentials(accessKey, secretKey, sessionToken),
+)
+```
+
+## 🏗️ How It Fits in GoMind
+
+### The Architecture
+
+```
+┌─────────────────────────────────────────┐
+│            Your Application              │
+│                                          │
+│  "I need AI to analyze this data"       │
+└────────────────┬────────────────────────┘
+                 │
+    ┌────────────▼────────────┐
+    │     GoMind Core         │
+    │                         │
+    │  BaseAgent with AI      │
+    └────────────┬────────────┘
+                 │
+    ┌────────────▼────────────┐
+    │      AI Module          │ ← You are here!
+    │                         │
+    │  • Provider Registry    │
+    │  • Universal Interface  │
+    │  • Auto-detection       │
+    └────────────┬────────────┘
+                 │
+         ┌───────┼───────┐
+         │       │       │
+    ┌────▼──┐ ┌──▼──┐ ┌──▼──┐
+    │OpenAI │ │Anthro│ │Custom│
+    │Provider│ │ pic  │ │ LLM  │
+    └────────┘ └─────┘ └──────┘
+```
+
+### Working with Agents
+
+The AI module integrates seamlessly with GoMind agents:
+
+```go
+// Create an agent
+agent := core.NewBaseAgent("analyzer")
+
+// Give it AI capabilities (auto-detect provider)
+aiClient, _ := ai.NewClient()
+agent.AI = aiClient
+
+// Now your agent can think!
+agent.HandleFunc("/analyze", func(w http.ResponseWriter, r *http.Request) {
+    // Agent uses AI to analyze requests
+    response, _ := agent.AI.GenerateResponse(
+        r.Context(),
+        "Analyze this: " + requestBody,
+        nil,
+    )
+    
+    w.Write([]byte(response.Content))
+})
 ```
 
 ### Creating an Intelligent Agent
 
 ```go
-package main
+// Intelligent agents combine BaseAgent with AI
+agent := ai.NewIntelligentAgent("assistant", "your-api-key")
+
+// The agent can discover and use tools via AI
+response, err := agent.DiscoverAndUseTools(ctx, 
+    "Get the latest sales data and create a summary")
+```
+
+## 🚀 Advanced Features
+
+### Creating Custom Providers
+
+The module is designed to be extended with your own providers:
+
+```go
+// mycompany/providers/custom_llm/provider.go
+package custom_llm
 
 import (
-    "context"
     "github.com/itsneelabh/gomind/ai"
+    "github.com/itsneelabh/gomind/core"
 )
 
-func main() {
-    // Create intelligent agent with AI capabilities
-    // Note: This creates both a BaseAgent and OpenAI client internally
-    agent := ai.NewIntelligentAgent("my-assistant", "your-api-key")
+type CustomProvider struct{}
+
+func (p *CustomProvider) Name() string {
+    return "custom-llm"
+}
+
+func (p *CustomProvider) Create(config *ai.AIConfig) core.AIClient {
+    return &CustomClient{
+        endpoint: config.BaseURL,
+        apiKey:   config.APIKey,
+        // Your implementation
+    }
+}
+
+func (p *CustomProvider) DetectEnvironment() (priority int, available bool) {
+    if os.Getenv("CUSTOM_LLM_KEY") != "" {
+        return 200, true  // High priority
+    }
+    return 0, false
+}
+
+// Auto-register when imported
+func init() {
+    ai.MustRegister(&CustomProvider{})
+}
+```
+
+Using your custom provider:
+
+```go
+// main.go
+import _ "mycompany/providers/custom_llm"  // Auto-registers!
+
+client, _ := ai.NewClient(ai.WithProvider("custom-llm"))
+```
+
+### Binary Size Management
+
+The framework uses build tags to keep binaries lightweight:
+
+```bash
+# Default build: ~5.5MB (includes OpenAI, Anthropic, Gemini)
+go build
+
+# With AWS Bedrock: ~8.2MB (adds AWS SDK)
+go build -tags bedrock
+
+# With multiple cloud providers: ~12MB
+go build -tags "bedrock,azure,vertex"
+```
+
+**The Rule:** Cloud SDK providers (AWS, Azure, GCP) require explicit build tags to avoid bloating binaries. All other providers are included by default if they add less than 1MB.
+
+### Provider Capabilities
+
+Each provider implementation can offer different capabilities:
+
+```go
+// Check if a provider supports streaming
+if streamer, ok := client.(ai.StreamingClient); ok {
+    stream, _ := streamer.StreamResponse(ctx, prompt, options)
+    for chunk := range stream {
+        fmt.Print(chunk.Content)  // Real-time streaming
+    }
+}
+
+// Check if a provider supports embeddings
+if embedder, ok := client.(ai.EmbeddingClient); ok {
+    embeddings, _ := embedder.GenerateEmbeddings(ctx, text)
+}
+```
+
+## 🎯 Common Use Cases
+
+### Simple Q&A Bot
+
+```go
+func handleQuestion(question string) string {
+    // Auto-detects provider from environment
+    client, _ := ai.NewClient()
     
-    // The agent can discover and use tools via AI
-    ctx := context.Background()
-    
-    // This method uses AI to:
-    // 1. Understand user intent
-    // 2. Discover available tools via Discovery service
-    // 3. Plan tool usage
-    // 4. Synthesize results
-    response, err := agent.DiscoverAndUseTools(ctx, 
-        "What were the Q3 sales figures?")
+    response, err := client.GenerateResponse(
+        context.Background(),
+        question,
+        &core.AIOptions{
+            MaxTokens: 500,  // Keep responses concise
+            Temperature: 0.7, // Balanced creativity
+        },
+    )
     
     if err != nil {
-        log.Fatal(err)
+        return "Sorry, I couldn't process that question."
     }
     
-    fmt.Println(response)
+    return response.Content
 }
 ```
 
-## Components
-
-### 1. AIClient Interface
-
-The minimal interface that all AI providers must implement:
+### Document Analysis
 
 ```go
-type AIClient interface {
-    GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error)
-}
-```
-
-### 2. OpenAIClient
-
-Basic OpenAI API integration:
-
-```go
-// Create client with API key
-client := ai.NewOpenAIClient(apiKey)
-
-// Or use environment variable OPENAI_API_KEY
-client := ai.NewOpenAIClient("")
-
-// Client configuration is currently limited
-// Default timeout: 30 seconds
-// Default base URL: https://api.openai.com/v1
-```
-
-**Supported Options in AIOptions:**
-- `Model`: "gpt-4", "gpt-3.5-turbo", etc.
-- `Temperature`: Creativity level (0.0-1.0)
-- `MaxTokens`: Maximum tokens to generate
-- `SystemPrompt`: System message to set context
-
-### 3. IntelligentAgent
-
-An agent that combines BaseAgent with AI capabilities:
-
-```go
-type IntelligentAgent struct {
-    *core.BaseAgent
-    aiClient core.AIClient
-}
-```
-
-**Key Methods:**
-- `NewIntelligentAgent(name, apiKey)`: Creates agent with AI
-- `EnableAI(agent, apiKey)`: Adds AI to existing BaseAgent
-- `DiscoverAndUseTools(ctx, query)`: AI-powered tool discovery and usage
-
-## Examples
-
-### Example 1: Simple Q&A Agent
-
-```go
-func createQAAgent() *ai.IntelligentAgent {
-    agent := ai.NewIntelligentAgent("qa-bot", os.Getenv("OPENAI_API_KEY"))
+func analyzeDocument(document string) (string, error) {
+    client, _ := ai.NewClient(
+        ai.WithProvider("anthropic"),  // Use Claude for documents
+        ai.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")),
+        ai.WithModel("claude-3-sonnet-20240229"),
+    )
     
-    // The agent inherits all BaseAgent capabilities
-    // You can add HTTP handlers, capabilities, etc.
-    agent.HandleFunc("/ask", func(w http.ResponseWriter, r *http.Request) {
-        var req struct {
-            Question string `json:"question"`
-        }
-        json.NewDecoder(r.Body).Decode(&req)
+    prompt := fmt.Sprintf(`
+        Analyze this document and provide:
+        1. Summary (2-3 sentences)
+        2. Key points
+        3. Action items
         
-        // Use the internal AI client
-        response, err := agent.aiClient.GenerateResponse(
-            r.Context(), 
-            req.Question,
-            &core.AIOptions{
-                Model: "gpt-3.5-turbo",
-                MaxTokens: 500,
-            },
-        )
-        
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        
-        json.NewEncoder(w).Encode(map[string]string{
-            "answer": response.Content,
-        })
-    })
+        Document: %s
+    `, document)
     
-    return agent
+    response, err := client.GenerateResponse(
+        context.Background(),
+        prompt,
+        &core.AIOptions{
+            Temperature: 0.3,  // More focused analysis
+            MaxTokens: 1000,
+        },
+    )
+    
+    return response.Content, err
 }
 ```
 
-### Example 2: Adding AI to Existing Agent
+### Resilient AI System with Fallback
 
 ```go
-// Start with a regular BaseAgent
-baseAgent := core.NewBaseAgent("my-agent")
+func createResilientAI() core.AIClient {
+    // Primary provider
+    primary, _ := ai.NewClient()
+    
+    // Fallback provider (different service)
+    fallback, _ := ai.NewClient(
+        ai.WithProvider("openai"),
+        ai.WithBaseURL("https://api.groq.com/openai/v1"),
+        ai.WithAPIKey(os.Getenv("GROQ_API_KEY")),
+    )
+    
+    // Wrap in resilient client
+    return &ResilientClient{
+        primary:  primary,
+        fallback: fallback,
+    }
+}
 
-// Add your capabilities, handlers, etc.
-baseAgent.AddCapability(core.Capability{
-    Name: "data_processing",
-    Endpoint: "/process",
+type ResilientClient struct {
+    primary  core.AIClient
+    fallback core.AIClient
+}
+
+func (r *ResilientClient) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
+    // Try primary first
+    response, err := r.primary.GenerateResponse(ctx, prompt, options)
+    if err == nil {
+        return response, nil
+    }
+    
+    // Fallback on error
+    log.Printf("Primary provider failed, using fallback: %v", err)
+    return r.fallback.GenerateResponse(ctx, prompt, options)
+}
+```
+
+## 💡 Best Practices
+
+### The Golden Rules
+
+1. **🔑 Never hardcode API keys**
+```go
+// ❌ Bad
+client, _ := ai.NewClient(ai.WithAPIKey("sk-proj-123..."))
+
+// ✅ Good
+client, _ := ai.NewClient(ai.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
+```
+
+2. **🔄 Always handle errors**
+```go
+response, err := client.GenerateResponse(ctx, prompt, options)
+if err != nil {
+    // Handle error appropriately
+    log.Printf("AI request failed: %v", err)
+    return fallbackResponse, nil
+}
+```
+
+3. **⏱️ Set appropriate timeouts**
+```go
+client, _ := ai.NewClient(
+    ai.WithTimeout(30 * time.Second),  // Don't wait forever
+    ai.WithMaxRetries(3),               // Retry transient failures
+)
+```
+
+4. **📊 Monitor token usage**
+```go
+response, _ := client.GenerateResponse(ctx, prompt, options)
+log.Printf("Request used %d tokens", response.Usage.TotalTokens)
+```
+
+5. **🎯 Use appropriate options for your use case**
+```go
+// For factual queries: lower temperature
+factualResponse, _ := client.GenerateResponse(ctx, prompt, &core.AIOptions{
+    Temperature: 0.2,  // More deterministic
 })
 
-// Later, enable AI capabilities
-ai.EnableAI(baseAgent, "your-api-key")
-
-// Now baseAgent.AI is available for AI operations
-if baseAgent.AI != nil {
-    response, _ := baseAgent.AI.GenerateResponse(ctx, prompt, options)
-}
+// For creative tasks: higher temperature
+creativeResponse, _ := client.GenerateResponse(ctx, prompt, &core.AIOptions{
+    Temperature: 0.8,  // More creative
+})
 ```
 
-### Example 3: Tool Discovery Pattern
+## 🔮 Roadmap
+
+### Currently In Development
+- **Response Streaming** - Watch responses generate in real-time
+- **Conversation Memory** - Maintain context across multiple calls
+- **Provider Health Monitoring** - Automatic failover on provider issues
+
+### Planned Features
+- **Function Calling** - Let AI call your defined functions
+- **Embeddings Support** - Generate semantic embeddings for search
+- **Multi-Modal Support** - Process images, audio, and documents
+- **Cost Tracking** - Monitor spending across providers
+- **Rate Limiting** - Automatic rate limit handling
+- **Caching Layer** - Reduce costs with intelligent caching
+
+## 🎉 Summary
+
+### What This Module Gives You
+
+1. **Universal Interface** - One API for all AI providers
+2. **Provider Freedom** - Switch providers without changing code
+3. **Auto-Detection** - Zero configuration to get started
+4. **Extensibility** - Add custom providers easily
+5. **Resilience** - Built-in retry and fallback support
+6. **Lightweight** - Minimal binary size with opt-in features
+7. **Future-Proof** - New OpenAI-compatible services work instantly
+
+### The Power of Abstraction
 
 ```go
-// This example shows how the IntelligentAgent discovers tools
-agent := ai.NewIntelligentAgent("orchestrator", apiKey)
+// Your code stays the same
+response, _ := client.GenerateResponse(ctx, prompt, options)
 
-// Set up discovery service (required for tool discovery)
-agent.Discovery = core.NewRedisDiscovery("redis://localhost:6379")
-
-// Register some services with capabilities
-agent.Discovery.Register(ctx, &core.ServiceRegistration{
-    ID: "calc-service",
-    Name: "calculator",
-    Capabilities: []string{"calculation", "math"},
-})
-
-// Now the agent can discover and plan tool usage
-result, _ := agent.DiscoverAndUseTools(ctx, 
-    "Calculate the compound interest on $1000 at 5% for 3 years")
+// Whether you're using:
+// - OpenAI's GPT-4
+// - Anthropic's Claude
+// - Google's Gemini
+// - Your company's private LLM
+// - A local Ollama model
+// - Any future AI service
 ```
 
-## API Reference
+### Quick Start Guide
 
-### OpenAIClient
+**Just want to start?**
+```go
+client, _ := ai.NewClient()  // Auto-detects from environment
+```
 
-| Method | Description |
-|--------|-------------|
-| `NewOpenAIClient(apiKey string, logger ...core.Logger)` | Create new OpenAI client |
-| `GenerateResponse(ctx, prompt, options)` | Generate AI response |
+**Want specific provider?**
+```go
+client, _ := ai.NewClient(ai.WithProvider("anthropic"))
+```
 
-### IntelligentAgent
+**Want custom endpoint?**
+```go
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),
+    ai.WithBaseURL("https://your-api.com/v1"),
+)
+```
 
-| Method | Description |
-|--------|-------------|
-| `NewIntelligentAgent(name, apiKey string)` | Create new intelligent agent |
-| `EnableAI(agent, apiKey string)` | Add AI to existing agent |
-| `DiscoverAndUseTools(ctx, query string)` | AI-powered tool discovery and orchestration |
+---
 
-### AIOptions
+**🎊 Congratulations!** You now understand the AI module - your universal interface to the world of AI. The module handles all the complexity of different providers, letting you focus on building amazing AI-powered features.
 
-| Field | Type | Description | Default |
-|-------|------|-------------|---------|
-| `Model` | string | OpenAI model to use | "gpt-4" |
-| `Temperature` | float32 | Creativity (0.0-1.0) | 0.7 |
-| `MaxTokens` | int | Max tokens to generate | 1000 |
-| `SystemPrompt` | string | System context message | "" |
-
-### AIResponse
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `Content` | string | Generated text response |
-| `Model` | string | Model that was used |
-| `Usage` | TokenUsage | Token consumption details |
-
-## Roadmap
-
-### Near-term (Planned)
-- [ ] Response streaming support
-- [ ] Retry logic with exponential backoff
-- [ ] Rate limiting and quota management
-- [ ] Response caching for repeated queries
-- [ ] Better error handling and logging
-
-### Medium-term (Under Consideration)
-- [ ] Additional providers (Anthropic Claude, Google PaLM)
-- [ ] Conversation memory management
-- [ ] Prompt templates and builders
-- [ ] Function calling support
-- [ ] Embeddings support
-
-### Long-term (Future)
-- [ ] Local model support (Ollama, llama.cpp)
-- [ ] Model selection strategies
-- [ ] Cost optimization features
-- [ ] Response validation
-- [ ] Fine-tuning integration
-
-## Contributing
-
-We welcome contributions! Current priorities:
-1. Improving error handling and retries
-2. Adding streaming support
-3. Implementing conversation memory
-4. Adding more providers
-
-Please ensure:
-- All code includes tests
-- Examples are functional
-- Documentation is updated
-
-## License
-
-See the main GoMind repository for license information.
+Remember: Start simple with auto-detection, then customize as your needs grow. The module scales with you from prototype to production. Happy building! 🚀
