@@ -12,12 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// Agent is the core interface that all agents must implement
+// Agent interface - agents have full discovery capabilities
 type Agent interface {
-	Initialize(ctx context.Context) error
-	GetID() string
-	GetName() string
-	GetCapabilities() []Capability
+	Component
+	Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error)
 }
 
 // Capability represents a capability that an agent provides
@@ -30,15 +28,16 @@ type Capability struct {
 	Handler     http.HandlerFunc `json:"-"` // Optional custom handler, excluded from JSON
 }
 
-// BaseAgent provides the core agent functionality (Tool Builder Kit)
-// This is the minimal implementation for building "tools" that AI agents can discover
+// BaseAgent provides the core agent functionality
+// Agents are active components that can discover and orchestrate both tools and agents
 type BaseAgent struct {
 	// Core fields (always available)
 	ID           string
 	Name         string
+	Type         ComponentType
 	Capabilities []Capability
 	Logger       Logger
-	Discovery    Discovery
+	Discovery    Discovery // Agents get full discovery powers
 	Memory       Memory
 
 	// Optional fields (set by modules)
@@ -84,6 +83,7 @@ func NewBaseAgentWithConfig(config *Config) *BaseAgent {
 	return &BaseAgent{
 		ID:                 config.ID,
 		Name:               config.Name,
+		Type:               ComponentTypeAgent,
 		Capabilities:       []Capability{},
 		Logger:             &NoOpLogger{},      // Will be initialized based on config
 		Memory:             NewInMemoryStore(), // Will be initialized based on config
@@ -141,28 +141,19 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 			capabilities[i] = cap.Name
 		}
 
-		address := b.Config.Address
-		if address == "" {
-			address = "localhost"
-		}
+		// Use the shared resolver to determine address and port
+		address, port := ResolveServiceAddress(b.Config, b.Logger)
 
-		registration := &ServiceRegistration{
+		registration := &ServiceInfo{
 			ID:           b.ID,
 			Name:         b.Name,
+			Type:         b.Type,
 			Address:      address,
-			Port:         b.Config.Port,
-			Capabilities: capabilities,
+			Port:         port,
+			Capabilities: b.Capabilities,
 			Health:       HealthHealthy,
 			LastSeen:     time.Now(),
-			Metadata: map[string]string{
-				"namespace": b.Config.Namespace,
-			},
-		}
-
-		if b.Config.Kubernetes.Enabled {
-			registration.Metadata["pod_name"] = b.Config.Kubernetes.PodName
-			registration.Metadata["pod_namespace"] = b.Config.Kubernetes.PodNamespace
-			registration.Metadata["service_name"] = b.Config.Kubernetes.ServiceName
+			Metadata:     BuildServiceMetadata(b.Config),
 		}
 
 		if err := b.Discovery.Register(ctx, registration); err != nil {
@@ -179,6 +170,12 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 	return nil
 }
 
+// determineRegistrationAddress is deprecated - use ResolveServiceAddress instead.
+// Kept for backward compatibility but delegates to the shared resolver.
+func (b *BaseAgent) determineRegistrationAddress() (string, int) {
+	return ResolveServiceAddress(b.Config, b.Logger)
+}
+
 // GetID returns the agent ID
 func (b *BaseAgent) GetID() string {
 	return b.ID
@@ -192,6 +189,19 @@ func (b *BaseAgent) GetName() string {
 // GetCapabilities returns the agent capabilities
 func (b *BaseAgent) GetCapabilities() []Capability {
 	return b.Capabilities
+}
+
+// GetType returns ComponentTypeAgent
+func (b *BaseAgent) GetType() ComponentType {
+	return b.Type
+}
+
+// Discover allows agents to discover both tools and other agents
+func (b *BaseAgent) Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error) {
+	if b.Discovery == nil {
+		return nil, fmt.Errorf("discovery not configured for agent %s", b.Name)
+	}
+	return b.Discovery.Discover(ctx, filter)
 }
 
 // HandleFunc registers a custom HTTP handler for the given pattern.

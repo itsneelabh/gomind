@@ -224,7 +224,10 @@ func TestMockDiscovery_FindByCapability(t *testing.T) {
 			Name:         fmt.Sprintf("cap-service-%d", i),
 			Address:      "localhost",
 			Port:         8080 + i,
-			Capabilities: []string{"test-cap", "other-cap"},
+			Capabilities: []Capability{
+				{Name: "test-cap"},
+				{Name: "other-cap"},
+			},
 		}
 		err := md.Register(ctx, service)
 		if err != nil {

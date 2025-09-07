@@ -344,7 +344,7 @@ client, _ := ai.NewClient(
     ┌────────────▼────────────┐
     │     GoMind Core         │
     │                         │
-    │  BaseAgent with AI      │
+    │  Tools & Agents with AI │
     └────────────┬────────────┘
                  │
     ┌────────────▼────────────┐
@@ -363,39 +363,50 @@ client, _ := ai.NewClient(
     └────────┘ └─────┘ └──────┘
 ```
 
-### Working with Agents
+### AI-Enhanced Components: Tools vs Agents
 
-The AI module integrates seamlessly with GoMind agents:
+The AI module provides two types of AI-enhanced components:
+
+#### AI Tools (Passive, Single-Purpose)
 
 ```go
-// Create an agent
-agent := core.NewBaseAgent("analyzer")
+// Create an AI-powered tool (passive component)
+translator := ai.NewAITool("translator", "your-api-key")
 
-// Give it AI capabilities (auto-detect provider)
-aiClient, _ := ai.NewClient()
-agent.AI = aiClient
+// Tools do ONE thing well - they don't orchestrate
+translator.RegisterAICapability(
+    "translate",
+    "Translates text between languages",
+    "You are a professional translator. Translate the following text.",
+)
 
-// Now your agent can think!
-agent.HandleFunc("/analyze", func(w http.ResponseWriter, r *http.Request) {
-    // Agent uses AI to analyze requests
-    response, _ := agent.AI.GenerateResponse(
-        r.Context(),
-        "Analyze this: " + requestBody,
-        nil,
-    )
-    
-    w.Write([]byte(response.Content))
-})
+// The tool responds to requests but doesn't discover others
 ```
 
-### Creating an Intelligent Agent
+#### AI Agents (Active Orchestrators)
 
 ```go
-// Intelligent agents combine BaseAgent with AI
-agent := ai.NewIntelligentAgent("assistant", "your-api-key")
+// Create an AI-powered agent (active orchestrator)
+orchestrator := ai.NewAIAgent("orchestrator", "your-api-key")
 
-// The agent can discover and use tools via AI
-response, err := agent.DiscoverAndUseTools(ctx, 
+// Agents can discover and coordinate components
+tools, _ := orchestrator.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeTool,
+})
+
+// Use AI to plan and execute workflows
+response, _ := orchestrator.ProcessWithAI(ctx, 
+    "Analyze sales data and create a report")
+```
+
+### The Power of AI Orchestration
+
+```go
+// AI Agents orchestrate multiple tools intelligently
+agent := ai.NewAIAgent("assistant", "your-api-key")
+
+// The agent discovers available tools and coordinates them
+response, err := agent.DiscoverAndOrchestrate(ctx, 
     "Get the latest sales data and create a summary")
 ```
 

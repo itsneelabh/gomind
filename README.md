@@ -7,28 +7,29 @@ A modular framework for building AI agents in Go with production-grade resilienc
 
 ## Why GoMind? The Evolution Towards Production AI Agents
 
-### 1. Micro-Agents Are the Future of AI Architecture
+### 1. Intelligent Agents and Tools Are the Future of AI Architecture
 
-**The Paradigm Shift**: Just as microservices revolutionized traditional applications, micro-agents are transforming AI systems. Instead of monolithic AI applications, the future lies in:
+**The Paradigm Shift**: The future of AI isn't monolithic applications, but ecosystems of specialized components - tools that perform specific tasks and agents that orchestrate them intelligently.
 
-- **Specialized Agents**: Each agent masters one domain (data retrieval, analysis, decision-making)
-- **Composable Intelligence**: Combine simple agents to solve complex problems
-- **Independent Scaling**: Scale only the agents that need more resources
-- **Fault Isolation**: One agent failing doesn't crash your entire AI system
-- **Rapid Iteration**: Update individual agents without touching the whole system
+- **Specialized Tools**: Each tool masters one capability (calculation, data retrieval, translation)
+- **Intelligent Agents**: Orchestrators that discover and coordinate tools to solve complex problems
+- **Composable Intelligence**: Combine simple tools through smart agents
+- **Independent Scaling**: Scale only the components that need more resources
+- **Fault Isolation**: One tool failing doesn't crash your entire AI system
+- **Rapid Iteration**: Update individual tools or agents without touching the whole system
 
-### 2. Kubernetes: The Battle-Tested Platform for Micro-Agents
+### 2. Kubernetes: The Battle-Tested Platform for AI Components
 
-**Why Reinvent the Wheel?** Kubernetes already solved distributed system challenges for microservices. These same solutions apply perfectly to micro-agents:
+**Why Reinvent the Wheel?** Kubernetes already solved distributed system challenges. These same solutions apply perfectly to AI tools and agents:
 
-| Kubernetes Capability | How It Powers Micro-Agents |
+| Kubernetes Capability | How It Powers AI Components |
 |----------------------|----------------------------|
-| **Auto-scaling** | Spawn more agents based on load |
-| **Health Monitoring** | Restart failed agents automatically |
-| **Load Balancing** | Distribute requests across agent replicas |
-| **Resource Limits** | Prevent runaway agents from consuming all resources |
-| **Rolling Updates** | Deploy new agent versions with zero downtime |
-| **Pod Networking** | Secure communication between agents |
+| **Auto-scaling** | Spawn more tool/agent instances based on load |
+| **Health Monitoring** | Restart failed components automatically |
+| **Load Balancing** | Distribute requests across tool replicas |
+| **Resource Limits** | Prevent runaway components from consuming all resources |
+| **Rolling Updates** | Deploy new versions with zero downtime |
+| **Service Discovery** | Tools and agents find each other via Kubernetes DNS |
 
 **The GoMind Advantage**: Go applications are Kubernetes-native. Single binary deployments, tiny containers (~16MB), and built-in health checks make Go agents perfect citizens in a Kubernetes cluster.
 
@@ -36,16 +37,16 @@ A modular framework for building AI agents in Go with production-grade resilienc
 
 **The AI-Assisted Coding Revolution**: With GitHub Copilot, Claude Code, and Cursor, programming language syntax is no longer a barrier. If you understand programming concepts, AI assistants help you write idiomatic code in any language.
 
-**So Why Choose Go for AI Agents?**
+**So Why Choose Go for AI Tools and Agents?**
 
 | What You Get with Go | The Reality |
 |---------------------|-------------|
-| **Container Size** | ~16MB (verified with Alpine Linux base) |
-| **Memory Usage** | 10-50MB per agent |
+| **Container Size** | ~5MB for tools, ~10MB for agents (verified) |
+| **Memory Usage** | 10-50MB per component |
 | **Startup Time** | <1 second |
 | **Deployment** | Single binary - no dependencies |
 | **Concurrency** | Native goroutines - thousands of concurrent operations |
-| **Kubernetes Native** | Built-in health checks, graceful shutdown |
+| **Kubernetes Native** | Built-in health checks, Service DNS support |
 
 **The Bottom Line**: With AI assistance removing the learning curve, Go gives you production superpowers. You write agents that are faster, smaller, and more reliable.
 
@@ -56,13 +57,13 @@ A modular framework for building AI agents in Go with production-grade resilienc
 ### The Problems We Solve
 
 🔴 **Common Challenge**: "Here's how to build an agent. Good luck running 100 of them in production!"
-✅ **GoMind**: Built-in circuit breakers, retries, and telemetry. Your agents stay up even when external APIs go down.
+✅ **GoMind**: Tools and agents with built-in resilience. Your components stay up even when external APIs go down.
 
 🔴 **Common Challenge**: "Install these 50 dependencies, hope they don't conflict."
 ✅ **GoMind**: Single binary. No dependency hell. Compiles once, runs everywhere.
 
-🔴 **Common Challenge**: "To coordinate agents, write complex orchestration code."
-✅ **GoMind**: Just describe what you want in English, or use simple YAML workflows.
+🔴 **Common Challenge**: "To coordinate components, write complex orchestration code."
+✅ **GoMind**: Agents discover tools automatically. Describe workflows in English or YAML.
 
 🔴 **Common Challenge**: "Add Prometheus, OpenTelemetry, Grafana, configure them all..."
 ✅ **GoMind**: Initialize once, then `telemetry.Counter("task.done")`. Observability built-in.
@@ -80,7 +81,7 @@ graph TD
     App --> Framework
     
     subgraph Framework["GoMind Framework"]
-        Core["<b>CORE MODULE</b><br/>━━━━━━━━━━━━<br/>• BaseAgent<br/>• Discovery<br/>• Capabilities<br/>• Health Checks<br/><i>(Required)</i>"]
+        Core["<b>CORE MODULE</b><br/>━━━━━━━━━━━━<br/>• Tools & Agents<br/>• Discovery<br/>• Capabilities<br/>• Health Checks<br/><i>(Required)</i>"]
         
         AI["<b>AI</b><br/>━━━━━━<br/>• LLM Client<br/>• Intelligent Agent<br/>• Embeddings"]
         
@@ -106,12 +107,14 @@ graph TD
 
 **Why This Modular Architecture Works**:
 
-- **Core Module (Required)**: Provides the foundation - agent creation, service discovery, health checks
+- **Core Module (Required)**: Provides two building blocks:
+  - **Tools**: Passive components that perform specific tasks
+  - **Agents**: Active orchestrators that discover and coordinate
 - **Optional Modules**: Add only what you need:
-  - **AI**: LLM integration for intelligent agents
+  - **AI**: LLM integration for intelligent tools and agents
   - **Resilience**: Circuit breakers and retry logic for production stability
-  - **Telemetry**: Metrics, tracing, and observability
-  - **Orchestration**: Multi-agent coordination via workflows or natural language
+  - **Telemetry**: Metrics, tracing, and observability for both tools and agents
+  - **Orchestration**: Advanced multi-agent coordination via workflows or natural language
 - **Clean Separation**: Each module has a single responsibility
 - **No Hidden Dependencies**: Modules depend only on Core, not on each other
 - **Incremental Complexity**: Start simple, add modules as your needs grow
@@ -419,7 +422,7 @@ agent2.Process(ctx)  // Metrics include: request_id=req-789
 
 ## Putting It All Together: A Real Example
 
-Let's build a customer support system with three specialized agents:
+Let's build a customer support system with tools and an orchestrating agent:
 
 ```go
 import (
@@ -433,20 +436,20 @@ import (
     "github.com/itsneelabh/gomind/orchestration"
 )
 
-// 1. Ticket Classifier Agent - understands the problem
-type ClassifierAgent struct {
-    *core.BaseAgent
+// 1. Ticket Classifier Tool - a passive AI-powered tool
+type ClassifierTool struct {
+    *core.BaseTool  // Tools are passive
     aiClient core.AIClient
 }
 
-func NewClassifierAgent(aiClient core.AIClient) *ClassifierAgent {
-    return &ClassifierAgent{
-        BaseAgent: core.NewBaseAgent("classifier"),
+func NewClassifierTool(aiClient core.AIClient) *ClassifierTool {
+    return &ClassifierTool{
+        BaseTool: core.NewTool("classifier"),
         aiClient: aiClient,
     }
 }
 
-func (c *ClassifierAgent) ClassifyTicket(ctx context.Context, ticket string) (string, error) {
+func (c *ClassifierTool) ClassifyTicket(ctx context.Context, ticket string) (string, error) {
     // Use AI to understand the ticket
     response, err := c.aiClient.GenerateResponse(ctx, 
         fmt.Sprintf("Classify this support ticket: %s", ticket),
@@ -459,12 +462,12 @@ func (c *ClassifierAgent) ClassifyTicket(ctx context.Context, ticket string) (st
     return response.Content, nil
 }
 
-// 2. Knowledge Agent - searches documentation
-type KnowledgeAgent struct {
-    *core.BaseAgent
+// 2. Knowledge Tool - searches documentation
+type KnowledgeTool struct {
+    *core.BaseTool  // Another passive tool
 }
 
-func (k *KnowledgeAgent) SearchDocs(ctx context.Context, query string) (string, error) {
+func (k *KnowledgeTool) SearchDocs(ctx context.Context, query string) (string, error) {
     // Resilient external API call
     var result string
     err := resilience.Retry(ctx, resilience.DefaultRetryConfig(), func() error {
@@ -481,9 +484,9 @@ func (k *KnowledgeAgent) SearchDocs(ctx context.Context, query string) (string, 
     return result, err
 }
 
-// Orchestrate them all
+// 3. Support Agent - orchestrates the tools
 func HandleSupportTicket(ctx context.Context, orchestrator *orchestration.AIOrchestrator, ticket string) (string, error) {
-    // The orchestrator coordinates all three agents
+    // The agent discovers and coordinates tools
     response, err := orchestrator.ProcessRequest(ctx,
         fmt.Sprintf("Handle this support ticket: %s", ticket),
         nil,
@@ -497,10 +500,10 @@ func HandleSupportTicket(ctx context.Context, orchestrator *orchestration.AIOrch
 ```
 
 **What's Happening**:
-1. **Discovery**: Agents find each other automatically via Redis
-2. **Orchestration**: Natural language or workflow coordinates them
+1. **Discovery**: Agent finds available tools via Redis
+2. **Orchestration**: Agent coordinates tools using AI or workflows
 3. **Resilience**: Retries and circuit breakers protect external calls
-4. **Observability**: Every step is tracked, traceable across agents
+4. **Observability**: Every step is tracked across tools and agents
 5. **Production Ready**: Health checks, graceful shutdown, all built-in
 
 ## Complete Production Setup
@@ -533,12 +536,14 @@ func main() {
         log.Fatalf("Failed to connect to Redis: %v", err)
     }
 
-    // 3. Create your agents
-    dataAgent := &DataAgent{BaseAgent: core.NewBaseAgent("data-agent")}
-    dataAgent.Discovery = discovery
+    // 3. Create your components (tools and agents)
+    // Tools are passive - they just register themselves
+    dataTool := &DataTool{BaseTool: core.NewTool("data-tool")}
+    dataTool.Registry = discovery  // Tools only register
     
-    aiAgent := ai.NewIntelligentAgent("ai-agent", os.Getenv("OPENAI_KEY"))
-    aiAgent.Discovery = discovery
+    // Agents are active - they can discover and orchestrate
+    coordinatorAgent := ai.NewAIAgent("coordinator", os.Getenv("OPENAI_KEY"))
+    coordinatorAgent.Discovery = discovery  // Agents get full discovery
 
     // 4. Add orchestration
     orchestrator := orchestration.NewAIOrchestrator(

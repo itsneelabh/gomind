@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -53,26 +54,28 @@ type TokenUsage struct {
 	TotalTokens      int
 }
 
-// Discovery interface for service discovery
-type Discovery interface {
-	Register(ctx context.Context, registration *ServiceRegistration) error
-	Unregister(ctx context.Context, serviceID string) error
-	FindService(ctx context.Context, serviceName string) ([]*ServiceRegistration, error)
-	FindByCapability(ctx context.Context, capability string) ([]*ServiceRegistration, error)
-	UpdateHealth(ctx context.Context, serviceID string, status HealthStatus) error
+// Registry interface for tools (registration only)
+type Registry interface {
+	Register(ctx context.Context, info *ServiceInfo) error
+	UpdateHealth(ctx context.Context, id string, status HealthStatus) error
+	Unregister(ctx context.Context, id string) error
 }
 
-// ServiceRegistration for service discovery
-type ServiceRegistration struct {
-	ID           string
-	Name         string
-	Address      string
-	Port         int
-	Capabilities []string
-	Metadata     map[string]string
-	Health       HealthStatus
-	LastSeen     time.Time
+// Discovery interface for agents (registration + discovery)
+type Discovery interface {
+	Registry // Embed Registry
+	Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error)
 }
+
+// CapabilityExample provides example usage of a capability
+type CapabilityExample struct {
+	Description string          `json:"description"`
+	Input       json.RawMessage `json:"input"`
+	Output      json.RawMessage `json:"output"`
+}
+
+// ServiceRegistration is deprecated - use ServiceInfo from component.go instead
+type ServiceRegistration = ServiceInfo
 
 // HealthStatus for services
 type HealthStatus string
