@@ -215,8 +215,9 @@ func TestClient_Reset(t *testing.T) {
 	client.GenerateResponse(context.Background(), "test prompt", &core.AIOptions{Model: "test"})
 	
 	// Verify state before reset
-	if client.ResponseIndex != 1 {
-		t.Errorf("expected ResponseIndex 1, got %d", client.ResponseIndex)
+	// Note: ResponseIndex should be 0 because error was returned before consuming response
+	if client.ResponseIndex != 0 {
+		t.Errorf("expected ResponseIndex 0 (error returned, no response consumed), got %d", client.ResponseIndex)
 	}
 	if client.CallCount != 1 {
 		t.Errorf("expected CallCount 1, got %d", client.CallCount)

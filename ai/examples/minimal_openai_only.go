@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // Package main - minimal example with only OpenAI provider
 package main
 

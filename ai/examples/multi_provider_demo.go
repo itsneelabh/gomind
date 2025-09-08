@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // Package main demonstrates the multi-provider AI system
 package main
 

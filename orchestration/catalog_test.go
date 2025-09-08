@@ -41,7 +41,7 @@ func (m *MockDiscovery) FindByCapability(ctx context.Context, capability string)
 	for _, services := range m.services {
 		for _, service := range services {
 			for _, cap := range service.Capabilities {
-				if cap == capability {
+				if cap.Name == capability {
 					results = append(results, service)
 					break
 				}
@@ -55,6 +55,46 @@ func (m *MockDiscovery) UpdateHealth(ctx context.Context, serviceID string, stat
 	return nil
 }
 
+func (m *MockDiscovery) Discover(ctx context.Context, filter core.DiscoveryFilter) ([]*core.ServiceInfo, error) {
+	var results []*core.ServiceInfo
+	
+	// If searching by name
+	if filter.Name != "" {
+		if services, ok := m.services[filter.Name]; ok {
+			for _, svc := range services {
+				results = append(results, (*core.ServiceInfo)(svc))
+			}
+		}
+		return results, nil
+	}
+	
+	// If searching by capabilities
+	if len(filter.Capabilities) > 0 {
+		for _, services := range m.services {
+			for _, service := range services {
+				for _, cap := range service.Capabilities {
+					for _, filterCap := range filter.Capabilities {
+						if cap.Name == filterCap {
+							results = append(results, (*core.ServiceInfo)(service))
+							goto nextService
+						}
+					}
+				}
+				nextService:
+			}
+		}
+		return results, nil
+	}
+	
+	// Return all services
+	for _, services := range m.services {
+		for _, svc := range services {
+			results = append(results, (*core.ServiceInfo)(svc))
+		}
+	}
+	return results, nil
+}
+
 func TestAgentCatalog_Refresh(t *testing.T) {
 	// Create mock discovery with test services
 	discovery := NewMockDiscovery()
@@ -65,7 +105,7 @@ func TestAgentCatalog_Refresh(t *testing.T) {
 		Name:         "stock-analyzer",
 		Address:      "localhost",
 		Port:         8080,
-		Capabilities: []string{"analyze_stock", "get_price"},
+		Capabilities: []core.Capability{{Name: "analyze_stock"}, {Name: "get_price"}},
 		Health:       core.HealthHealthy,
 	})
 
@@ -74,7 +114,7 @@ func TestAgentCatalog_Refresh(t *testing.T) {
 		Name:         "news-agent",
 		Address:      "localhost",
 		Port:         8081,
-		Capabilities: []string{"get_news", "analyze_sentiment"},
+		Capabilities: []core.Capability{{Name: "get_news"}, {Name: "analyze_sentiment"}},
 		Health:       core.HealthHealthy,
 	})
 
@@ -263,7 +303,10 @@ func TestAgentCatalog_ConvertBasicCapabilities(t *testing.T) {
 	discovery := NewMockDiscovery()
 	catalog := NewAgentCatalog(discovery)
 
-	basic := []string{"capability1", "capability2"}
+	basic := []core.Capability{
+		{Name: "capability1"},
+		{Name: "capability2"},
+	}
 	enhanced := catalog.convertBasicCapabilities(basic)
 
 	if len(enhanced) != 2 {

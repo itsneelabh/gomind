@@ -87,7 +87,7 @@ func TestAIOrchestrator_ProcessRequest(t *testing.T) {
 		Name:         "stock-analyzer",
 		Address:      "localhost",
 		Port:         8080,
-		Capabilities: []string{"analyze_stock"},
+		Capabilities: []core.Capability{{Name: "analyze_stock"}},
 	})
 
 	// Create orchestrator
@@ -102,7 +102,7 @@ func TestAIOrchestrator_ProcessRequest(t *testing.T) {
 				Name:         "stock-analyzer",
 				Address:      "localhost",
 				Port:         8080,
-				Capabilities: []string{"analyze_stock"},
+				Capabilities: []core.Capability{{Name: "analyze_stock"}},
 			},
 			Capabilities: []EnhancedCapability{
 				{Name: "analyze_stock", Description: "Analyzes stocks"},
@@ -144,7 +144,7 @@ func TestAIOrchestrator_ValidatePlan(t *testing.T) {
 	_ = discovery.Register(context.Background(), &core.ServiceRegistration{
 		ID:           "agent-1",
 		Name:         "test-agent",
-		Capabilities: []string{"capability1"},
+		Capabilities: []core.Capability{{Name: "capability1"}},
 	})
 
 	orchestrator := NewAIOrchestrator(DefaultConfig(), discovery, aiClient)

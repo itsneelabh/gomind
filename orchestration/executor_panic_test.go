@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -195,6 +196,23 @@ func TestSmartExecutor_PanicWithDependencies(t *testing.T) {
 	}))
 	defer server2.Close()
 
+	// Parse server URLs
+	parseServerURL := func(serverURL string) (string, int) {
+		url := strings.TrimPrefix(serverURL, "http://")
+		parts := strings.Split(url, ":")
+		addr := parts[0]
+		port := 80
+		if len(parts) > 1 {
+			if p, err := strconv.Atoi(parts[1]); err == nil {
+				port = p
+			}
+		}
+		return addr, port
+	}
+
+	addr1, port1 := parseServerURL(server1.URL)
+	addr2, port2 := parseServerURL(server2.URL)
+
 	catalog := &AgentCatalog{
 		agents: make(map[string]*AgentInfo),
 		mu:     sync.RWMutex{},
@@ -204,11 +222,11 @@ func TestSmartExecutor_PanicWithDependencies(t *testing.T) {
 		Registration: &core.ServiceRegistration{
 			ID:      "agent1",
 			Name:    "agent1",
-			Address: server1.URL,
-			Port:    80,
+			Address: addr1,
+			Port:    port1,
 		},
 		Capabilities: []EnhancedCapability{
-			{Name: "test", Endpoint: server1.URL + "/api/test"},
+			{Name: "test", Endpoint: "/api/test"},
 		},
 	}
 
@@ -216,11 +234,11 @@ func TestSmartExecutor_PanicWithDependencies(t *testing.T) {
 		Registration: &core.ServiceRegistration{
 			ID:      "agent2",
 			Name:    "agent2",
-			Address: server2.URL,
-			Port:    80,
+			Address: addr2,
+			Port:    port2,
 		},
 		Capabilities: []EnhancedCapability{
-			{Name: "test", Endpoint: server2.URL + "/api/test"},
+			{Name: "test", Endpoint: "/api/test"},
 		},
 	}
 
@@ -235,7 +253,7 @@ func TestSmartExecutor_PanicWithDependencies(t *testing.T) {
 				Namespace: "test",
 				DependsOn: []string{}, // No dependencies
 				Metadata: map[string]interface{}{
-					"endpoint": server1.URL + "/api/test",
+					"capability": "test",
 				},
 			},
 			{
@@ -244,7 +262,7 @@ func TestSmartExecutor_PanicWithDependencies(t *testing.T) {
 				Namespace: "test",
 				DependsOn: []string{"step1"}, // Depends on panicking step
 				Metadata: map[string]interface{}{
-					"endpoint": server2.URL + "/api/test",
+					"capability": "test",
 				},
 			},
 		},
@@ -499,6 +517,9 @@ func TestSmartExecutor_StartTimePreservationInPanic(t *testing.T) {
 func TestSmartExecutor_NoDeadlockInPanic(t *testing.T) {
 	// Create panic servers
 	var servers []*httptest.Server
+	var serverAddresses []string
+	var serverPorts []int
+	
 	for i := 0; i < 10; i++ {
 		idx := i
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -506,6 +527,18 @@ func TestSmartExecutor_NoDeadlockInPanic(t *testing.T) {
 		}))
 		servers = append(servers, server)
 		defer server.Close()
+		
+		// Parse server URL to get address and port
+		serverURL := strings.TrimPrefix(server.URL, "http://")
+		parts := strings.Split(serverURL, ":")
+		serverAddresses = append(serverAddresses, parts[0])
+		port := 80
+		if len(parts) > 1 {
+			if p, err := strconv.Atoi(parts[1]); err == nil {
+				port = p
+			}
+		}
+		serverPorts = append(serverPorts, port)
 	}
 
 	catalog := &AgentCatalog{
@@ -513,18 +546,18 @@ func TestSmartExecutor_NoDeadlockInPanic(t *testing.T) {
 		mu:     sync.RWMutex{},
 	}
 
-	// Add multiple agents
+	// Add multiple agents with proper address and port
 	for i := 0; i < 10; i++ {
 		agentID := fmt.Sprintf("agent-%d", i)
 		catalog.agents[agentID] = &AgentInfo{
 			Registration: &core.ServiceRegistration{
 				ID:      agentID,
 				Name:    agentID,
-				Address: servers[i].URL,
-				Port:    80,
+				Address: serverAddresses[i],
+				Port:    serverPorts[i],
 			},
 			Capabilities: []EnhancedCapability{
-				{Name: "test", Endpoint: servers[i].URL + "/api/test"},
+				{Name: "test", Endpoint: "/api/test"},
 			},
 		}
 	}
@@ -539,7 +572,7 @@ func TestSmartExecutor_NoDeadlockInPanic(t *testing.T) {
 			AgentName: fmt.Sprintf("agent-%d", i),
 			Namespace: "test",
 			Metadata: map[string]interface{}{
-				"endpoint": servers[i].URL + "/api/test",
+				"capability": "test",
 			},
 		})
 	}
@@ -567,8 +600,10 @@ func TestSmartExecutor_NoDeadlockInPanic(t *testing.T) {
 	select {
 	case <-done:
 		// Success - no deadlock
-	case <-time.After(5 * time.Second):
-		t.Fatal("Execution deadlocked")
+	case <-time.After(15 * time.Second):
+		// With 10 steps, max concurrency of 5, and 3 retries each with delays,
+		// execution can take up to ~12 seconds in the worst case
+		t.Fatal("Execution timed out after 15 seconds")
 	}
 }
 

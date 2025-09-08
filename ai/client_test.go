@@ -2,7 +2,7 @@ package ai
 
 import (
 	"context"
-	"errors"
+	"strings"
 	"testing"
 
 	"github.com/itsneelabh/gomind/core"
@@ -135,7 +135,7 @@ func TestNewClient(t *testing.T) {
 				}
 			},
 			wantErr: true,
-			errMsg:  "provider not found: unknown",
+			errMsg:  "provider 'unknown' not registered",
 		},
 		{
 			name: "provider with custom config",
@@ -228,8 +228,8 @@ func TestNewClient(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("expected error, got nil")
-				} else if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("expected error %q, got %q", tt.errMsg, err.Error())
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error containing %q, got %q", tt.errMsg, err.Error())
 				}
 				return
 			}
@@ -361,7 +361,7 @@ func TestAutoDetectProvider(t *testing.T) {
 				registry.providers[f.Name()] = f
 			}
 
-			factory, err := autoDetectProvider()
+			providerName, err := detectBestProvider()
 
 			if tt.expectedError != "" {
 				if err == nil {
@@ -377,8 +377,8 @@ func TestAutoDetectProvider(t *testing.T) {
 				return
 			}
 
-			if factory.Name() != tt.expectedName {
-				t.Errorf("expected provider %s, got %s", tt.expectedName, factory.Name())
+			if providerName != tt.expectedName {
+				t.Errorf("expected provider %s, got %s", tt.expectedName, providerName)
 			}
 		})
 	}

@@ -334,7 +334,7 @@ func (s *slowMockDiscovery) UpdateHealth(ctx context.Context, id string, health 
 	return nil
 }
 
-func (s *slowMockDiscovery) FindService(ctx context.Context, name string) (*ServiceInfo, error) {
+func (s *slowMockDiscovery) FindService(ctx context.Context, name string) ([]*ServiceInfo, error) {
 	return nil, nil
 }
 

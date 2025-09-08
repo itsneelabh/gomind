@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // Package main - example with all providers EXCEPT Bedrock
 package main
 

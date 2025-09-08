@@ -161,13 +161,20 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 }
 
 // convertBasicCapabilities converts simple capability names to enhanced format
-func (c *AgentCatalog) convertBasicCapabilities(caps []string) []EnhancedCapability {
+func (c *AgentCatalog) convertBasicCapabilities(caps []core.Capability) []EnhancedCapability {
 	enhanced := make([]EnhancedCapability, len(caps))
 	for i, cap := range caps {
 		enhanced[i] = EnhancedCapability{
-			Name:        cap,
-			Description: fmt.Sprintf("Capability: %s", cap),
-			Endpoint:    fmt.Sprintf("/api/%s", cap),
+			Name:        cap.Name,
+			Description: cap.Description,
+			Endpoint:    cap.Endpoint,
+		}
+		// Use defaults if not set
+		if enhanced[i].Endpoint == "" {
+			enhanced[i].Endpoint = fmt.Sprintf("/api/%s", cap.Name)
+		}
+		if enhanced[i].Description == "" {
+			enhanced[i].Description = fmt.Sprintf("Capability: %s", cap.Name)
 		}
 	}
 	return enhanced

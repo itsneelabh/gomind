@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // Package main - minimal example with NO providers imported
 package main
 
