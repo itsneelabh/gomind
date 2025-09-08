@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
@@ -22,9 +23,10 @@ type BaseClient struct {
 	RetryDelay time.Duration
 	
 	// Default configuration
-	DefaultModel       string
-	DefaultTemperature float32
-	DefaultMaxTokens   int
+	DefaultModel        string
+	DefaultTemperature  float32
+	DefaultMaxTokens    int
+	DefaultSystemPrompt string
 }
 
 // NewBaseClient creates a new base client with defaults
@@ -59,8 +61,13 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 		// Execute request
 		resp, err := b.HTTPClient.Do(reqClone)
 		
-		// Success
-		if err == nil && resp.StatusCode < 500 {
+		// Success - return if no error and status is not retryable
+		if err == nil && resp.StatusCode < 400 {
+			return resp, nil
+		}
+		
+		// Return non-retryable client errors immediately
+		if err == nil && resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
 			return resp, nil
 		}
 		
@@ -97,6 +104,14 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 	return nil, fmt.Errorf("request failed after %d retries: %w", b.MaxRetries, lastErr)
 }
 
+// LogError logs an error with provider context
+func (b *BaseClient) LogError(provider string, err error) {
+	b.Logger.Error("Provider error", map[string]interface{}{
+		"provider": provider,
+		"error":    err.Error(),
+	})
+}
+
 // ApplyDefaults applies default values to options if not set
 func (b *BaseClient) ApplyDefaults(options *core.AIOptions) *core.AIOptions {
 	if options == nil {
@@ -116,7 +131,36 @@ func (b *BaseClient) ApplyDefaults(options *core.AIOptions) *core.AIOptions {
 		options.MaxTokens = b.DefaultMaxTokens
 	}
 	
+	if options.SystemPrompt == "" && b.DefaultSystemPrompt != "" {
+		options.SystemPrompt = b.DefaultSystemPrompt
+	}
+	
 	return options
+}
+
+// isRetryableError determines if an error is retryable
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	errStr := err.Error()
+	
+	// Check for specific HTTP status codes that are retryable
+	if strings.Contains(errStr, "(429)") || // Rate limit
+		strings.Contains(errStr, "(500)") || // Internal server error
+		strings.Contains(errStr, "(502)") || // Bad gateway
+		strings.Contains(errStr, "(503)") || // Service unavailable
+		strings.Contains(errStr, "(504)") { // Gateway timeout
+		return true
+	}
+	
+	// Check for context timeout/deadline
+	if err == context.DeadlineExceeded {
+		return true
+	}
+	
+	return false
 }
 
 // HandleError processes API errors consistently
