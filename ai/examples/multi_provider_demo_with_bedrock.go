@@ -1,3 +1,6 @@
+//go:build bedrock
+// +build bedrock
+
 // Package main demonstrates the multi-provider AI system INCLUDING AWS Bedrock
 // Build with: go build -tags bedrock multi_provider_demo_with_bedrock.go
 package main

@@ -59,7 +59,46 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 		readySteps := e.findReadySteps(plan, executed, stepResults)
 
 		if len(readySteps) == 0 {
-			// No steps ready - might be circular dependency
+			// No steps ready - check if it's due to failed dependencies or circular dependency
+			// Mark remaining steps as skipped if their dependencies failed
+			hasSkipped := false
+			for _, step := range plan.Steps {
+				if executed[step.StepID] {
+					continue
+				}
+				// Check if this step is blocked by failed dependencies
+				blockedByFailure := false
+				for _, dep := range step.DependsOn {
+					if result, ok := stepResults[dep]; ok && !result.Success {
+						blockedByFailure = true
+						break
+					}
+				}
+				if blockedByFailure {
+					// Mark this step as skipped due to failed dependency
+					skippedResult := StepResult{
+						StepID:    step.StepID,
+						AgentName: step.AgentName,
+						Namespace: step.Namespace,
+						Success:   false,
+						Error:     "skipped due to failed dependency",
+						StartTime: time.Now(),
+						Duration:  0,
+					}
+					stepResults[step.StepID] = &skippedResult
+					result.Steps = append(result.Steps, skippedResult)
+					executed[step.StepID] = true
+					result.Success = false
+					hasSkipped = true
+				}
+			}
+			
+			if hasSkipped {
+				// We skipped some steps, continue to check if more can be executed
+				continue
+			}
+			
+			// No steps were skipped, this is likely a circular dependency
 			return nil, fmt.Errorf("no executable steps found - check for circular dependencies")
 		}
 
@@ -71,7 +110,14 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 				// Track when this step started for accurate timing
 				stepStartTime := time.Now()
 
+				// Acquire semaphore for concurrency control BEFORE setting up defer
+				// This ensures the semaphore is always released even if panic occurs
+				e.semaphore <- struct{}{}
+				
 				defer func() {
+					// Always release semaphore first
+					<-e.semaphore
+					
 					if r := recover(); r != nil {
 						// Panic recovery mechanism for step execution.
 						// Captures any panic that occurs during step execution and converts it
@@ -111,10 +157,6 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 					}
 					wg.Done()
 				}()
-
-				// Acquire semaphore for concurrency control
-				e.semaphore <- struct{}{}
-				defer func() { <-e.semaphore }()
 
 				// Build context for step execution
 				stepCtx := e.buildStepContext(ctx, s, stepResults)

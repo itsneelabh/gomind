@@ -11,8 +11,12 @@ import (
 // This represents an orchestrating agent that can discover and coordinate other components
 type AIAgent struct {
 	*core.BaseAgent // Full agent with discovery
-	aiClient        core.AIClient
+	AI              core.AIClient // Exposed for testing compatibility
+	aiClient        core.AIClient // Internal field (deprecated, use AI)
 }
+
+// IntelligentAgent is an alias for AIAgent for backward compatibility
+type IntelligentAgent = AIAgent
 
 // NewAIAgent creates a new agent with AI capabilities and discovery
 func NewAIAgent(name string, apiKey string) (*AIAgent, error) {
@@ -31,8 +35,100 @@ func NewAIAgent(name string, apiKey string) (*AIAgent, error) {
 	
 	return &AIAgent{
 		BaseAgent: agent,
+		AI:        aiClient,
 		aiClient:  aiClient,
 	}, nil
+}
+
+// NewIntelligentAgent creates a new intelligent agent for testing compatibility
+func NewIntelligentAgent(id string) *IntelligentAgent {
+	// Use the id as the name for NewBaseAgent
+	agent := core.NewBaseAgent(id)
+	// Override the auto-generated ID with the provided one
+	agent.ID = id
+	return &IntelligentAgent{
+		BaseAgent: agent,
+		AI:        nil, // AI client should be set later
+		aiClient:  nil,
+	}
+}
+
+// GenerateResponse generates a response using the AI client
+func (a *AIAgent) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
+	client := a.AI
+	if client == nil {
+		client = a.aiClient
+	}
+	if client == nil {
+		return nil, fmt.Errorf("no AI client configured")
+	}
+	return client.GenerateResponse(ctx, prompt, options)
+}
+
+// SetAI sets the AI client for the agent
+func (a *AIAgent) SetAI(client core.AIClient) {
+	a.AI = client
+	a.aiClient = client
+}
+
+// ProcessWithMemory processes input with memory storage
+func (a *AIAgent) ProcessWithMemory(ctx context.Context, input string) (string, error) {
+	// Store input in memory if available
+	if a.Memory != nil {
+		// Store with both generic and specific keys for compatibility
+		a.Memory.Set(ctx, "last_input", input, 0)
+		a.Memory.Set(ctx, fmt.Sprintf("input:%s", input), input, 0)
+	}
+	
+	// Process with AI
+	client := a.AI
+	if client == nil {
+		client = a.aiClient
+	}
+	if client == nil {
+		return "", fmt.Errorf("no AI client configured")
+	}
+	
+	response, err := client.GenerateResponse(ctx, "Processed: " + input, nil)
+	if err != nil {
+		return "", err
+	}
+	
+	// Store response in memory if available
+	if a.Memory != nil {
+		// Store with both generic and specific keys for compatibility
+		a.Memory.Set(ctx, "last_response", response.Content, 0)
+		a.Memory.Set(ctx, fmt.Sprintf("response:%s", input), response.Content, 0)
+	}
+	
+	return response.Content, nil
+}
+
+// ThinkAndAct processes complex reasoning tasks
+func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string, error) {
+	client := a.AI
+	if client == nil {
+		client = a.aiClient
+	}
+	if client == nil {
+		return "", "", fmt.Errorf("no AI client configured")
+	}
+	
+	// First, think about the task (planning phase)
+	thinkPrompt := fmt.Sprintf("Analyze this task and break it down: %s", task)
+	thinkResp, err := client.GenerateResponse(ctx, thinkPrompt, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("thinking failed: %w", err)
+	}
+	
+	// Then act on the analysis
+	actPrompt := fmt.Sprintf("Based on this analysis: %s\nExecute: %s", thinkResp.Content, task)
+	actResp, err := client.GenerateResponse(ctx, actPrompt, nil)
+	if err != nil {
+		return thinkResp.Content, "", fmt.Errorf("action failed: %w", err)
+	}
+	
+	return thinkResp.Content, actResp.Content, nil
 }
 
 // ProcessWithAI uses AI to understand requests and coordinate components
@@ -61,7 +157,14 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	contextPrompt := a.buildContextPrompt(tools, agents, request)
 	
 	// Use AI to process request
-	response, err := a.aiClient.GenerateResponse(ctx, contextPrompt, &core.AIOptions{
+	client := a.AI
+	if client == nil {
+		client = a.aiClient
+	}
+	if client == nil {
+		return nil, fmt.Errorf("no AI client configured")
+	}
+	response, err := client.GenerateResponse(ctx, contextPrompt, &core.AIOptions{
 		Model:       "gpt-4",
 		Temperature: 0.7,
 		MaxTokens:   1000,
@@ -81,7 +184,14 @@ Query: "%s"
 
 List the types of capabilities needed (e.g., "database_query", "calculation", "data_transformation").`, userQuery)
 
-	intentResp, err := a.aiClient.GenerateResponse(ctx, intentPrompt, &core.AIOptions{
+	client := a.AI
+	if client == nil {
+		client = a.aiClient
+	}
+	if client == nil {
+		return "", fmt.Errorf("no AI client configured")
+	}
+	intentResp, err := client.GenerateResponse(ctx, intentPrompt, &core.AIOptions{
 		Model:       "gpt-4",
 		Temperature: 0.3,
 		MaxTokens:   200,
@@ -103,7 +213,7 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 	// 3. Use AI to plan component usage
 	planPrompt := a.buildPlanPrompt(allComponents, userQuery, intentResp.Content)
 	
-	planResp, err := a.aiClient.GenerateResponse(ctx, planPrompt, &core.AIOptions{
+	planResp, err := client.GenerateResponse(ctx, planPrompt, &core.AIOptions{
 		Model:       "gpt-4",
 		Temperature: 0.3,
 		MaxTokens:   500,
@@ -124,7 +234,7 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 
 Generate a response to the original user query: "%s"`, planResp.Content, userQuery)
 
-	finalResp, err := a.aiClient.GenerateResponse(ctx, synthesisPrompt, &core.AIOptions{
+	finalResp, err := client.GenerateResponse(ctx, synthesisPrompt, &core.AIOptions{
 		Model:       "gpt-4",
 		Temperature: 0.7,
 		MaxTokens:   1000,

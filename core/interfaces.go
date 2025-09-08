@@ -65,6 +65,9 @@ type Registry interface {
 type Discovery interface {
 	Registry // Embed Registry
 	Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error)
+	// Backward compatibility methods
+	FindService(ctx context.Context, serviceName string) ([]*ServiceInfo, error)
+	FindByCapability(ctx context.Context, capability string) ([]*ServiceInfo, error)
 }
 
 // CapabilityExample provides example usage of a capability
