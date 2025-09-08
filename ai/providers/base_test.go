@@ -63,8 +63,11 @@ func TestNewBaseClient(t *testing.T) {
 				t.Errorf("expected timeout %v, got %v", tt.timeout, client.HTTPClient.Timeout)
 			}
 			
-			if tt.logger == nil && client.Logger != nil {
-				t.Error("expected nil logger when not provided")
+			if tt.logger == nil {
+				// When no logger is provided, we expect a NoOpLogger to be set
+				if _, ok := client.Logger.(*core.NoOpLogger); !ok {
+					t.Error("expected NoOpLogger when no logger provided")
+				}
 			}
 			
 			if tt.logger != nil && client.Logger != tt.logger {
@@ -274,28 +277,28 @@ func TestBaseClient_HandleError(t *testing.T) {
 			statusCode: http.StatusBadRequest,
 			body:       []byte(`{"error": "invalid request"}`),
 			provider:   "TestProvider",
-			wantErr:    "TestProvider API error (400): {\"error\": \"invalid request\"}",
+			wantErr:    "TestProvider API error: invalid request - {\"error\": \"invalid request\"}",
 		},
 		{
 			name:       "unauthorized",
 			statusCode: http.StatusUnauthorized,
 			body:       []byte(`{"error": "invalid api key"}`),
 			provider:   "TestProvider",
-			wantErr:    "TestProvider API error (401): {\"error\": \"invalid api key\"}",
+			wantErr:    "TestProvider API error: invalid or missing API key",
 		},
 		{
 			name:       "rate limit",
 			statusCode: http.StatusTooManyRequests,
 			body:       []byte(`{"error": "rate limit exceeded"}`),
 			provider:   "TestProvider",
-			wantErr:    "TestProvider API error (429): {\"error\": \"rate limit exceeded\"}",
+			wantErr:    "TestProvider API error: rate limit exceeded",
 		},
 		{
 			name:       "server error",
 			statusCode: http.StatusInternalServerError,
 			body:       []byte(`{"error": "internal server error"}`),
 			provider:   "TestProvider",
-			wantErr:    "TestProvider API error (500): {\"error\": \"internal server error\"}",
+			wantErr:    "TestProvider API error: service temporarily unavailable (status 500)",
 		},
 	}
 
@@ -341,11 +344,11 @@ func TestBaseClient_Logging(t *testing.T) {
 	}
 	client.LogResponse("test-provider", "test-model", usage, 100*time.Millisecond)
 	
-	if len(logger.infoCalls) != 1 {
-		t.Errorf("expected 1 info call, got %d", len(logger.infoCalls))
+	if len(logger.debugCalls) != 2 {
+		t.Errorf("expected 2 debug calls, got %d", len(logger.debugCalls))
 	}
 	
-	fields = logger.infoCalls[0]
+	fields = logger.debugCalls[1] // Second debug call is LogResponse
 	if fields["provider"] != "test-provider" {
 		t.Errorf("expected provider test-provider, got %v", fields["provider"])
 	}
