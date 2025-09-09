@@ -1,3 +1,47 @@
+// Package ui provides circuit breaker implementation for the GoMind framework.
+// This file implements a concrete circuit breaker that can be used by UI components
+// for fault tolerance and preventing cascading failures.
+//
+// Purpose:
+// - Provides a concrete implementation of the circuit breaker pattern
+// - Monitors failures and automatically opens circuit when threshold exceeded
+// - Implements automatic recovery testing through half-open state
+// - Offers thread-safe state management and metrics collection
+// - Serves as default implementation when no external circuit breaker is provided
+//
+// Scope:
+// - SimpleCircuitBreaker: Concrete in-memory implementation
+// - CircuitState: Enumeration of circuit states (Closed, Open, Half-Open)
+// - CircuitBreakerConfig: Configuration parameters
+// - Failure counting and threshold management
+// - Automatic state transitions based on success/failure patterns
+//
+// State Machine:
+// The circuit breaker operates as a state machine:
+// 1. Closed → Open: When failure threshold is exceeded
+// 2. Open → Half-Open: After timeout period expires
+// 3. Half-Open → Closed: When success threshold is met
+// 4. Half-Open → Open: When any request fails in half-open state
+//
+// Features:
+// - Configurable failure and success thresholds
+// - Adjustable timeout for recovery attempts
+// - Limited requests in half-open state for safe recovery testing
+// - Thread-safe operation with mutex protection
+// - Integration with telemetry for metrics and monitoring
+// - HTTP status code based failure detection
+//
+// Usage:
+// config := CircuitBreakerConfig{
+//     FailureThreshold: 5,
+//     SuccessThreshold: 2,
+//     Timeout: 30 * time.Second,
+// }
+// cb := NewSimpleCircuitBreaker("my-service", config)
+// transport := NewCircuitBreakerTransport(baseTransport, cb)
+//
+// This implementation can be used standalone or replaced with more sophisticated
+// implementations (e.g., Netflix Hystrix, Sony gobreaker) through the core.CircuitBreaker interface.
 package ui
 
 import (
@@ -46,7 +90,7 @@ type CircuitBreakerConfig struct {
 	Timeout time.Duration
 	// MaxRequests is the maximum number of requests allowed in half-open state
 	MaxRequests int
-	
+
 	// Optional telemetry and logging
 	Telemetry core.Telemetry
 	Logger    core.Logger
@@ -57,8 +101,8 @@ func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
 	return CircuitBreakerConfig{
 		FailureThreshold: 5,
 		SuccessThreshold: 2,
-		Timeout:         30 * time.Second,
-		MaxRequests:     1,
+		Timeout:          30 * time.Second,
+		MaxRequests:      1,
 	}
 }
 
@@ -66,17 +110,17 @@ func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
 type CircuitBreakerTransport struct {
 	// The underlying transport being wrapped
 	underlying Transport
-	
+
 	// Circuit breaker state
-	state          CircuitState
-	failureCount   int
-	successCount   int
-	lastFailTime   time.Time
+	state            CircuitState
+	failureCount     int
+	successCount     int
+	lastFailTime     time.Time
 	halfOpenRequests int
-	
+
 	// Configuration
 	config CircuitBreakerConfig
-	
+
 	// Thread safety
 	mu sync.RWMutex
 }
@@ -96,18 +140,18 @@ func NewCircuitBreakerTransport(transport Transport, config CircuitBreakerConfig
 	if config.MaxRequests == 0 {
 		config.MaxRequests = 1
 	}
-	
+
 	// Ensure MaxRequests is sufficient for SuccessThreshold
 	// This prevents impossible configurations where we can't make enough
 	// requests in HalfOpen state to meet the success threshold
 	if config.MaxRequests < config.SuccessThreshold {
 		config.MaxRequests = config.SuccessThreshold
 	}
-	
+
 	return &CircuitBreakerTransport{
 		underlying: transport,
-		state:     StateClosed,
-		config:    config,
+		state:      StateClosed,
+		config:     config,
 	}
 }
 
@@ -125,7 +169,7 @@ func (cb *CircuitBreakerTransport) Description() string {
 func (cb *CircuitBreakerTransport) Available() bool {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
-	
+
 	// Check circuit state
 	if cb.state == StateOpen {
 		// Check if we should transition to half-open
@@ -134,7 +178,7 @@ func (cb *CircuitBreakerTransport) Available() bool {
 		}
 		return false
 	}
-	
+
 	// Also check underlying transport availability
 	return cb.underlying.Available()
 }
@@ -154,10 +198,10 @@ func (cb *CircuitBreakerTransport) Start(ctx context.Context) error {
 	if !cb.canAttempt() {
 		return cb.createCircuitOpenError()
 	}
-	
+
 	err := cb.underlying.Start(ctx)
 	cb.recordResult(err)
-	
+
 	return err
 }
 
@@ -170,23 +214,23 @@ func (cb *CircuitBreakerTransport) Stop(ctx context.Context) error {
 // CreateHandler wraps the underlying handler with circuit breaker logic
 func (cb *CircuitBreakerTransport) CreateHandler(agent ChatAgent) http.Handler {
 	originalHandler := cb.underlying.CreateHandler(agent)
-	
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check circuit breaker state
 		if !cb.canAttempt() {
 			cb.handleCircuitOpenResponse(w, r)
 			return
 		}
-		
+
 		// Wrap response writer to monitor failures
 		wrapped := &responseWriterWrapper{
 			ResponseWriter: w,
-			statusCode:    200,
+			statusCode:     200,
 		}
-		
+
 		// Call underlying handler
 		originalHandler.ServeHTTP(wrapped, r)
-		
+
 		// Record result based on status code
 		if wrapped.statusCode >= 500 {
 			cb.recordResult(fmt.Errorf("server error: %d", wrapped.statusCode))
@@ -204,10 +248,10 @@ func (cb *CircuitBreakerTransport) HealthCheck(ctx context.Context) error {
 	if !cb.canAttempt() {
 		return cb.createCircuitOpenError()
 	}
-	
+
 	err := cb.underlying.HealthCheck(ctx)
 	cb.recordResult(err)
-	
+
 	return err
 }
 
@@ -225,22 +269,22 @@ func (cb *CircuitBreakerTransport) ClientExample() string {
 func (cb *CircuitBreakerTransport) canAttempt() bool {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	switch cb.state {
 	case StateClosed:
 		return true
-		
+
 	case StateOpen:
 		// Check if timeout has passed
 		if time.Since(cb.lastFailTime) > cb.config.Timeout {
 			// Transition to half-open
 			cb.state = StateHalfOpen
-			cb.halfOpenRequests = 1  // Count this as the first request
+			cb.halfOpenRequests = 1 // Count this as the first request
 			cb.logStateTransition(StateOpen, StateHalfOpen)
 			return true
 		}
 		return false
-		
+
 	case StateHalfOpen:
 		// Allow limited requests in half-open state
 		if cb.halfOpenRequests < cb.config.MaxRequests {
@@ -248,7 +292,7 @@ func (cb *CircuitBreakerTransport) canAttempt() bool {
 			return true
 		}
 		return false
-		
+
 	default:
 		return false
 	}
@@ -258,7 +302,7 @@ func (cb *CircuitBreakerTransport) canAttempt() bool {
 func (cb *CircuitBreakerTransport) recordResult(err error) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	if err != nil {
 		cb.recordFailureLocked()
 	} else {
@@ -270,19 +314,19 @@ func (cb *CircuitBreakerTransport) recordResult(err error) {
 func (cb *CircuitBreakerTransport) recordFailureLocked() {
 	cb.failureCount++
 	cb.lastFailTime = time.Now()
-	
+
 	switch cb.state {
 	case StateClosed:
 		if cb.failureCount >= cb.config.FailureThreshold {
 			// Open the circuit
 			oldState := cb.state
 			cb.state = StateOpen
-			cb.failureCount = 0  // Reset for consistency with HalfOpen->Open transition
+			cb.failureCount = 0 // Reset for consistency with HalfOpen->Open transition
 			cb.successCount = 0
 			cb.logStateTransition(oldState, StateOpen)
 			cb.recordMetric("circuit.opened", 1.0)
 		}
-		
+
 	case StateHalfOpen:
 		// Single failure in half-open returns to open
 		oldState := cb.state
@@ -310,7 +354,7 @@ func (cb *CircuitBreakerTransport) recordSuccessLocked() {
 			cb.logStateTransition(oldState, StateClosed)
 			cb.recordMetric("circuit.closed", 1.0)
 		}
-		
+
 	case StateClosed:
 		// Reset failure count on success
 		cb.failureCount = 0
@@ -331,10 +375,10 @@ func (cb *CircuitBreakerTransport) handleCircuitOpenResponse(w http.ResponseWrit
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Circuit-Breaker", "open")
 	w.WriteHeader(http.StatusServiceUnavailable)
-	
-	fmt.Fprintf(w, `{"error":"Service temporarily unavailable (circuit breaker open)","transport":"%s"}`, 
+
+	fmt.Fprintf(w, `{"error":"Service temporarily unavailable (circuit breaker open)","transport":"%s"}`,
 		cb.underlying.Name())
-	
+
 	cb.recordMetric("circuit.rejected", 1.0)
 }
 
@@ -371,12 +415,12 @@ func (cb *CircuitBreakerTransport) GetState() CircuitState {
 func (cb *CircuitBreakerTransport) GetStats() map[string]interface{} {
 	cb.mu.RLock()
 	defer cb.mu.RUnlock()
-	
+
 	return map[string]interface{}{
-		"state":           cb.state.String(),
-		"failure_count":   cb.failureCount,
-		"success_count":   cb.successCount,
-		"last_fail_time":  cb.lastFailTime,
+		"state":              cb.state.String(),
+		"failure_count":      cb.failureCount,
+		"success_count":      cb.successCount,
+		"last_fail_time":     cb.lastFailTime,
 		"half_open_requests": cb.halfOpenRequests,
 	}
 }

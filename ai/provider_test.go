@@ -7,9 +7,9 @@ import (
 
 func TestProviderOptions(t *testing.T) {
 	tests := []struct {
-		name     string
-		option   AIOption
-		verify   func(*testing.T, *AIConfig)
+		name   string
+		option AIOption
+		verify func(*testing.T, *AIConfig)
 	}{
 		{
 			name:   "WithProvider",
@@ -168,7 +168,7 @@ func TestProviderOptions(t *testing.T) {
 
 func TestMultipleOptions(t *testing.T) {
 	config := &AIConfig{}
-	
+
 	// Apply multiple options
 	options := []AIOption{
 		WithProvider("openai"),
@@ -181,11 +181,11 @@ func TestMultipleOptions(t *testing.T) {
 		WithExtra("field1", "value1"),
 		WithExtra("field2", "value2"),
 	}
-	
+
 	for _, opt := range options {
 		opt(config)
 	}
-	
+
 	// Verify all options were applied
 	if config.Provider != "openai" {
 		t.Errorf("expected provider 'openai', got %q", config.Provider)
@@ -202,7 +202,7 @@ func TestMultipleOptions(t *testing.T) {
 	if config.MaxTokens != 1500 {
 		t.Errorf("expected max tokens 1500, got %d", config.MaxTokens)
 	}
-	
+
 	// Verify headers were merged
 	if len(config.Headers) != 2 {
 		t.Errorf("expected 2 headers, got %d", len(config.Headers))
@@ -213,7 +213,7 @@ func TestMultipleOptions(t *testing.T) {
 	if config.Headers["X-Header-2"] != "value2" {
 		t.Errorf("expected X-Header-2='value2', got %q", config.Headers["X-Header-2"])
 	}
-	
+
 	// Verify extra fields
 	if len(config.Extra) != 2 {
 		t.Errorf("expected 2 extra fields, got %d", len(config.Extra))
@@ -239,7 +239,7 @@ func TestProviderConstants(t *testing.T) {
 		{ProviderAuto, "auto"},
 		{ProviderCustom, "custom"},
 	}
-	
+
 	for _, tt := range tests {
 		if string(tt.provider) != tt.expected {
 			t.Errorf("Provider constant %v = %q, want %q", tt.provider, string(tt.provider), tt.expected)

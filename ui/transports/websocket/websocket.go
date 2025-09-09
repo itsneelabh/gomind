@@ -63,7 +63,7 @@ func (t *WebSocketTransport) Description() string {
 // Initialize configures the transport
 func (t *WebSocketTransport) Initialize(config ui.TransportConfig) error {
 	t.config = config
-	
+
 	// Configure WebSocket upgrader
 	t.upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
@@ -73,12 +73,12 @@ func (t *WebSocketTransport) Initialize(config ui.TransportConfig) error {
 			if !config.CORS.Enabled {
 				return true
 			}
-			
+
 			origin := r.Header.Get("Origin")
 			if len(config.CORS.AllowedOrigins) == 0 {
 				return true
 			}
-			
+
 			for _, allowed := range config.CORS.AllowedOrigins {
 				if allowed == "*" || allowed == origin {
 					return true
@@ -88,7 +88,7 @@ func (t *WebSocketTransport) Initialize(config ui.TransportConfig) error {
 		},
 		HandshakeTimeout: config.Timeout,
 	}
-	
+
 	// Configure buffer sizes from options
 	if config.Options != nil {
 		if bufferSize, ok := config.Options["buffer_size"].(int); ok && bufferSize > 0 {
@@ -102,7 +102,7 @@ func (t *WebSocketTransport) Initialize(config ui.TransportConfig) error {
 			t.upgrader.WriteBufferSize = writeBuffer
 		}
 	}
-	
+
 	t.clients = make(map[string]*wsClient)
 	t.initialized = true
 	t.ready = true
@@ -122,13 +122,13 @@ func (t *WebSocketTransport) Start(ctx context.Context) error {
 func (t *WebSocketTransport) Stop(ctx context.Context) error {
 	t.clientsMu.Lock()
 	defer t.clientsMu.Unlock()
-	
+
 	// Close all client connections
 	for clientID, client := range t.clients {
 		client.close()
 		delete(t.clients, clientID)
 	}
-	
+
 	t.ready = false
 	return nil
 }
@@ -162,7 +162,7 @@ func (t *WebSocketTransport) CreateHandler(agent ui.ChatAgent) http.Handler {
 
 		// Generate client ID for tracking
 		clientID := fmt.Sprintf("%p", client)
-		
+
 		// Register client
 		t.clientsMu.Lock()
 		t.clients[clientID] = client
@@ -171,7 +171,7 @@ func (t *WebSocketTransport) CreateHandler(agent ui.ChatAgent) http.Handler {
 		// Start client handlers
 		go client.writePump()
 		go client.readPump(t, clientID)
-		
+
 		// Send welcome message
 		welcomeData := map[string]interface{}{
 			"client_id": clientID,
@@ -179,8 +179,8 @@ func (t *WebSocketTransport) CreateHandler(agent ui.ChatAgent) http.Handler {
 		}
 		welcomeJSON, _ := json.Marshal(welcomeData)
 		client.send <- ui.ChatEvent{
-			Type: "connected",
-			Data: string(welcomeJSON),
+			Type:      "connected",
+			Data:      string(welcomeJSON),
 			Timestamp: time.Now(),
 		}
 	})
@@ -201,7 +201,7 @@ func (t *WebSocketTransport) HealthCheck(ctx context.Context) error {
 	if !t.ready {
 		return fmt.Errorf("transport not ready")
 	}
-	
+
 	// Health check passes if transport is ready
 	// Could add more sophisticated health checks here like checking client connections
 	return nil
@@ -317,7 +317,7 @@ func (c *wsClient) readPump(transport *WebSocketTransport, clientID string) {
 		transport.clientsMu.Lock()
 		delete(transport.clients, clientID)
 		transport.clientsMu.Unlock()
-		
+
 		c.close()
 	}()
 
@@ -379,8 +379,8 @@ func (c *wsClient) handleChatMessage(msg wsMessage) {
 		}
 		sessionJSON, _ := json.Marshal(sessionData)
 		c.send <- ui.ChatEvent{
-			Type: "session_created",
-			Data: string(sessionJSON),
+			Type:      "session_created",
+			Data:      string(sessionJSON),
 			Timestamp: time.Now(),
 		}
 	}
@@ -424,8 +424,8 @@ func (c *wsClient) handlePing() {
 	}
 	pongJSON, _ := json.Marshal(pongData)
 	c.send <- ui.ChatEvent{
-		Type: "pong",
-		Data: string(pongJSON),
+		Type:      "pong",
+		Data:      string(pongJSON),
 		Timestamp: time.Now(),
 	}
 }
@@ -433,13 +433,13 @@ func (c *wsClient) handlePing() {
 // handleSessionCreate creates a new session
 func (c *wsClient) handleSessionCreate(msg wsMessage) {
 	ctx := context.Background()
-	
+
 	session, err := c.agent.CreateSession(ctx)
 	if err != nil {
 		c.sendError(fmt.Sprintf("failed to create session: %v", err))
 		return
 	}
-	
+
 	c.sessionID = session.ID
 	sessionCreateData := map[string]interface{}{
 		"session_id": session.ID,
@@ -448,8 +448,8 @@ func (c *wsClient) handleSessionCreate(msg wsMessage) {
 	}
 	sessionCreateJSON, _ := json.Marshal(sessionCreateData)
 	c.send <- ui.ChatEvent{
-		Type: "session_created",
-		Data: string(sessionCreateJSON),
+		Type:      "session_created",
+		Data:      string(sessionCreateJSON),
 		Timestamp: time.Now(),
 	}
 }
@@ -479,8 +479,8 @@ func (c *wsClient) handleSessionGet(msg wsMessage) {
 	}
 	sessionInfoJSON, _ := json.Marshal(sessionInfoData)
 	c.send <- ui.ChatEvent{
-		Type: "session_info",
-		Data: string(sessionInfoJSON),
+		Type:      "session_info",
+		Data:      string(sessionInfoJSON),
 		Timestamp: time.Now(),
 	}
 }
@@ -493,8 +493,8 @@ func (c *wsClient) sendError(message string) {
 	}
 	errorJSON, _ := json.Marshal(errorData)
 	c.send <- ui.ChatEvent{
-		Type: ui.EventError,
-		Data: string(errorJSON),
+		Type:      ui.EventError,
+		Data:      string(errorJSON),
 		Timestamp: time.Now(),
 	}
 }
@@ -503,7 +503,7 @@ func (c *wsClient) sendError(message string) {
 func (c *wsClient) close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if !c.closed {
 		c.closed = true
 		close(c.send)

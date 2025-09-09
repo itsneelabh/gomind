@@ -11,7 +11,7 @@ import (
 	"github.com/itsneelabh/gomind/core"
 )
 
-// MockAIClient implements ai.AIClient for testing
+// MockAIClient implements core.AIClient for testing
 type MockAIClient struct {
 	responses map[string]string
 	calls     []string

@@ -11,28 +11,28 @@ import (
 
 func TestFactory(t *testing.T) {
 	factory := &Factory{}
-	
+
 	// Test Name
 	if factory.Name() != "mock" {
 		t.Errorf("expected name 'mock', got %q", factory.Name())
 	}
-	
+
 	// Test Description
 	if factory.Description() == "" {
 		t.Error("expected non-empty description")
 	}
-	
+
 	// Test Priority
 	if factory.Priority() != 1 {
 		t.Errorf("expected priority 1, got %d", factory.Priority())
 	}
-	
+
 	// Test DetectEnvironment
 	priority, available := factory.DetectEnvironment()
 	if priority != 0 || available != false {
 		t.Errorf("expected (0, false), got (%d, %v)", priority, available)
 	}
-	
+
 	// Test Create
 	config := &ai.AIConfig{
 		Model: "test-model",
@@ -77,7 +77,7 @@ func TestClient_GenerateResponse(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "with options",
+			name:   "with options",
 			prompt: "test",
 			options: &core.AIOptions{
 				Model:       "custom-model",
@@ -99,46 +99,46 @@ func TestClient_GenerateResponse(t *testing.T) {
 			wantModel:   "config-model",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := NewClient(nil)
-			
+
 			if tt.setup != nil {
 				tt.setup(client)
 			}
-			
+
 			resp, err := client.GenerateResponse(context.Background(), tt.prompt, tt.options)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
 			}
-			
+
 			if resp.Content != tt.wantContent {
 				t.Errorf("expected content %q, got %q", tt.wantContent, resp.Content)
 			}
-			
+
 			if resp.Model != tt.wantModel {
 				t.Errorf("expected model %q, got %q", tt.wantModel, resp.Model)
 			}
-			
+
 			// Check that prompt and options were recorded
 			if client.LastPrompt != tt.prompt {
 				t.Errorf("expected LastPrompt %q, got %q", tt.prompt, client.LastPrompt)
 			}
-			
+
 			if tt.options != nil && client.LastOptions != tt.options {
 				t.Error("LastOptions not recorded correctly")
 			}
-			
+
 			if client.CallCount != 1 {
 				t.Errorf("expected CallCount 1, got %d", client.CallCount)
 			}
@@ -149,9 +149,9 @@ func TestClient_GenerateResponse(t *testing.T) {
 func TestClient_MultipleResponses(t *testing.T) {
 	client := NewClient(nil)
 	client.SetResponses("One", "Two", "Three")
-	
+
 	ctx := context.Background()
-	
+
 	// First call
 	resp1, err := client.GenerateResponse(ctx, "test", nil)
 	if err != nil {
@@ -160,7 +160,7 @@ func TestClient_MultipleResponses(t *testing.T) {
 	if resp1.Content != "One" {
 		t.Errorf("expected 'One', got %q", resp1.Content)
 	}
-	
+
 	// Second call
 	resp2, err := client.GenerateResponse(ctx, "test", nil)
 	if err != nil {
@@ -169,7 +169,7 @@ func TestClient_MultipleResponses(t *testing.T) {
 	if resp2.Content != "Two" {
 		t.Errorf("expected 'Two', got %q", resp2.Content)
 	}
-	
+
 	// Third call
 	resp3, err := client.GenerateResponse(ctx, "test", nil)
 	if err != nil {
@@ -178,13 +178,13 @@ func TestClient_MultipleResponses(t *testing.T) {
 	if resp3.Content != "Three" {
 		t.Errorf("expected 'Three', got %q", resp3.Content)
 	}
-	
+
 	// Fourth call should error
 	_, err = client.GenerateResponse(ctx, "test", nil)
 	if err == nil {
 		t.Error("expected error when no more responses, got nil")
 	}
-	
+
 	if client.CallCount != 4 {
 		t.Errorf("expected CallCount 4, got %d", client.CallCount)
 	}
@@ -192,15 +192,15 @@ func TestClient_MultipleResponses(t *testing.T) {
 
 func TestClient_ContextCancellation(t *testing.T) {
 	client := NewClient(nil)
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
-	
+
 	_, err := client.GenerateResponse(ctx, "test", nil)
 	if err == nil {
 		t.Error("expected context cancellation error, got nil")
 	}
-	
+
 	if err != context.Canceled {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
@@ -210,10 +210,10 @@ func TestClient_Reset(t *testing.T) {
 	client := NewClient(nil)
 	client.SetResponses("One", "Two")
 	client.SetError(errors.New("test"))
-	
+
 	// Make a call
 	client.GenerateResponse(context.Background(), "test prompt", &core.AIOptions{Model: "test"})
-	
+
 	// Verify state before reset
 	// Note: ResponseIndex should be 0 because error was returned before consuming response
 	if client.ResponseIndex != 0 {
@@ -228,10 +228,10 @@ func TestClient_Reset(t *testing.T) {
 	if client.Error == nil {
 		t.Error("expected Error to be set")
 	}
-	
+
 	// Reset
 	client.Reset()
-	
+
 	// Verify state after reset
 	if client.ResponseIndex != 0 {
 		t.Errorf("expected ResponseIndex 0 after reset, got %d", client.ResponseIndex)
@@ -252,21 +252,21 @@ func TestClient_Reset(t *testing.T) {
 
 func TestClient_TokenUsage(t *testing.T) {
 	client := NewClient(nil)
-	
+
 	prompt := "This is a test prompt"
 	response := "This is a mock response"
 	client.SetResponses(response)
-	
+
 	resp, err := client.GenerateResponse(context.Background(), prompt, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Check token usage estimation
 	expectedPromptTokens := len(prompt) / 4
 	expectedCompletionTokens := len(response) / 4
 	expectedTotalTokens := (len(prompt) + len(response)) / 4
-	
+
 	if resp.Usage.PromptTokens != expectedPromptTokens {
 		t.Errorf("expected PromptTokens %d, got %d", expectedPromptTokens, resp.Usage.PromptTokens)
 	}

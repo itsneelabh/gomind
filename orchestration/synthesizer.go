@@ -6,18 +6,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/itsneelabh/gomind/ai"
 	"github.com/itsneelabh/gomind/core"
 )
 
 // AISynthesizer uses AI to synthesize agent responses
 type AISynthesizer struct {
-	aiClient ai.AIClient
+	aiClient core.AIClient
 	strategy SynthesisStrategy
 }
 
 // NewAISynthesizer creates a new AI-powered synthesizer
-func NewAISynthesizer(aiClient ai.AIClient) *AISynthesizer {
+func NewAISynthesizer(aiClient core.AIClient) *AISynthesizer {
 	return &AISynthesizer{
 		aiClient: aiClient,
 		strategy: StrategyLLM,

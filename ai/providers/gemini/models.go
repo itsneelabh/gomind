@@ -2,9 +2,9 @@ package gemini
 
 // GeminiRequest represents the native Gemini GenerateContent API request
 type GeminiRequest struct {
-	Contents         []Content          `json:"contents"`
-	GenerationConfig *GenerationConfig  `json:"generationConfig,omitempty"`
-	SafetySettings   []SafetySetting    `json:"safetySettings,omitempty"`
+	Contents          []Content          `json:"contents"`
+	GenerationConfig  *GenerationConfig  `json:"generationConfig,omitempty"`
+	SafetySettings    []SafetySetting    `json:"safetySettings,omitempty"`
 	SystemInstruction *SystemInstruction `json:"systemInstruction,omitempty"`
 }
 
@@ -41,9 +41,9 @@ type SafetySetting struct {
 
 // GeminiResponse represents the response from Gemini API
 type GeminiResponse struct {
-	Candidates     []Candidate    `json:"candidates"`
-	UsageMetadata  UsageMetadata  `json:"usageMetadata"`
-	ModelVersion   string         `json:"modelVersion"`
+	Candidates    []Candidate   `json:"candidates"`
+	UsageMetadata UsageMetadata `json:"usageMetadata"`
+	ModelVersion  string        `json:"modelVersion"`
 }
 
 // Candidate represents a response candidate
@@ -56,9 +56,9 @@ type Candidate struct {
 
 // SafetyRating represents safety rating information
 type SafetyRating struct {
-	Category    string  `json:"category"`
-	Probability string  `json:"probability"`
-	Blocked     bool    `json:"blocked"`
+	Category    string `json:"category"`
+	Probability string `json:"probability"`
+	Blocked     bool   `json:"blocked"`
 }
 
 // UsageMetadata represents token usage information

@@ -57,7 +57,7 @@ func (m *MockDiscovery) UpdateHealth(ctx context.Context, serviceID string, stat
 
 func (m *MockDiscovery) Discover(ctx context.Context, filter core.DiscoveryFilter) ([]*core.ServiceInfo, error) {
 	var results []*core.ServiceInfo
-	
+
 	// If searching by name
 	if filter.Name != "" {
 		if services, ok := m.services[filter.Name]; ok {
@@ -67,7 +67,7 @@ func (m *MockDiscovery) Discover(ctx context.Context, filter core.DiscoveryFilte
 		}
 		return results, nil
 	}
-	
+
 	// If searching by capabilities
 	if len(filter.Capabilities) > 0 {
 		for _, services := range m.services {
@@ -80,12 +80,12 @@ func (m *MockDiscovery) Discover(ctx context.Context, filter core.DiscoveryFilte
 						}
 					}
 				}
-				nextService:
+			nextService:
 			}
 		}
 		return results, nil
 	}
-	
+
 	// Return all services
 	for _, services := range m.services {
 		for _, svc := range services {

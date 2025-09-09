@@ -14,7 +14,7 @@ type AnthropicRequest struct {
 
 // Message represents a message in the conversation
 type Message struct {
-	Role    string `json:"role"`    // "user" or "assistant"
+	Role    string `json:"role"` // "user" or "assistant"
 	Content string `json:"content"`
 }
 

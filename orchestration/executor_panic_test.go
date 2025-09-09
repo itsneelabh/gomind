@@ -519,7 +519,7 @@ func TestSmartExecutor_NoDeadlockInPanic(t *testing.T) {
 	var servers []*httptest.Server
 	var serverAddresses []string
 	var serverPorts []int
-	
+
 	for i := 0; i < 10; i++ {
 		idx := i
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -527,7 +527,7 @@ func TestSmartExecutor_NoDeadlockInPanic(t *testing.T) {
 		}))
 		servers = append(servers, server)
 		defer server.Close()
-		
+
 		// Parse server URL to get address and port
 		serverURL := strings.TrimPrefix(server.URL, "http://")
 		parts := strings.Split(serverURL, ":")

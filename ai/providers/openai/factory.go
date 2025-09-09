@@ -19,7 +19,7 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
-	
+
 	// Use base URL from config or environment
 	baseURL := config.BaseURL
 	if baseURL == "" {
@@ -30,38 +30,38 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 			baseURL = "https://api.openai.com/v1"
 		}
 	}
-	
+
 	// Create logger (nil will use NoOpLogger)
 	var logger core.Logger
-	
+
 	// Create the client with full configuration
 	client := NewClient(apiKey, baseURL, logger)
-	
+
 	// Apply timeout if specified
 	if config.Timeout > 0 {
 		client.BaseClient.HTTPClient.Timeout = config.Timeout
 	}
-	
+
 	// Apply retry configuration
 	if config.MaxRetries > 0 {
 		client.BaseClient.MaxRetries = config.MaxRetries
 	}
-	
+
 	// Apply model defaults
 	if config.Model != "" {
 		client.BaseClient.DefaultModel = config.Model
 	}
-	
+
 	// Apply temperature default
 	if config.Temperature > 0 {
 		client.BaseClient.DefaultTemperature = config.Temperature
 	}
-	
+
 	// Apply max tokens default
 	if config.MaxTokens > 0 {
 		client.BaseClient.DefaultMaxTokens = config.MaxTokens
 	}
-	
+
 	// Apply custom headers if any
 	if len(config.Headers) > 0 {
 		// Create a custom transport to add headers
@@ -71,7 +71,7 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		}
 		client.BaseClient.HTTPClient.Transport = transport
 	}
-	
+
 	return client
 }
 
@@ -95,41 +95,41 @@ func (f *Factory) DetectEnvironment() (priority int, available bool) {
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		return 100, true
 	}
-	
+
 	// Check for Groq (ultra-fast inference)
 	if os.Getenv("GROQ_API_KEY") != "" {
 		os.Setenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
 		os.Setenv("OPENAI_API_KEY", os.Getenv("GROQ_API_KEY"))
 		return 95, true
 	}
-	
+
 	// Check for DeepSeek (reasoning model)
 	if os.Getenv("DEEPSEEK_API_KEY") != "" {
 		os.Setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
 		os.Setenv("OPENAI_API_KEY", os.Getenv("DEEPSEEK_API_KEY"))
 		return 90, true
 	}
-	
+
 	// Check for xAI Grok
 	if os.Getenv("XAI_API_KEY") != "" {
 		os.Setenv("OPENAI_BASE_URL", "https://api.x.ai/v1")
 		os.Setenv("OPENAI_API_KEY", os.Getenv("XAI_API_KEY"))
 		return 85, true
 	}
-	
+
 	// Check for Qwen (Alibaba)
 	if os.Getenv("QWEN_API_KEY") != "" {
 		os.Setenv("OPENAI_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
 		os.Setenv("OPENAI_API_KEY", os.Getenv("QWEN_API_KEY"))
 		return 80, true
 	}
-	
+
 	// Check for local Ollama (no API key needed)
 	if isLocalServiceAvailable("http://localhost:11434/v1/models") {
 		os.Setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
 		return 50, true
 	}
-	
+
 	return 0, false
 }
 

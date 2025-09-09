@@ -20,11 +20,15 @@ type DefaultChatAgent struct {
 	transports map[string]Transport
 	config     ChatAgentConfig
 	mu         sync.RWMutex
-	
+
+	// Injected dependencies
+	circuitBreaker core.CircuitBreaker
+
 	// Resource lifecycle management
-	stopping  bool
-	stopChan  chan struct{}
-	wg        sync.WaitGroup
+	server   *http.Server
+	stopping bool
+	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // DefaultChatAgentConfig returns default configuration
@@ -77,6 +81,96 @@ func NewChatAgent(config ChatAgentConfig, aiClient core.AIClient, sessions Sessi
 	return agent
 }
 
+// NewChatAgentWithDependencies creates a new chat agent with injected dependencies.
+// This is the preferred constructor for production use as it allows proper
+// dependency injection without direct module imports.
+func NewChatAgentWithDependencies(
+	config ChatAgentConfig,
+	sessions SessionManager,
+	deps ChatAgentDependencies,
+) *DefaultChatAgent {
+	agent := &DefaultChatAgent{
+		BaseAgent:      core.NewBaseAgent(config.Name),
+		aiClient:       deps.AIClient,
+		sessions:       sessions,
+		transports:     make(map[string]Transport),
+		config:         config,
+		circuitBreaker: deps.CircuitBreaker,
+		stopChan:       make(chan struct{}),
+	}
+
+	// Set logger and telemetry if provided
+	if deps.Logger != nil {
+		agent.BaseAgent.Logger = deps.Logger
+	}
+	if deps.Telemetry != nil {
+		agent.BaseAgent.Telemetry = deps.Telemetry
+	}
+
+	// Auto-configure available transports
+	agent.AutoConfigureTransports()
+
+	// Add discovery endpoint
+	agent.RegisterCapability(core.Capability{
+		Name:        "transports",
+		Description: "Discover available transports",
+		Endpoint:    "/chat/transports",
+		Handler:     agent.HandleTransportDiscovery,
+	})
+
+	// Add health endpoint
+	agent.RegisterCapability(core.Capability{
+		Name:        "health",
+		Description: "Health check",
+		Endpoint:    "/chat/health",
+		Handler:     agent.HandleHealth,
+	})
+
+	return agent
+}
+
+// NewChatAgentWithOptions creates a new chat agent with functional options.
+// This provides a flexible way to configure the agent.
+func NewChatAgentWithOptions(
+	config ChatAgentConfig,
+	sessions SessionManager,
+	opts ...ChatAgentOption,
+) *DefaultChatAgent {
+	agent := &DefaultChatAgent{
+		BaseAgent:  core.NewBaseAgent(config.Name),
+		sessions:   sessions,
+		transports: make(map[string]Transport),
+		config:     config,
+		stopChan:   make(chan struct{}),
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(agent)
+	}
+
+	// Auto-configure available transports
+	agent.AutoConfigureTransports()
+
+	// Add discovery endpoint
+	agent.RegisterCapability(core.Capability{
+		Name:        "transports",
+		Description: "Discover available transports",
+		Endpoint:    "/chat/transports",
+		Handler:     agent.HandleTransportDiscovery,
+	})
+
+	// Add health endpoint
+	agent.RegisterCapability(core.Capability{
+		Name:        "health",
+		Description: "Health check",
+		Endpoint:    "/chat/health",
+		Handler:     agent.HandleHealth,
+	})
+
+	return agent
+}
+
 // AutoConfigureTransports automatically configures available transports
 func (c *DefaultChatAgent) AutoConfigureTransports() {
 	available := ListAvailableTransports()
@@ -101,18 +195,30 @@ func (c *DefaultChatAgent) AutoConfigureTransports() {
 
 		// Wrap with circuit breaker if enabled
 		if c.config.CircuitBreakerEnabled {
-			// Configure circuit breaker with logger and telemetry
-			cbConfig := c.config.CircuitBreakerConfig
-			cbConfig.Logger = c.BaseAgent.Logger
-			cbConfig.Telemetry = c.BaseAgent.Telemetry
-			
-			transport = NewCircuitBreakerTransport(transport, cbConfig)
-			
-			c.Logger.Info("Wrapped transport with circuit breaker", map[string]interface{}{
-				"transport":         transport.Name(),
-				"failure_threshold": cbConfig.FailureThreshold,
-				"timeout":          cbConfig.Timeout,
-			})
+			// Use injected circuit breaker if available (preferred)
+			if c.circuitBreaker != nil {
+				transport = NewInterfaceBasedCircuitBreakerTransport(transport, c.circuitBreaker)
+
+				c.Logger.Info("Wrapped transport with injected circuit breaker", map[string]interface{}{
+					"transport": transport.Name(),
+					"state":     c.circuitBreaker.GetState(),
+				})
+			} else {
+				// Fall back to legacy built-in circuit breaker (deprecated)
+				// TODO: Remove this fallback in next major version
+				cbConfig := c.config.CircuitBreakerConfig
+				cbConfig.Logger = c.BaseAgent.Logger
+				cbConfig.Telemetry = c.BaseAgent.Telemetry
+
+				transport = NewCircuitBreakerTransport(transport, cbConfig)
+
+				c.Logger.Info("Wrapped transport with legacy circuit breaker (deprecated)", map[string]interface{}{
+					"transport":         transport.Name(),
+					"failure_threshold": cbConfig.FailureThreshold,
+					"timeout":           cbConfig.Timeout,
+					"warning":           "Please use dependency injection for circuit breaker",
+				})
+			}
 		}
 
 		// Start transport
@@ -136,7 +242,7 @@ func (c *DefaultChatAgent) AutoConfigureTransports() {
 			Name:        fmt.Sprintf("chat_%s", transport.Name()),
 			Description: transport.Description(),
 			Endpoint:    endpoint,
-			Handler:     func(w http.ResponseWriter, r *http.Request) {
+			Handler: func(w http.ResponseWriter, r *http.Request) {
 				handler.ServeHTTP(w, r)
 			},
 		})
@@ -185,7 +291,7 @@ func (c *DefaultChatAgent) HandleHealth(w http.ResponseWriter, r *http.Request) 
 	defer c.mu.RUnlock()
 
 	health := map[string]interface{}{
-		"status": "healthy",
+		"status":     "healthy",
 		"transports": make(map[string]interface{}),
 	}
 
@@ -217,10 +323,10 @@ func (c *DefaultChatAgent) CreateSession(ctx context.Context) (*Session, error) 
 		ctx, span = c.BaseAgent.Telemetry.StartSpan(ctx, "chat.session.create")
 		defer span.End()
 	}
-	
+
 	// Create session with empty metadata
 	session, err := c.sessions.Create(ctx, nil)
-	
+
 	// Record metrics
 	if c.BaseAgent.Telemetry != nil {
 		if err != nil {
@@ -229,7 +335,7 @@ func (c *DefaultChatAgent) CreateSession(ctx context.Context) (*Session, error) 
 			c.BaseAgent.Telemetry.RecordMetric("chat.session.create.success", 1.0, nil)
 		}
 	}
-	
+
 	return session, err
 }
 
@@ -242,7 +348,7 @@ func (c *DefaultChatAgent) GetSession(ctx context.Context, sessionID string) (*S
 func (c *DefaultChatAgent) CheckRateLimit(ctx context.Context, sessionID string) (bool, error) {
 	// Get the full rate limit info from session manager
 	allowed, _, err := c.sessions.CheckRateLimit(ctx, sessionID)
-	
+
 	// Record rate limit metrics
 	if c.BaseAgent.Telemetry != nil {
 		if err != nil {
@@ -253,7 +359,7 @@ func (c *DefaultChatAgent) CheckRateLimit(ctx context.Context, sessionID string)
 			})
 		}
 	}
-	
+
 	return allowed, err
 }
 
@@ -267,7 +373,7 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 		span.SetAttribute("session_id", sessionID)
 		span.SetAttribute("message_length", len(message))
 	}
-	
+
 	// Validate message size
 	if len(message) > c.config.SecurityConfig.MaxMessageSize {
 		if c.BaseAgent.Telemetry != nil {
@@ -290,7 +396,7 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 			return nil, fmt.Errorf("failed to create session: %w", err)
 		}
 		sessionID = session.ID
-		
+
 		if c.BaseAgent.Telemetry != nil {
 			c.BaseAgent.Telemetry.RecordMetric("chat.session.auto_created", 1.0, nil)
 		}
@@ -336,12 +442,12 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 		// Generate AI response
 		startTime := time.Now()
 		response, err := c.aiClient.GenerateResponse(ctx, prompt, options)
-		
+
 		// Record AI generation metrics
 		if c.BaseAgent.Telemetry != nil {
 			duration := time.Since(startTime)
 			c.BaseAgent.Telemetry.RecordMetric("chat.ai.generation.duration", float64(duration.Milliseconds()), nil)
-			
+
 			if err != nil {
 				c.BaseAgent.Telemetry.RecordMetric("chat.ai.generation.error", 1.0, nil)
 			} else {
@@ -351,11 +457,11 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 				}
 			}
 		}
-		
+
 		if err != nil {
 			events <- ChatEvent{
-				Type: EventError,
-				Data: err.Error(),
+				Type:      EventError,
+				Data:      err.Error(),
 				Timestamp: time.Now(),
 			}
 			return
@@ -366,7 +472,7 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 			Type: EventMessage,
 			Data: response.Content,
 			Metadata: map[string]interface{}{
-				"role": "assistant",
+				"role":  "assistant",
 				"model": response.Model,
 			},
 			Timestamp: time.Now(),
@@ -419,11 +525,11 @@ func (c *DefaultChatAgent) GetSessionManager() SessionManager {
 func (c *DefaultChatAgent) RegisterTransport(transport Transport) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if _, exists := c.transports[transport.Name()]; exists {
 		return fmt.Errorf("transport %s already registered", transport.Name())
 	}
-	
+
 	c.transports[transport.Name()] = transport
 	return nil
 }
@@ -432,7 +538,7 @@ func (c *DefaultChatAgent) RegisterTransport(transport Transport) error {
 func (c *DefaultChatAgent) GetTransport(name string) (Transport, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	transport, exists := c.transports[name]
 	return transport, exists
 }
@@ -456,7 +562,7 @@ func (c *DefaultChatAgent) Initialize(ctx context.Context) error {
 		ctx, span = c.BaseAgent.Telemetry.StartSpan(ctx, "chat.agent.initialize")
 		defer span.End()
 	}
-	
+
 	// First call base initialization
 	if err := c.BaseAgent.Initialize(ctx); err != nil {
 		if span != nil {
@@ -469,10 +575,10 @@ func (c *DefaultChatAgent) Initialize(ctx context.Context) error {
 	if c.BaseAgent.Discovery != nil && c.BaseAgent.Config != nil && c.BaseAgent.Config.Discovery.Enabled {
 		// Build metadata for service discovery
 		metadata := c.buildServiceMetadata()
-		
+
 		// Get address and port from BaseAgent config
 		address, port := core.ResolveServiceAddress(c.BaseAgent.Config, c.BaseAgent.Logger)
-		
+
 		registration := &core.ServiceInfo{
 			ID:           c.BaseAgent.ID,
 			Name:         c.BaseAgent.Name,
@@ -484,7 +590,7 @@ func (c *DefaultChatAgent) Initialize(ctx context.Context) error {
 			LastSeen:     time.Now(),
 			Metadata:     metadata,
 		}
-		
+
 		if err := c.BaseAgent.Discovery.Register(ctx, registration); err != nil {
 			c.BaseAgent.Logger.Error("Failed to register chat agent with discovery", map[string]interface{}{
 				"error":      err.Error(),
@@ -515,24 +621,56 @@ func (c *DefaultChatAgent) Initialize(ctx context.Context) error {
 	return nil
 }
 
+// Start starts the HTTP server on the specified port
+func (c *DefaultChatAgent) Start(port int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Create HTTP server
+	mux := http.NewServeMux()
+
+	// Register transport endpoints
+	for name, transport := range c.transports {
+		handler := transport.CreateHandler(c)
+		if handler != nil {
+			// Create endpoint path based on transport name
+			endpoint := fmt.Sprintf("/chat/%s", name)
+			mux.Handle(endpoint, handler)
+		}
+	}
+
+	// Register discovery and health endpoints
+	mux.HandleFunc("/chat/transports", c.HandleTransportDiscovery)
+	mux.HandleFunc("/chat/health", c.HandleHealth)
+
+	// Create server
+	c.server = &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: mux,
+	}
+
+	// Start server
+	return c.server.ListenAndServe()
+}
+
 // buildServiceMetadata builds metadata for service discovery
 func (c *DefaultChatAgent) buildServiceMetadata() map[string]interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	transportList := make([]string, 0, len(c.transports))
 	for name := range c.transports {
 		transportList = append(transportList, name)
 	}
-	
+
 	metadata := map[string]interface{}{
-		"type":          "chat_agent",
-		"transports":    transportList,
-		"rate_limit":    c.config.SecurityConfig.RateLimit,
-		"max_msg_size":  c.config.SecurityConfig.MaxMessageSize,
-		"require_auth":  c.config.SecurityConfig.RequireAuth,
+		"type":         "chat_agent",
+		"transports":   transportList,
+		"rate_limit":   c.config.SecurityConfig.RateLimit,
+		"max_msg_size": c.config.SecurityConfig.MaxMessageSize,
+		"require_auth": c.config.SecurityConfig.RequireAuth,
 	}
-	
+
 	// Add session backend type
 	if c.sessions != nil {
 		switch c.sessions.(type) {
@@ -544,7 +682,7 @@ func (c *DefaultChatAgent) buildServiceMetadata() map[string]interface{} {
 			metadata["session_backend"] = "custom"
 		}
 	}
-	
+
 	return metadata
 }
 
@@ -553,27 +691,27 @@ func (c *DefaultChatAgent) validateConfig() error {
 	if c.config.SecurityConfig.RateLimit < 0 {
 		return fmt.Errorf("invalid rate limit: %d (must be >= 0)", c.config.SecurityConfig.RateLimit)
 	}
-	
+
 	if c.config.SecurityConfig.MaxMessageSize < 0 {
 		return fmt.Errorf("invalid max message size: %d (must be >= 0)", c.config.SecurityConfig.MaxMessageSize)
 	}
-	
+
 	if c.config.SessionConfig.TTL <= 0 {
 		return fmt.Errorf("invalid session TTL: %v (must be > 0)", c.config.SessionConfig.TTL)
 	}
-	
+
 	if c.config.SessionConfig.MaxMessages <= 0 {
 		return fmt.Errorf("invalid max messages: %d (must be > 0)", c.config.SessionConfig.MaxMessages)
 	}
-	
+
 	if c.config.SessionConfig.RateLimitMax < 0 {
 		return fmt.Errorf("invalid rate limit max: %d (must be >= 0)", c.config.SessionConfig.RateLimitMax)
 	}
-	
+
 	if c.config.SessionConfig.RateLimitWindow <= 0 {
 		return fmt.Errorf("invalid rate limit window: %v (must be > 0)", c.config.SessionConfig.RateLimitWindow)
 	}
-	
+
 	return nil
 }
 
@@ -582,10 +720,10 @@ func (c *DefaultChatAgent) startHealthMonitoring(ctx context.Context) {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		
+
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ticker.C:
@@ -603,18 +741,18 @@ func (c *DefaultChatAgent) startHealthMonitoring(ctx context.Context) {
 func (c *DefaultChatAgent) checkTransportHealth(ctx context.Context) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	for name, transport := range c.transports {
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := transport.HealthCheck(checkCtx)
 		cancel()
-		
+
 		if err != nil {
 			c.BaseAgent.Logger.Warn("Transport health check failed", map[string]interface{}{
 				"transport": name,
 				"error":     err.Error(),
 			})
-			
+
 			// Record telemetry if available
 			if c.BaseAgent.Telemetry != nil {
 				c.BaseAgent.Telemetry.RecordMetric("transport.health.failed", 1.0, map[string]string{
@@ -628,29 +766,29 @@ func (c *DefaultChatAgent) checkTransportHealth(ctx context.Context) {
 // Stop stops the chat agent and all transports with graceful shutdown
 func (c *DefaultChatAgent) Stop(ctx context.Context) error {
 	c.mu.Lock()
-	
+
 	// Check if already stopping
 	if c.stopping {
 		c.mu.Unlock()
 		return nil
 	}
 	c.stopping = true
-	
+
 	// Signal all goroutines to stop
 	close(c.stopChan)
 	c.mu.Unlock()
-	
+
 	// Stop all transports in parallel
 	var wg sync.WaitGroup
 	for name, transport := range c.transports {
 		wg.Add(1)
 		go func(n string, t Transport) {
 			defer wg.Done()
-			
+
 			// Create timeout context for transport shutdown
 			transportCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
-			
+
 			if err := t.Stop(transportCtx); err != nil {
 				c.BaseAgent.Logger.Error("Failed to stop transport", map[string]interface{}{
 					"transport": n,
@@ -659,14 +797,14 @@ func (c *DefaultChatAgent) Stop(ctx context.Context) error {
 			}
 		}(name, transport)
 	}
-	
+
 	// Wait for all transports to stop or timeout
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		// All transports stopped successfully
@@ -674,7 +812,7 @@ func (c *DefaultChatAgent) Stop(ctx context.Context) error {
 		// Context cancelled, forced shutdown
 		c.BaseAgent.Logger.Warn("Forced shutdown due to context cancellation", nil)
 	}
-	
+
 	// Stop session manager if it supports graceful shutdown
 	if closer, ok := c.sessions.(interface{ Close() error }); ok {
 		if err := closer.Close(); err != nil {
@@ -683,22 +821,27 @@ func (c *DefaultChatAgent) Stop(ctx context.Context) error {
 			})
 		}
 	}
-	
+
 	// Wait for all background goroutines to finish
 	c.wg.Wait()
-	
+
 	// Unregister from discovery if available
 	if c.BaseAgent.Discovery != nil && c.BaseAgent.Config != nil && c.BaseAgent.Config.Discovery.Enabled {
 		unregCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		
+
 		if err := c.BaseAgent.Discovery.Unregister(unregCtx, c.BaseAgent.ID); err != nil {
 			c.BaseAgent.Logger.Error("Failed to unregister from discovery", map[string]interface{}{
 				"error": err.Error(),
 			})
 		}
 	}
-	
+
 	// Call base stop
 	return c.BaseAgent.Stop(ctx)
+}
+
+// Shutdown is an alias for Stop for backward compatibility
+func (c *DefaultChatAgent) Shutdown(ctx context.Context) error {
+	return c.Stop(ctx)
 }

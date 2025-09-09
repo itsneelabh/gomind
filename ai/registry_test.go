@@ -50,7 +50,7 @@ func TestRegister(t *testing.T) {
 	registry.mu.Lock()
 	registry.providers = make(map[string]ProviderFactory)
 	registry.mu.Unlock()
-	
+
 	tests := []struct {
 		name      string
 		factory   ProviderFactory
@@ -85,7 +85,7 @@ func TestRegister(t *testing.T) {
 			wantError: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := Register(tt.factory)
@@ -106,7 +106,7 @@ func TestGetProvider(t *testing.T) {
 	}
 	registry.providers["test-provider"] = testFactory
 	registry.mu.Unlock()
-	
+
 	tests := []struct {
 		name         string
 		providerName string
@@ -123,7 +123,7 @@ func TestGetProvider(t *testing.T) {
 			wantExists:   false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			factory, exists := GetProvider(tt.providerName)
@@ -145,14 +145,14 @@ func TestListProviders(t *testing.T) {
 	registry.providers["provider-b"] = &MockProviderFactory{name: "provider-b"}
 	registry.providers["provider-c"] = &MockProviderFactory{name: "provider-c"}
 	registry.mu.Unlock()
-	
+
 	providers := ListProviders()
-	
+
 	// Check count
 	if len(providers) != 3 {
 		t.Errorf("ListProviders() returned %d providers, want 3", len(providers))
 	}
-	
+
 	// Check sorting
 	expected := []string{"provider-a", "provider-b", "provider-c"}
 	for i, p := range providers {
@@ -187,12 +187,12 @@ func TestDetectBestProvider(t *testing.T) {
 		available: false,
 	}
 	registry.mu.Unlock()
-	
+
 	provider, err := detectBestProvider()
 	if err != nil {
 		t.Fatalf("detectBestProvider() error = %v", err)
 	}
-	
+
 	if provider != "high-priority" {
 		t.Errorf("detectBestProvider() = %s, want high-priority", provider)
 	}
@@ -213,7 +213,7 @@ func TestDetectBestProviderNoAvailable(t *testing.T) {
 		available: false,
 	}
 	registry.mu.Unlock()
-	
+
 	_, err := detectBestProvider()
 	if err == nil {
 		t.Error("detectBestProvider() should return error when no providers available")
@@ -243,19 +243,19 @@ func TestGetProviderInfo(t *testing.T) {
 		available:   false,
 	}
 	registry.mu.Unlock()
-	
+
 	info := GetProviderInfo()
-	
+
 	// Check count
 	if len(info) != 3 {
 		t.Errorf("GetProviderInfo() returned %d providers, want 3", len(info))
 	}
-	
+
 	// Check sorting by priority (highest first)
 	if info[0].Name != "available-high" {
 		t.Errorf("First provider should be available-high, got %s", info[0].Name)
 	}
-	
+
 	// Check availability flags
 	for _, p := range info {
 		switch p.Name {

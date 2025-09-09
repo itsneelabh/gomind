@@ -12,14 +12,14 @@ import (
 type ProviderFactory interface {
 	// Create creates a new AI client instance with the given configuration
 	Create(config *AIConfig) core.AIClient
-	
+
 	// DetectEnvironment checks if this provider can be used with current environment
 	// Returns priority (higher = preferred) and availability
 	DetectEnvironment() (priority int, available bool)
-	
+
 	// Name returns the provider's name
 	Name() string
-	
+
 	// Description returns a human-readable description
 	Description() string
 }
@@ -41,19 +41,19 @@ func Register(factory ProviderFactory) error {
 	if factory == nil {
 		return fmt.Errorf("factory cannot be nil")
 	}
-	
+
 	name := factory.Name()
 	if name == "" {
 		return fmt.Errorf("factory.Name() cannot be empty")
 	}
-	
+
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
-	
+
 	if _, exists := registry.providers[name]; exists {
 		return fmt.Errorf("provider '%s' already registered", name)
 	}
-	
+
 	registry.providers[name] = factory
 	return nil
 }
@@ -70,7 +70,7 @@ func MustRegister(factory ProviderFactory) {
 func GetProvider(name string) (ProviderFactory, bool) {
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
-	
+
 	factory, exists := registry.providers[name]
 	return factory, exists
 }
@@ -79,7 +79,7 @@ func GetProvider(name string) (ProviderFactory, bool) {
 func ListProviders() []string {
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
-	
+
 	names := make([]string, 0, len(registry.providers))
 	for name := range registry.providers {
 		names = append(names, name)
@@ -92,7 +92,7 @@ func ListProviders() []string {
 func GetProviderInfo() []ProviderInfo {
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
-	
+
 	info := make([]ProviderInfo, 0, len(registry.providers))
 	for name, factory := range registry.providers {
 		priority, available := factory.DetectEnvironment()
@@ -103,7 +103,7 @@ func GetProviderInfo() []ProviderInfo {
 			Priority:    priority,
 		})
 	}
-	
+
 	// Sort by priority (highest first), then by name
 	sort.Slice(info, func(i, j int) bool {
 		if info[i].Priority != info[j].Priority {
@@ -111,7 +111,7 @@ func GetProviderInfo() []ProviderInfo {
 		}
 		return info[i].Name < info[j].Name
 	})
-	
+
 	return info
 }
 
@@ -129,13 +129,13 @@ func detectBestProvider() (string, error) {
 		name     string
 		priority int
 	}
-	
+
 	var candidates []candidate
-	
+
 	// Check all registered providers
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
-	
+
 	for name, factory := range registry.providers {
 		if priority, available := factory.DetectEnvironment(); available {
 			candidates = append(candidates, candidate{
@@ -144,15 +144,15 @@ func detectBestProvider() (string, error) {
 			})
 		}
 	}
-	
+
 	if len(candidates) == 0 {
 		return "", fmt.Errorf("no provider detected in environment")
 	}
-	
+
 	// Sort by priority (highest first)
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].priority > candidates[j].priority
 	})
-	
+
 	return candidates[0].name, nil
 }

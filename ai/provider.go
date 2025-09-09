@@ -13,7 +13,7 @@ const (
 	ProviderAnthropic Provider = "anthropic"
 	ProviderGemini    Provider = "gemini"
 	ProviderOllama    Provider = "ollama"
-	ProviderAuto      Provider = "auto" // Auto-detect from environment
+	ProviderAuto      Provider = "auto"   // Auto-detect from environment
 	ProviderCustom    Provider = "custom" // For custom providers
 )
 
@@ -21,20 +21,20 @@ const (
 type AIConfig struct {
 	// Provider to use
 	Provider string
-	
+
 	// API credentials
 	APIKey  string
 	BaseURL string
-	
+
 	// Connection settings
 	Timeout    time.Duration
 	MaxRetries int
-	
+
 	// Model configuration
 	Model       string
 	Temperature float32
 	MaxTokens   int
-	
+
 	// Advanced options
 	Headers map[string]string
 	Extra   map[string]interface{}

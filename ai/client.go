@@ -17,12 +17,12 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 		Temperature: 0.7,
 		MaxTokens:   1000,
 	}
-	
+
 	// Apply options
 	for _, opt := range opts {
 		opt(config)
 	}
-	
+
 	// Auto-detection logic
 	if config.Provider == string(ProviderAuto) {
 		provider, err := detectBestProvider()
@@ -31,14 +31,14 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 		}
 		config.Provider = provider
 	}
-	
+
 	// Get provider from registry
 	factory, exists := GetProvider(config.Provider)
 	if !exists {
-		return nil, fmt.Errorf("provider '%s' not registered. Import _ \"github.com/itsneelabh/gomind/ai/providers/%s\"", 
+		return nil, fmt.Errorf("provider '%s' not registered. Import _ \"github.com/itsneelabh/gomind/ai/providers/%s\"",
 			config.Provider, config.Provider)
 	}
-	
+
 	// Create client using provider factory
 	return factory.Create(config), nil
 }

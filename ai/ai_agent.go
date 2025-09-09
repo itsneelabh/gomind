@@ -10,7 +10,7 @@ import (
 // AIAgent extends BaseAgent with AI capabilities and full discovery powers
 // This represents an orchestrating agent that can discover and coordinate other components
 type AIAgent struct {
-	*core.BaseAgent // Full agent with discovery
+	*core.BaseAgent               // Full agent with discovery
 	AI              core.AIClient // Exposed for testing compatibility
 	aiClient        core.AIClient // Internal field (deprecated, use AI)
 }
@@ -21,7 +21,7 @@ type IntelligentAgent = AIAgent
 // NewAIAgent creates a new agent with AI capabilities and discovery
 func NewAIAgent(name string, apiKey string) (*AIAgent, error) {
 	agent := core.NewBaseAgent(name)
-	
+
 	// Create AI client
 	aiClient, err := NewClient(
 		WithProvider("openai"),
@@ -30,9 +30,9 @@ func NewAIAgent(name string, apiKey string) (*AIAgent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AI client: %w", err)
 	}
-	
+
 	agent.AI = aiClient
-	
+
 	return &AIAgent{
 		BaseAgent: agent,
 		AI:        aiClient,
@@ -79,7 +79,7 @@ func (a *AIAgent) ProcessWithMemory(ctx context.Context, input string) (string, 
 		a.Memory.Set(ctx, "last_input", input, 0)
 		a.Memory.Set(ctx, fmt.Sprintf("input:%s", input), input, 0)
 	}
-	
+
 	// Process with AI
 	client := a.AI
 	if client == nil {
@@ -88,19 +88,19 @@ func (a *AIAgent) ProcessWithMemory(ctx context.Context, input string) (string, 
 	if client == nil {
 		return "", fmt.Errorf("no AI client configured")
 	}
-	
-	response, err := client.GenerateResponse(ctx, "Processed: " + input, nil)
+
+	response, err := client.GenerateResponse(ctx, "Processed: "+input, nil)
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Store response in memory if available
 	if a.Memory != nil {
 		// Store with both generic and specific keys for compatibility
 		a.Memory.Set(ctx, "last_response", response.Content, 0)
 		a.Memory.Set(ctx, fmt.Sprintf("response:%s", input), response.Content, 0)
 	}
-	
+
 	return response.Content, nil
 }
 
@@ -113,21 +113,21 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 	if client == nil {
 		return "", "", fmt.Errorf("no AI client configured")
 	}
-	
+
 	// First, think about the task (planning phase)
 	thinkPrompt := fmt.Sprintf("Analyze this task and break it down: %s", task)
 	thinkResp, err := client.GenerateResponse(ctx, thinkPrompt, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("thinking failed: %w", err)
 	}
-	
+
 	// Then act on the analysis
 	actPrompt := fmt.Sprintf("Based on this analysis: %s\nExecute: %s", thinkResp.Content, task)
 	actResp, err := client.GenerateResponse(ctx, actPrompt, nil)
 	if err != nil {
 		return thinkResp.Content, "", fmt.Errorf("action failed: %w", err)
 	}
-	
+
 	return thinkResp.Content, actResp.Content, nil
 }
 
@@ -142,7 +142,7 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 			"error": err.Error(),
 		})
 	}
-	
+
 	// Discover other agents if needed
 	agents, err := a.Discover(ctx, core.DiscoveryFilter{
 		Type: core.ComponentTypeAgent,
@@ -152,10 +152,10 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 			"error": err.Error(),
 		})
 	}
-	
+
 	// Build context for AI
 	contextPrompt := a.buildContextPrompt(tools, agents, request)
-	
+
 	// Use AI to process request
 	client := a.AI
 	if client == nil {
@@ -172,7 +172,7 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	if err != nil {
 		return nil, fmt.Errorf("AI processing failed: %w", err)
 	}
-	
+
 	return response, nil
 }
 
@@ -212,7 +212,7 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 
 	// 3. Use AI to plan component usage
 	planPrompt := a.buildPlanPrompt(allComponents, userQuery, intentResp.Content)
-	
+
 	planResp, err := client.GenerateResponse(ctx, planPrompt, &core.AIOptions{
 		Model:       "gpt-4",
 		Temperature: 0.3,
@@ -249,7 +249,7 @@ Generate a response to the original user query: "%s"`, planResp.Content, userQue
 // buildContextPrompt creates a context prompt for the AI with available components
 func (a *AIAgent) buildContextPrompt(tools []*core.ServiceInfo, agents []*core.ServiceInfo, request string) string {
 	prompt := "Available components:\n\n"
-	
+
 	if len(tools) > 0 {
 		prompt += "TOOLS (passive components):\n"
 		for _, tool := range tools {
@@ -260,7 +260,7 @@ func (a *AIAgent) buildContextPrompt(tools []*core.ServiceInfo, agents []*core.S
 		}
 		prompt += "\n"
 	}
-	
+
 	if len(agents) > 0 {
 		prompt += "AGENTS (active orchestrators):\n"
 		for _, agent := range agents {
@@ -271,10 +271,10 @@ func (a *AIAgent) buildContextPrompt(tools []*core.ServiceInfo, agents []*core.S
 		}
 		prompt += "\n"
 	}
-	
+
 	prompt += fmt.Sprintf("\nUser request: %s\n", request)
 	prompt += "\nHow would you handle this request using the available components?"
-	
+
 	return prompt
 }
 
@@ -296,6 +296,6 @@ User intent analysis: %s
 And this user query: "%s"
 
 Create a step-by-step plan for which components to use and in what order. 
-Be specific about which capabilities to invoke and what data to pass between them.`, 
+Be specific about which capabilities to invoke and what data to pass between them.`,
 		componentList, intent, userQuery)
 }

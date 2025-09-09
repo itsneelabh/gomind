@@ -54,26 +54,26 @@ func TestNewBaseClient(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := NewBaseClient(tt.timeout, tt.logger)
-			
+
 			if client == nil {
 				t.Fatal("expected non-nil client")
 			}
-			
+
 			if client.HTTPClient.Timeout != tt.timeout {
 				t.Errorf("expected timeout %v, got %v", tt.timeout, client.HTTPClient.Timeout)
 			}
-			
+
 			if tt.logger == nil {
 				// When no logger is provided, we expect a NoOpLogger to be set
 				if _, ok := client.Logger.(*core.NoOpLogger); !ok {
 					t.Error("expected NoOpLogger when no logger provided")
 				}
 			}
-			
+
 			if tt.logger != nil && client.Logger != tt.logger {
 				t.Error("logger not set correctly")
 			}
-			
+
 			if client.MaxRetries != 3 {
 				t.Errorf("expected default MaxRetries 3, got %d", client.MaxRetries)
 			}
@@ -104,7 +104,7 @@ func TestBaseClient_ApplyDefaults(t *testing.T) {
 			},
 		},
 		{
-			name: "empty options",
+			name:  "empty options",
 			input: &core.AIOptions{},
 			expected: &core.AIOptions{
 				Model:        "default-model",
@@ -146,7 +146,7 @@ func TestBaseClient_ApplyDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := client.ApplyDefaults(tt.input)
-			
+
 			if result.Model != tt.expected.Model {
 				t.Errorf("expected model %q, got %q", tt.expected.Model, result.Model)
 			}
@@ -241,7 +241,7 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 			}
 
 			resp, err := client.ExecuteWithRetry(context.Background(), req)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -305,11 +305,11 @@ func TestBaseClient_HandleError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := client.HandleError(tt.statusCode, tt.body, tt.provider)
-			
+
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			
+
 			if err.Error() != tt.wantErr {
 				t.Errorf("expected error %q, got %q", tt.wantErr, err.Error())
 			}
@@ -323,11 +323,11 @@ func TestBaseClient_Logging(t *testing.T) {
 
 	// Test LogRequest
 	client.LogRequest("test-provider", "test-model", "test prompt")
-	
+
 	if len(logger.debugCalls) != 1 {
 		t.Errorf("expected 1 debug call, got %d", len(logger.debugCalls))
 	}
-	
+
 	fields := logger.debugCalls[0]
 	if fields["provider"] != "test-provider" {
 		t.Errorf("expected provider test-provider, got %v", fields["provider"])
@@ -343,11 +343,11 @@ func TestBaseClient_Logging(t *testing.T) {
 		TotalTokens:      30,
 	}
 	client.LogResponse("test-provider", "test-model", usage, 100*time.Millisecond)
-	
+
 	if len(logger.debugCalls) != 2 {
 		t.Errorf("expected 2 debug calls, got %d", len(logger.debugCalls))
 	}
-	
+
 	fields = logger.debugCalls[1] // Second debug call is LogResponse
 	if fields["provider"] != "test-provider" {
 		t.Errorf("expected provider test-provider, got %v", fields["provider"])
@@ -358,11 +358,11 @@ func TestBaseClient_Logging(t *testing.T) {
 
 	// Test LogError
 	client.LogError("test-provider", errors.New("test error"))
-	
+
 	if len(logger.errorCalls) != 1 {
 		t.Errorf("expected 1 error call, got %d", len(logger.errorCalls))
 	}
-	
+
 	fields = logger.errorCalls[0]
 	if fields["provider"] != "test-provider" {
 		t.Errorf("expected provider test-provider, got %v", fields["provider"])
@@ -374,9 +374,9 @@ func TestBaseClient_Logging(t *testing.T) {
 
 func TestIsRetryableError(t *testing.T) {
 	tests := []struct {
-		name    string
-		err     error
-		want    bool
+		name string
+		err  error
+		want bool
 	}{
 		{
 			name: "rate limit error",
@@ -450,18 +450,18 @@ func TestBaseClient_ContextCancellation(t *testing.T) {
 	defer server.Close()
 
 	client := NewBaseClient(30*time.Second, nil)
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
-	
+
 	// Cancel context immediately
 	cancel()
-	
+
 	_, err := client.ExecuteWithRetry(ctx, req)
 	if err == nil {
 		t.Error("expected error due to cancelled context, got nil")
 	}
-	
+
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled error, got %v", err)
 	}

@@ -21,7 +21,7 @@ func TestWebSocketTransport_Compliance(t *testing.T) {
 	// The compliance test framework has a design issue where it expects to run
 	// multiple independent tests on the same transport instance, but the tests
 	// have interdependencies. For now, we'll implement specific compliance tests.
-	
+
 	t.Run("CompliantMetadata", func(t *testing.T) {
 		transport := &WebSocketTransport{}
 		if transport.Name() == "" {
@@ -37,48 +37,48 @@ func TestWebSocketTransport_Compliance(t *testing.T) {
 			t.Error("Transport.Capabilities() returned nil")
 		}
 	})
-	
+
 	t.Run("CompliantLifecycle", func(t *testing.T) {
 		transport := &WebSocketTransport{}
 		ctx := context.Background()
-		
+
 		config := ui.TransportConfig{
 			MaxConnections: 10,
 			Timeout:        5 * time.Second,
 		}
-		
+
 		// Initialize
 		if err := transport.Initialize(config); err != nil {
 			t.Fatalf("Transport.Initialize() failed: %v", err)
 		}
-		
+
 		// Start
 		if err := transport.Start(ctx); err != nil {
 			t.Fatalf("Transport.Start() failed: %v", err)
 		}
-		
+
 		// Stop
 		if err := transport.Stop(ctx); err != nil {
 			t.Fatalf("Transport.Stop() failed: %v", err)
 		}
-		
+
 		// Should be able to restart
 		if err := transport.Start(ctx); err != nil {
 			t.Fatalf("Transport.Start() after Stop() failed: %v", err)
 		}
-		
+
 		transport.Stop(ctx)
 	})
-	
+
 	t.Run("CompliantErrorHandling", func(t *testing.T) {
 		transport := &WebSocketTransport{}
 		ctx := context.Background()
-		
+
 		// Starting without initialization should fail
 		if err := transport.Start(ctx); err == nil {
 			t.Error("Transport.Start() without Initialize() should fail")
 		}
-		
+
 		// Initialize with invalid config should not panic
 		invalidConfig := ui.TransportConfig{
 			MaxConnections: -1,
@@ -105,10 +105,10 @@ func TestWebSocketTransport_Metadata(t *testing.T) {
 
 	capabilities := transport.Capabilities()
 	expectedCaps := map[ui.TransportCapability]bool{
-		ui.CapabilityStreaming:      true,
-		ui.CapabilityBidirectional:  true,
-		ui.CapabilityReconnect:      true,
-		ui.CapabilityMultiplex:      true,
+		ui.CapabilityStreaming:     true,
+		ui.CapabilityBidirectional: true,
+		ui.CapabilityReconnect:     true,
+		ui.CapabilityMultiplex:     true,
 	}
 
 	if len(capabilities) != len(expectedCaps) {
@@ -124,7 +124,7 @@ func TestWebSocketTransport_Metadata(t *testing.T) {
 
 func TestWebSocketTransport_Available(t *testing.T) {
 	transport := &WebSocketTransport{}
-	
+
 	// WebSocket should be available when built with websocket tag
 	if !transport.Available() {
 		t.Error("WebSocket transport should be available when built with websocket tag")
@@ -188,7 +188,7 @@ func TestWebSocketTransport_Lifecycle(t *testing.T) {
 
 func TestWebSocketTransport_HandlerCreation(t *testing.T) {
 	transport := &WebSocketTransport{}
-	
+
 	// Initialize transport
 	config := ui.TransportConfig{
 		MaxConnections: 10,
@@ -477,11 +477,11 @@ func testErrorHandling(t *testing.T, wsURL string) {
 func TestWebSocketTransport_ClientExample(t *testing.T) {
 	transport := &WebSocketTransport{}
 	example := transport.ClientExample()
-	
+
 	if example == "" {
 		t.Error("Client example should not be empty")
 	}
-	
+
 	// Verify example contains key WebSocket concepts
 	expectedTerms := []string{
 		"WebSocket",
@@ -493,7 +493,7 @@ func TestWebSocketTransport_ClientExample(t *testing.T) {
 		"pong",
 		"reconnect",
 	}
-	
+
 	for _, term := range expectedTerms {
 		if !strings.Contains(example, term) {
 			t.Errorf("Client example should contain '%s'", term)
@@ -503,7 +503,7 @@ func TestWebSocketTransport_ClientExample(t *testing.T) {
 
 func TestWebSocketTransport_CORS(t *testing.T) {
 	transport := &WebSocketTransport{}
-	
+
 	// Test with CORS disabled
 	config := ui.TransportConfig{
 		MaxConnections: 10,
@@ -512,51 +512,51 @@ func TestWebSocketTransport_CORS(t *testing.T) {
 			Enabled: false,
 		},
 	}
-	
+
 	err := transport.Initialize(config)
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
-	
+
 	// CheckOrigin should return true when CORS is disabled
 	req := &http.Request{
 		Header: http.Header{
 			"Origin": []string{"http://evil.example.com"},
 		},
 	}
-	
+
 	if !transport.upgrader.CheckOrigin(req) {
 		t.Error("CheckOrigin should allow all origins when CORS is disabled")
 	}
-	
+
 	// Test with CORS enabled and specific origins
 	config.CORS.Enabled = true
 	config.CORS.AllowedOrigins = []string{"http://localhost:3000", "https://example.com"}
-	
+
 	err = transport.Initialize(config)
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
-	
+
 	// Should allow configured origin
 	req.Header.Set("Origin", "http://localhost:3000")
 	if !transport.upgrader.CheckOrigin(req) {
 		t.Error("CheckOrigin should allow configured origin")
 	}
-	
+
 	// Should reject unconfigured origin
 	req.Header.Set("Origin", "http://evil.example.com")
 	if transport.upgrader.CheckOrigin(req) {
 		t.Error("CheckOrigin should reject unconfigured origin")
 	}
-	
+
 	// Test wildcard origin
 	config.CORS.AllowedOrigins = []string{"*"}
 	err = transport.Initialize(config)
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
-	
+
 	if !transport.upgrader.CheckOrigin(req) {
 		t.Error("CheckOrigin should allow all origins with wildcard")
 	}
@@ -564,7 +564,7 @@ func TestWebSocketTransport_CORS(t *testing.T) {
 
 func TestWebSocketTransport_BufferConfiguration(t *testing.T) {
 	transport := &WebSocketTransport{}
-	
+
 	// Test custom buffer sizes
 	config := ui.TransportConfig{
 		MaxConnections: 10,
@@ -574,34 +574,34 @@ func TestWebSocketTransport_BufferConfiguration(t *testing.T) {
 			"write_buffer_size": 8192,
 		},
 	}
-	
+
 	err := transport.Initialize(config)
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
-	
+
 	if transport.upgrader.ReadBufferSize != 4096 {
 		t.Errorf("Expected read buffer size 4096, got %d", transport.upgrader.ReadBufferSize)
 	}
-	
+
 	if transport.upgrader.WriteBufferSize != 8192 {
 		t.Errorf("Expected write buffer size 8192, got %d", transport.upgrader.WriteBufferSize)
 	}
-	
+
 	// Test fallback to buffer_size option
 	config.Options = map[string]interface{}{
 		"buffer_size": 2048,
 	}
-	
+
 	err = transport.Initialize(config)
 	if err != nil {
 		t.Fatalf("Initialize failed: %v", err)
 	}
-	
+
 	if transport.upgrader.ReadBufferSize != 2048 {
 		t.Errorf("Expected read buffer size 2048, got %d", transport.upgrader.ReadBufferSize)
 	}
-	
+
 	if transport.upgrader.WriteBufferSize != 2048 {
 		t.Errorf("Expected write buffer size 2048, got %d", transport.upgrader.WriteBufferSize)
 	}

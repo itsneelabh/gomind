@@ -15,7 +15,7 @@ import (
 type RedisSessionManager struct {
 	client *redis.Client
 	config SessionConfig
-	
+
 	// Graceful shutdown support
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -55,15 +55,15 @@ func (r *RedisSessionManager) Create(ctx context.Context, metadata map[string]in
 	if metadata == nil {
 		metadata = make(map[string]interface{})
 	}
-	
+
 	session := &Session{
-		ID:          uuid.New().String(),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ExpiresAt:   time.Now().Add(r.config.TTL),
-		TokenCount:  0,
+		ID:           uuid.New().String(),
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(r.config.TTL),
+		TokenCount:   0,
 		MessageCount: 0,
-		Metadata:    metadata,
+		Metadata:     metadata,
 	}
 
 	pipe := r.client.Pipeline()
@@ -78,14 +78,14 @@ func (r *RedisSessionManager) Create(ctx context.Context, metadata map[string]in
 		"token_count":   session.TokenCount,
 		"message_count": session.MessageCount,
 	}
-	
+
 	// Store metadata as JSON
 	if len(session.Metadata) > 0 {
 		if metadataJSON, err := json.Marshal(session.Metadata); err == nil {
 			hashData["metadata"] = string(metadataJSON)
 		}
 	}
-	
+
 	pipe.HSet(ctx, sessionKey, hashData)
 
 	// Set TTL
@@ -161,14 +161,14 @@ func (r *RedisSessionManager) Update(ctx context.Context, session *Session) erro
 		"token_count":   session.TokenCount,
 		"message_count": session.MessageCount,
 	}
-	
+
 	// Update metadata if present
 	if len(session.Metadata) > 0 {
 		if metadataJSON, err := json.Marshal(session.Metadata); err == nil {
 			updateData["metadata"] = string(metadataJSON)
 		}
 	}
-	
+
 	pipe.HSet(ctx, sessionKey, updateData)
 
 	// Refresh TTL
@@ -293,7 +293,7 @@ func (r *RedisSessionManager) CheckRateLimit(ctx context.Context, sessionID stri
 
 	count, _ := incr.Result()
 	ttlDuration, _ := ttl.Result()
-	
+
 	// Calculate reset time
 	resetAt := time.Now().Add(ttlDuration)
 	if ttlDuration <= 0 {
@@ -402,7 +402,7 @@ func (r *RedisSessionManager) startCleanupRoutine() {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		
+
 		ticker := time.NewTicker(r.config.CleanupInterval)
 		defer ticker.Stop()
 
@@ -442,7 +442,7 @@ func (r *RedisSessionManager) parseSession(data map[string]string) (*Session, er
 	if id, ok := data["id"]; ok {
 		sessionID = id
 	}
-	
+
 	session := &Session{
 		ID:       sessionID,
 		Metadata: make(map[string]interface{}),
@@ -491,10 +491,10 @@ func parseUnixTime(s string) (time.Time, error) {
 func (r *RedisSessionManager) Close() error {
 	// Signal cleanup routine to stop
 	close(r.stopChan)
-	
+
 	// Wait for cleanup routine to finish
 	r.wg.Wait()
-	
+
 	// Close Redis connection
 	return r.client.Close()
 }

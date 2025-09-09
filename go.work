@@ -7,4 +7,5 @@ use (
 	./telemetry
 	./orchestration
 	./resilience
+	./ui
 )
