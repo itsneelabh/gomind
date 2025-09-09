@@ -340,7 +340,10 @@ func (r *RedisSessionManager) CleanupExpiredSessions(ctx context.Context) error 
 		session, err := r.Get(ctx, sessionID)
 		if err != nil {
 			// Session might already be deleted
-			r.client.SRem(ctx, r.activeSessionsKey(), sessionID)
+			if err := r.client.SRem(ctx, r.activeSessionsKey(), sessionID).Err(); err != nil {
+				// Log error but continue cleanup
+				fmt.Printf("Failed to remove session from active set: %v\n", err)
+			}
 			continue
 		}
 
@@ -410,7 +413,10 @@ func (r *RedisSessionManager) startCleanupRoutine() {
 			select {
 			case <-ticker.C:
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				r.CleanupExpiredSessions(ctx)
+				if err := r.CleanupExpiredSessions(ctx); err != nil {
+					// Log error but continue running
+					fmt.Printf("Cleanup error: %v\n", err)
+				}
 				cancel()
 			case <-r.stopChan:
 				return
@@ -471,7 +477,10 @@ func (r *RedisSessionManager) parseSession(data map[string]string) (*Session, er
 		fmt.Sscanf(v, "%d", &session.MessageCount)
 	}
 	if v, ok := data["metadata"]; ok && v != "" {
-		json.Unmarshal([]byte(v), &session.Metadata)
+		if err := json.Unmarshal([]byte(v), &session.Metadata); err != nil {
+			// Log error but continue with empty metadata
+			fmt.Printf("Failed to unmarshal session metadata: %v\n", err)
+		}
 	}
 
 	return session, nil

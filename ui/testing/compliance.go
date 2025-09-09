@@ -465,6 +465,7 @@ func testBasicStreaming(handler ui.StreamHandler) func(*testing.T) {
 func testStreamContextCancellation(handler ui.StreamHandler) func(*testing.T) {
 	return func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel() // Ensure cancel is always called
 
 		// Start streaming
 		events, err := handler.StreamResponse(ctx, "session123", "test message")

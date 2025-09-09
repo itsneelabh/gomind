@@ -32,11 +32,13 @@
 // - HTTP status code based failure detection
 //
 // Usage:
-// config := CircuitBreakerConfig{
-//     FailureThreshold: 5,
-//     SuccessThreshold: 2,
-//     Timeout: 30 * time.Second,
-// }
+//
+//	config := CircuitBreakerConfig{
+//	    FailureThreshold: 5,
+//	    SuccessThreshold: 2,
+//	    Timeout: 30 * time.Second,
+//	}
+//
 // cb := NewSimpleCircuitBreaker("my-service", config)
 // transport := NewCircuitBreakerTransport(baseTransport, cb)
 //

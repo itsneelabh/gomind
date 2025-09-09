@@ -1,6 +1,6 @@
 # GoMind - Go-Native AI Agent Framework with Production Primitives
 
-[![Go Version](https://img.shields.io/badge/go-1.21+-blue.svg)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A modular framework for building AI agents in Go with production-grade resilience, observability, and orchestration capabilities built-in from the start.
@@ -72,7 +72,7 @@ A modular framework for building AI agents in Go with production-grade resilienc
 
 ### Architecture - Modular Design for Production
 
-GoMind's architecture is built on independent, composable modules. Start with just the core module and add only what you need - no forced dependencies, no bloat.
+GoMind's architecture enforces a clear separation between Tools (passive components) and Agents (active orchestrators), built on independent, composable modules. Start with just the core module and add only what you need - no forced dependencies, no bloat.
 
 ```mermaid
 graph TD
@@ -81,43 +81,70 @@ graph TD
     App --> Framework
     
     subgraph Framework["GoMind Framework"]
-        Core["<b>CORE MODULE</b><br/>━━━━━━━━━━━━<br/>• Tools & Agents<br/>• Discovery<br/>• Capabilities<br/>• Health Checks<br/><i>(Required)</i>"]
+        subgraph CoreLayer["Core Module (Required)"]
+            Core["<b>CORE</b><br/>━━━━━━<br/>• Interfaces<br/>• Discovery<br/>• Config"]
+            Tools["<b>TOOLS</b><br/>━━━━━━<br/>• Registry only<br/>• Passive<br/>• Task-focused"]
+            Agents["<b>AGENTS</b><br/>━━━━━━<br/>• Discovery<br/>• Active<br/>• Orchestrate"]
+            
+            Core --> Tools
+            Core --> Agents
+        end
         
         AI["<b>AI</b><br/>━━━━━━<br/>• LLM Client<br/>• Intelligent Agent<br/>• Embeddings"]
         
         Resilience["<b>RESILIENCE</b><br/>━━━━━━<br/>• Circuit Breaker<br/>• Retry Logic<br/>• Timeouts"]
         
-        Telemetry["<b>TELEMETRY</b><br/>━━━━━━<br/>• Metrics<br/>• Tracing<br/>• Observability"]
+        Telemetry["<b>TELEMETRY*</b><br/>━━━━━━<br/>• Metrics<br/>• Tracing<br/>• Observability<br/><i>*Cross-cutting</i>"]
         
         Orchestration["<b>ORCHESTRATION</b><br/>━━━━━━<br/>• Workflow Engine<br/>• Natural Language<br/>• Multi-Agent"]
         
-        Core -.->|Optional| AI
-        Core -.->|Optional| Resilience
-        Core -.->|Optional| Telemetry
-        Core -.->|Optional| Orchestration
+        Core -->|Defines interfaces| AI
+        Core -->|Defines interfaces| Resilience
+        Core -->|Defines interfaces| Telemetry
+        Core -->|Defines interfaces| Orchestration
+        
+        Telemetry -.->|Implements| Core
+        Resilience -->|Uses| Telemetry
+        Orchestration -->|Uses| Telemetry
     end
     
-    style Core fill:#0277bd,stroke:#01579b,stroke-width:3px,color:#fff
+    style Core fill:#0277bd,stroke:#01579b,stroke-width:2px,color:#fff
+    style Tools fill:#0288d1,stroke:#0277bd,stroke-width:2px,color:#fff
+    style Agents fill:#039be5,stroke:#0288d1,stroke-width:2px,color:#fff
     style AI fill:#ef6c00,stroke:#e65100,stroke-width:2px,color:#fff
     style Resilience fill:#6a1b9a,stroke:#4a148c,stroke-width:2px,color:#fff
-    style Telemetry fill:#2e7d32,stroke:#1b5e20,stroke-width:2px,color:#fff
+    style Telemetry fill:#2e7d32,stroke:#1b5e20,stroke-width:3px,color:#fff
     style Orchestration fill:#ad1457,stroke:#880e4f,stroke-width:2px,color:#fff
     style App fill:#37474f,stroke:#263238,stroke-width:2px,color:#fff
 ```
 
-**Why This Modular Architecture Works**:
+**Architectural Principles**:
 
-- **Core Module (Required)**: Provides two building blocks:
-  - **Tools**: Passive components that perform specific tasks
-  - **Agents**: Active orchestrators that discover and coordinate
-- **Optional Modules**: Add only what you need:
-  - **AI**: LLM integration for intelligent tools and agents
-  - **Resilience**: Circuit breakers and retry logic for production stability
-  - **Telemetry**: Metrics, tracing, and observability for both tools and agents
-  - **Orchestration**: Advanced multi-agent coordination via workflows or natural language
+- **Tool/Agent Separation (Enforced at Compile Time)**:
+  - **Tools**: Can only register themselves (`Registry` interface) - they're passive components that respond to requests
+  - **Agents**: Have discovery powers (`Discovery` interface) - they actively find and orchestrate both tools and other agents
+  - This separation ensures clean architecture and prevents tools from creating complex dependencies
+
+- **Core Module (Required)**: Foundation layer that defines:
+  - All interfaces (`Component`, `Registry`, `Discovery`, `Telemetry`, `AIClient`, etc.)
+  - Base implementations for Tools and Agents
+  - Configuration management and service discovery
+
+- **Module Dependencies**:
+  - **AI, UI** → Core only
+  - **Resilience, Orchestration** → Core + Telemetry (for metrics)
+  - **Telemetry** → Core (implements the `core.Telemetry` interface)
+  - No circular dependencies - proper DAG structure
+
+- **Telemetry as Cross-Cutting Concern**:
+  - Core defines the `Telemetry` interface
+  - Components receive telemetry via dependency injection
+  - Special case: Resilience/Orchestration import telemetry for metric schema declaration only
+  - Follows Dependency Inversion Principle - depend on abstractions, not implementations
+
 - **Clean Separation**: Each module has a single responsibility
-- **No Hidden Dependencies**: Modules depend only on Core, not on each other
-- **Incremental Complexity**: Start simple, add modules as your needs grow
+- **Interface-Based Design**: All module interactions through well-defined interfaces
+- **Incremental Complexity**: Start simple with Core, add modules as your needs grow
 
 ### Pick What You Need
 
@@ -128,6 +155,7 @@ import (
     "github.com/itsneelabh/gomind/orchestration" // Add for multi-agent coordination  
     "github.com/itsneelabh/gomind/resilience"    // Add for circuit breakers
     "github.com/itsneelabh/gomind/telemetry"     // Add for metrics
+    "github.com/itsneelabh/gomind/ui"            // Add for chat interfaces and transports
 )
 ```
 
@@ -677,6 +705,7 @@ spec:
 - [Orchestration Module](orchestration/README.md) - Multi-agent coordination and workflows
 - [Resilience Module](resilience/README.md) - Fault tolerance for agent operations
 - [Telemetry Module](telemetry/README.md) - Agent metrics, tracing, and observability
+- [UI Module](ui/README.md) - Chat interfaces, transports (WebSocket, SSE), session management
 
 ## Examples
 

@@ -163,9 +163,20 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 	}
 	
 	addr := fmt.Sprintf(":%d", port)
+	
+	// Use default timeouts if config is not provided
+	if t.Config == nil {
+		t.Config = DefaultConfig()
+	}
+	
 	t.server = &http.Server{
-		Addr:    addr,
-		Handler: t.mux,
+		Addr:              addr,
+		Handler:           t.mux,
+		ReadTimeout:       t.Config.HTTP.ReadTimeout,
+		ReadHeaderTimeout: t.Config.HTTP.ReadHeaderTimeout,
+		WriteTimeout:      t.Config.HTTP.WriteTimeout,
+		IdleTimeout:       t.Config.HTTP.IdleTimeout,
+		MaxHeaderBytes:    t.Config.HTTP.MaxHeaderBytes,
 	}
 
 	t.Logger.Info("Starting tool HTTP server", map[string]interface{}{
