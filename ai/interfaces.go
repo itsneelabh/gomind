@@ -10,4 +10,3 @@ import (
 type AIClient interface {
 	GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error)
 }
-

@@ -14,14 +14,14 @@ import (
 type BaseClient struct {
 	// HTTP client with timeout
 	HTTPClient *http.Client
-	
+
 	// Logger for debugging
 	Logger core.Logger
-	
+
 	// Retry configuration
 	MaxRetries int
 	RetryDelay time.Duration
-	
+
 	// Default configuration
 	DefaultModel        string
 	DefaultTemperature  float32
@@ -34,7 +34,7 @@ func NewBaseClient(timeout time.Duration, logger core.Logger) *BaseClient {
 	if logger == nil {
 		logger = &core.NoOpLogger{}
 	}
-	
+
 	return &BaseClient{
 		HTTPClient: &http.Client{
 			Timeout: timeout,
@@ -50,27 +50,27 @@ func NewBaseClient(timeout time.Duration, logger core.Logger) *BaseClient {
 // ExecuteWithRetry performs an HTTP request with exponential backoff retry
 func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
 	var lastErr error
-	
+
 	for attempt := 0; attempt <= b.MaxRetries; attempt++ {
 		// Clone request for retry
 		reqClone := req.Clone(ctx)
-		
+
 		// Add context
 		reqClone = reqClone.WithContext(ctx)
-		
+
 		// Execute request
 		resp, err := b.HTTPClient.Do(reqClone)
-		
+
 		// Success - return if no error and status is not retryable
 		if err == nil && resp.StatusCode < 400 {
 			return resp, nil
 		}
-		
+
 		// Return non-retryable client errors immediately
 		if err == nil && resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
 			return resp, nil
 		}
-		
+
 		// Save error for potential return
 		if err != nil {
 			lastErr = err
@@ -78,19 +78,19 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 			lastErr = fmt.Errorf("server error: status %d", resp.StatusCode)
 			resp.Body.Close()
 		}
-		
+
 		// Check if we should retry
 		if attempt < b.MaxRetries {
 			// Calculate delay with exponential backoff
 			delay := b.RetryDelay * time.Duration(1<<uint(attempt))
-			
+
 			b.Logger.Debug("Retrying request", map[string]interface{}{
 				"attempt":     attempt + 1,
 				"max_retries": b.MaxRetries,
 				"delay":       delay,
 				"error":       lastErr,
 			})
-			
+
 			// Wait before retry
 			select {
 			case <-time.After(delay):
@@ -100,7 +100,7 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 			}
 		}
 	}
-	
+
 	return nil, fmt.Errorf("request failed after %d retries: %w", b.MaxRetries, lastErr)
 }
 
@@ -117,24 +117,24 @@ func (b *BaseClient) ApplyDefaults(options *core.AIOptions) *core.AIOptions {
 	if options == nil {
 		options = &core.AIOptions{}
 	}
-	
+
 	// Apply defaults for unset values
 	if options.Model == "" && b.DefaultModel != "" {
 		options.Model = b.DefaultModel
 	}
-	
+
 	if options.Temperature == 0 {
 		options.Temperature = b.DefaultTemperature
 	}
-	
+
 	if options.MaxTokens == 0 {
 		options.MaxTokens = b.DefaultMaxTokens
 	}
-	
+
 	if options.SystemPrompt == "" && b.DefaultSystemPrompt != "" {
 		options.SystemPrompt = b.DefaultSystemPrompt
 	}
-	
+
 	return options
 }
 
@@ -143,9 +143,9 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errStr := err.Error()
-	
+
 	// Check for specific HTTP status codes that are retryable
 	if strings.Contains(errStr, "(429)") || // Rate limit
 		strings.Contains(errStr, "(500)") || // Internal server error
@@ -154,12 +154,12 @@ func isRetryableError(err error) bool {
 		strings.Contains(errStr, "(504)") { // Gateway timeout
 		return true
 	}
-	
+
 	// Check for context timeout/deadline
 	if err == context.DeadlineExceeded {
 		return true
 	}
-	
+
 	return false
 }
 

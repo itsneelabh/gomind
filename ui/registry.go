@@ -29,26 +29,26 @@ func NewTransportRegistry() TransportRegistry {
 // Register registers a new transport
 func (r *transportRegistry) Register(transport Transport) error {
 	if transport == nil {
-		return NewUIError("Registry.Register", ErrorKindTransport, 
+		return NewUIError("Registry.Register", ErrorKindTransport,
 			fmt.Errorf("transport cannot be nil"))
 	}
-	
+
 	name := transport.Name()
 	if name == "" {
 		return NewUIError("Registry.Register", ErrorKindTransport,
 			fmt.Errorf("transport name cannot be empty"))
 	}
-	
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if _, exists := r.transports[name]; exists {
 		return NewUIError("Registry.Register", ErrorKindTransport,
 			fmt.Errorf("%w: %s", ErrTransportAlreadyExists, name))
 	}
-	
+
 	r.transports[name] = transport
-	
+
 	// Notify listeners
 	r.notifyListeners(TransportLifecycleEvent{
 		Transport: name,
@@ -59,7 +59,7 @@ func (r *transportRegistry) Register(transport Transport) error {
 			"capabilities": transport.Capabilities(),
 		},
 	})
-	
+
 	return nil
 }
 
@@ -69,24 +69,24 @@ func (r *transportRegistry) Unregister(name string) error {
 		return NewUIError("Registry.Unregister", ErrorKindTransport,
 			fmt.Errorf("transport name cannot be empty"))
 	}
-	
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if _, exists := r.transports[name]; !exists {
 		return NewUIError("Registry.Unregister", ErrorKindTransport,
 			fmt.Errorf("%w: %s", ErrTransportNotFound, name))
 	}
-	
+
 	delete(r.transports, name)
-	
+
 	// Notify listeners
 	r.notifyListeners(TransportLifecycleEvent{
 		Transport: name,
 		Event:     EventTransportStopped,
 		Timestamp: time.Now(),
 	})
-	
+
 	return nil
 }
 
@@ -94,7 +94,7 @@ func (r *transportRegistry) Unregister(name string) error {
 func (r *transportRegistry) Get(name string) (Transport, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	transport, exists := r.transports[name]
 	return transport, exists
 }
@@ -103,12 +103,12 @@ func (r *transportRegistry) Get(name string) (Transport, bool) {
 func (r *transportRegistry) List() []Transport {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	transports := make([]Transport, 0, len(r.transports))
 	for _, t := range r.transports {
 		transports = append(transports, t)
 	}
-	
+
 	// Sort by priority (highest first), then by name
 	sort.Slice(transports, func(i, j int) bool {
 		if transports[i].Priority() != transports[j].Priority() {
@@ -116,7 +116,7 @@ func (r *transportRegistry) List() []Transport {
 		}
 		return transports[i].Name() < transports[j].Name()
 	})
-	
+
 	return transports
 }
 
@@ -124,14 +124,14 @@ func (r *transportRegistry) List() []Transport {
 func (r *transportRegistry) ListAvailable() []Transport {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	available := make([]Transport, 0)
 	for _, t := range r.transports {
 		if t.Available() {
 			available = append(available, t)
 		}
 	}
-	
+
 	// Sort by priority (highest first), then by name
 	sort.Slice(available, func(i, j int) bool {
 		if available[i].Priority() != available[j].Priority() {
@@ -139,7 +139,7 @@ func (r *transportRegistry) ListAvailable() []Transport {
 		}
 		return available[i].Name() < available[j].Name()
 	})
-	
+
 	return available
 }
 
@@ -208,7 +208,7 @@ func (s *TransportSelector) SelectBest() (Transport, error) {
 		return nil, NewUIError("TransportSelector.SelectBest", ErrorKindTransport,
 			ErrTransportNotAvailable)
 	}
-	
+
 	// Available transports are already sorted by priority
 	return available[0], nil
 }
@@ -216,13 +216,13 @@ func (s *TransportSelector) SelectBest() (Transport, error) {
 // SelectWithCapabilities selects the best transport with required capabilities
 func (s *TransportSelector) SelectWithCapabilities(required []TransportCapability) (Transport, error) {
 	available := s.registry.ListAvailable()
-	
+
 	for _, transport := range available {
 		if hasAllCapabilities(transport, required) {
 			return transport, nil
 		}
 	}
-	
+
 	return nil, NewUIError("TransportSelector.SelectWithCapabilities", ErrorKindTransport,
 		fmt.Errorf("no transport found with required capabilities: %v", required))
 }
@@ -231,25 +231,25 @@ func (s *TransportSelector) SelectWithCapabilities(required []TransportCapabilit
 func hasAllCapabilities(transport Transport, required []TransportCapability) bool {
 	capabilities := transport.Capabilities()
 	capMap := make(map[TransportCapability]bool)
-	
+
 	for _, cap := range capabilities {
 		capMap[cap] = true
 	}
-	
+
 	for _, req := range required {
 		if !capMap[req] {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
 // TransportManager manages transport lifecycle
 type TransportManager struct {
-	registry  TransportRegistry
-	configs   map[string]TransportConfig
-	mu        sync.RWMutex
+	registry TransportRegistry
+	configs  map[string]TransportConfig
+	mu       sync.RWMutex
 }
 
 // NewTransportManager creates a new transport manager
@@ -270,16 +270,16 @@ func (m *TransportManager) InitializeTransport(name string, config TransportConf
 		return NewUIError("TransportManager.InitializeTransport", ErrorKindTransport,
 			fmt.Errorf("%w: %s", ErrTransportNotFound, name))
 	}
-	
+
 	if err := transport.Initialize(config); err != nil {
 		return NewUIError("TransportManager.InitializeTransport", ErrorKindTransport,
 			fmt.Errorf("failed to initialize transport %s: %w", name, err))
 	}
-	
+
 	m.mu.Lock()
 	m.configs[name] = config
 	m.mu.Unlock()
-	
+
 	return nil
 }
 
@@ -290,12 +290,12 @@ func (m *TransportManager) StartTransport(ctx context.Context, name string) erro
 		return NewUIError("TransportManager.StartTransport", ErrorKindTransport,
 			fmt.Errorf("%w: %s", ErrTransportNotFound, name))
 	}
-	
+
 	if err := transport.Start(ctx); err != nil {
 		return NewUIError("TransportManager.StartTransport", ErrorKindTransport,
 			fmt.Errorf("failed to start transport %s: %w", name, err))
 	}
-	
+
 	return nil
 }
 
@@ -306,12 +306,12 @@ func (m *TransportManager) StopTransport(ctx context.Context, name string) error
 		return NewUIError("TransportManager.StopTransport", ErrorKindTransport,
 			fmt.Errorf("%w: %s", ErrTransportNotFound, name))
 	}
-	
+
 	if err := transport.Stop(ctx); err != nil {
 		return NewUIError("TransportManager.StopTransport", ErrorKindTransport,
 			fmt.Errorf("failed to stop transport %s: %w", name, err))
 	}
-	
+
 	return nil
 }
 
@@ -322,19 +322,19 @@ func (m *TransportManager) HealthCheckTransport(ctx context.Context, name string
 		return NewUIError("TransportManager.HealthCheckTransport", ErrorKindTransport,
 			fmt.Errorf("%w: %s", ErrTransportNotFound, name))
 	}
-	
+
 	if err := transport.HealthCheck(ctx); err != nil {
 		return NewUIError("TransportManager.HealthCheckTransport", ErrorKindTransport,
 			fmt.Errorf("transport %s health check failed: %w", name, err))
 	}
-	
+
 	return nil
 }
 
 // StartAll starts all available transports
 func (m *TransportManager) StartAll(ctx context.Context) error {
 	available := m.registry.ListAvailable()
-	
+
 	for _, transport := range available {
 		// Initialize with default config if not configured
 		if _, configured := m.configs[transport.Name()]; !configured {
@@ -346,26 +346,26 @@ func (m *TransportManager) StartAll(ctx context.Context) error {
 				return fmt.Errorf("failed to initialize %s: %w", transport.Name(), err)
 			}
 		}
-		
+
 		// Start the transport
 		if err := transport.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start %s: %w", transport.Name(), err)
 		}
 	}
-	
+
 	return nil
 }
 
 // StopAll stops all transports
 func (m *TransportManager) StopAll(ctx context.Context) error {
 	transports := m.registry.List()
-	
+
 	var firstErr error
 	for _, transport := range transports {
 		if err := transport.Stop(ctx); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	
+
 	return firstErr
 }

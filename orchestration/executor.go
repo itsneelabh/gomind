@@ -92,12 +92,12 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 					hasSkipped = true
 				}
 			}
-			
+
 			if hasSkipped {
 				// We skipped some steps, continue to check if more can be executed
 				continue
 			}
-			
+
 			// No steps were skipped, this is likely a circular dependency
 			return nil, fmt.Errorf("no executable steps found - check for circular dependencies")
 		}
@@ -113,11 +113,11 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 				// Acquire semaphore for concurrency control BEFORE setting up defer
 				// This ensures the semaphore is always released even if panic occurs
 				e.semaphore <- struct{}{}
-				
+
 				defer func() {
 					// Always release semaphore first
 					<-e.semaphore
-					
+
 					if r := recover(); r != nil {
 						// Panic recovery mechanism for step execution.
 						// Captures any panic that occurs during step execution and converts it

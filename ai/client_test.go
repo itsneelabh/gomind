@@ -71,12 +71,12 @@ func TestNewClient(t *testing.T) {
 	defer func() { registry = originalRegistry }()
 
 	tests := []struct {
-		name      string
-		options   []AIOption
-		setup     func()
-		wantErr   bool
-		errMsg    string
-		validate  func(*testing.T, core.AIClient)
+		name     string
+		options  []AIOption
+		setup    func()
+		wantErr  bool
+		errMsg   string
+		validate func(*testing.T, core.AIClient)
 	}{
 		{
 			name: "auto-detect with available provider",

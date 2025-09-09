@@ -19,14 +19,14 @@ func (m *mockAIClientForAgent) GenerateResponse(ctx context.Context, prompt stri
 	if m.err != nil {
 		return nil, m.err
 	}
-	
+
 	if m.index >= len(m.responses) {
 		return nil, errors.New("no more responses")
 	}
-	
+
 	response := m.responses[m.index]
 	m.index++
-	
+
 	return &core.AIResponse{
 		Content: response,
 		Model:   "test-model",
@@ -55,15 +55,15 @@ func TestNewIntelligentAgent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			agent := NewIntelligentAgent(tt.id)
-			
+
 			if tt.wantNil && agent != nil {
 				t.Error("expected nil agent, got non-nil")
 			}
-			
+
 			if !tt.wantNil && agent == nil {
 				t.Error("expected non-nil agent, got nil")
 			}
-			
+
 			if agent != nil && agent.ID != tt.id {
 				t.Errorf("expected agent ID %q, got %q", tt.id, agent.ID)
 			}
@@ -131,24 +131,24 @@ func TestIntelligentAgent_GenerateResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			response, err := tt.agent.GenerateResponse(context.Background(), tt.prompt, tt.options)
-			
+
 			if tt.wantError {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
 			}
-			
+
 			if response == nil {
 				t.Error("expected response, got nil")
 				return
 			}
-			
+
 			if response.Content != tt.wantText {
 				t.Errorf("expected content %q, got %q", tt.wantText, response.Content)
 			}
@@ -158,22 +158,22 @@ func TestIntelligentAgent_GenerateResponse(t *testing.T) {
 
 func TestIntelligentAgent_SetAI(t *testing.T) {
 	agent := NewIntelligentAgent("test")
-	
+
 	// Initially AI should be nil
 	if agent.AI != nil {
 		t.Error("expected AI to be nil initially")
 	}
-	
+
 	// Set AI client
 	mockClient := &mockAIClientForAgent{
 		responses: []string{"test"},
 	}
 	agent.SetAI(mockClient)
-	
+
 	if agent.AI != mockClient {
 		t.Error("AI client was not set correctly")
 	}
-	
+
 	// Test that we can use the set AI client
 	resp, err := agent.GenerateResponse(context.Background(), "test", nil)
 	if err != nil {
@@ -243,33 +243,33 @@ func TestIntelligentAgent_ProcessWithMemory(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := tt.agent.ProcessWithMemory(context.Background(), tt.input)
-			
+
 			if tt.wantError {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
 			}
-			
+
 			if result != tt.wantResponse {
 				t.Errorf("expected response %q, got %q", tt.wantResponse, result)
 			}
-			
+
 			// Check if memory was updated
 			if tt.checkMemory && tt.agent.Memory != nil {
 				ctx := context.Background()
-				
+
 				// Check if input was stored
 				storedInput, _ := tt.agent.Memory.Get(ctx, "input:test input")
 				if storedInput != "test input" {
 					t.Errorf("expected input to be stored in memory")
 				}
-				
+
 				// Check if response was stored
 				storedResponse, _ := tt.agent.Memory.Get(ctx, "response:test input")
 				if storedResponse != tt.wantResponse {
@@ -336,23 +336,23 @@ func TestIntelligentAgent_ThinkAndAct(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			plan, action, err := tt.agent.ThinkAndAct(context.Background(), tt.situation)
-			
+
 			if tt.wantError {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 				return
 			}
-			
+
 			if plan != tt.wantPlan {
 				t.Errorf("expected plan %q, got %q", tt.wantPlan, plan)
 			}
-			
+
 			if action != tt.wantAct {
 				t.Errorf("expected action %q, got %q", tt.wantAct, action)
 			}
@@ -363,10 +363,10 @@ func TestIntelligentAgent_ThinkAndAct(t *testing.T) {
 func TestIntelligentAgent_Integration(t *testing.T) {
 	// Test the full integration of an intelligent agent
 	agent := NewIntelligentAgent("integration-test")
-	
+
 	// Set up memory
 	agent.Memory = core.NewMemoryStore()
-	
+
 	// Set up AI client with multiple responses
 	agent.AI = &mockAIClientForAgent{
 		responses: []string{
@@ -376,9 +376,9 @@ func TestIntelligentAgent_Integration(t *testing.T) {
 			"Action: Process the results",
 		},
 	}
-	
+
 	ctx := context.Background()
-	
+
 	// Test basic response
 	resp1, err := agent.GenerateResponse(ctx, "Introduce yourself", nil)
 	if err != nil {
@@ -387,7 +387,7 @@ func TestIntelligentAgent_Integration(t *testing.T) {
 	if resp1.Content != "Hello, I am an intelligent agent" {
 		t.Errorf("unexpected response: %q", resp1.Content)
 	}
-	
+
 	// Test process with memory
 	resp2, err := agent.ProcessWithMemory(ctx, "Remember this")
 	if err != nil {
@@ -396,13 +396,13 @@ func TestIntelligentAgent_Integration(t *testing.T) {
 	if resp2 != "I can remember our conversation" {
 		t.Errorf("unexpected response: %q", resp2)
 	}
-	
+
 	// Verify memory was updated
 	stored, _ := agent.Memory.Get(ctx, "response:Remember this")
 	if stored != "I can remember our conversation" {
 		t.Error("memory was not updated correctly")
 	}
-	
+
 	// Test think and act
 	plan, action, err := agent.ThinkAndAct(ctx, "Process data")
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itsneelabh/gomind/ai"
 	"github.com/itsneelabh/gomind/core"
 )
 
@@ -15,7 +14,7 @@ import (
 type AIOrchestrator struct {
 	config      *OrchestratorConfig
 	discovery   core.Discovery
-	aiClient    ai.AIClient
+	aiClient    core.AIClient
 	catalog     *AgentCatalog
 	executor    *SmartExecutor
 	synthesizer *AISynthesizer
@@ -32,7 +31,7 @@ type AIOrchestrator struct {
 }
 
 // NewAIOrchestrator creates a new AI-powered orchestrator
-func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiClient ai.AIClient) *AIOrchestrator {
+func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiClient core.AIClient) *AIOrchestrator {
 	if config == nil {
 		config = DefaultConfig()
 	}

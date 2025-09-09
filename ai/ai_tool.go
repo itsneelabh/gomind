@@ -19,7 +19,7 @@ type AITool struct {
 // NewAITool creates a new tool with AI capabilities but no discovery
 func NewAITool(name string, apiKey string) (*AITool, error) {
 	tool := core.NewTool(name)
-	
+
 	// Create AI client
 	aiClient, err := NewClient(
 		WithProvider("openai"),
@@ -28,9 +28,9 @@ func NewAITool(name string, apiKey string) (*AITool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AI client: %w", err)
 	}
-	
+
 	tool.AI = aiClient
-	
+
 	return &AITool{
 		BaseTool: tool,
 		aiClient: aiClient,
@@ -47,7 +47,7 @@ func (t *AITool) ProcessWithAI(ctx context.Context, input string) (string, error
 	if err != nil {
 		return "", fmt.Errorf("AI processing failed: %w", err)
 	}
-	
+
 	return response.Content, nil
 }
 
@@ -64,7 +64,7 @@ func (t *AITool) RegisterAICapability(name, description, prompt string) {
 				http.Error(w, "Failed to read request", http.StatusBadRequest)
 				return
 			}
-			
+
 			// Process with AI using the configured prompt
 			fullPrompt := fmt.Sprintf("%s\n\nInput: %s", prompt, string(body))
 			response, err := t.ProcessWithAI(r.Context(), fullPrompt)
@@ -72,13 +72,13 @@ func (t *AITool) RegisterAICapability(name, description, prompt string) {
 				http.Error(w, "AI processing failed", http.StatusInternalServerError)
 				return
 			}
-			
+
 			// Return response
 			w.Header().Set("Content-Type", "text/plain")
 			w.Write([]byte(response))
 		},
 	}
-	
+
 	t.RegisterCapability(capability)
 }
 
@@ -90,13 +90,13 @@ func NewTranslationTool(apiKey string) (*AITool, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	tool.RegisterAICapability(
 		"translate",
 		"Translates text between languages",
 		"You are a professional translator. Translate the following text, preserving meaning and context.",
 	)
-	
+
 	return tool, nil
 }
 
@@ -106,13 +106,13 @@ func NewSummarizationTool(apiKey string) (*AITool, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	tool.RegisterAICapability(
 		"summarize",
 		"Summarizes long text into key points",
 		"You are an expert at summarization. Provide a concise summary of the following text, highlighting key points.",
 	)
-	
+
 	return tool, nil
 }
 
@@ -122,13 +122,13 @@ func NewSentimentAnalysisTool(apiKey string) (*AITool, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	tool.RegisterAICapability(
 		"analyze_sentiment",
 		"Analyzes sentiment of text (positive, negative, neutral)",
 		"You are a sentiment analysis expert. Analyze the sentiment of the following text and respond with: POSITIVE, NEGATIVE, or NEUTRAL, followed by a confidence score (0-100) and brief explanation.",
 	)
-	
+
 	return tool, nil
 }
 
@@ -138,12 +138,12 @@ func NewCodeReviewTool(apiKey string) (*AITool, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	tool.RegisterAICapability(
 		"review_code",
 		"Reviews code for quality, bugs, and improvements",
 		"You are an expert code reviewer. Review the following code for:\n1. Potential bugs\n2. Performance issues\n3. Security vulnerabilities\n4. Code style and best practices\n5. Suggested improvements\n\nProvide specific, actionable feedback.",
 	)
-	
+
 	return tool, nil
 }

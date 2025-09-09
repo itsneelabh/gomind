@@ -205,7 +205,7 @@ func (t *SSETransport) sendEvent(w http.ResponseWriter, flusher http.Flusher, ev
 // sendError sends an error event
 func (t *SSETransport) sendError(w http.ResponseWriter, flusher http.Flusher, message string) {
 	t.sendEvent(w, flusher, "error", map[string]string{
-		"message": message,
+		"message":   message,
 		"timestamp": time.Now().Format(time.RFC3339),
 	})
 }

@@ -36,7 +36,7 @@ func (m *mockLogger) Error(msg string, fields map[string]interface{}) {
 
 func TestNewClient(t *testing.T) {
 	logger := &mockLogger{}
-	
+
 	tests := []struct {
 		name    string
 		apiKey  string
@@ -47,8 +47,8 @@ func TestNewClient(t *testing.T) {
 		}
 	}{
 		{
-			name:   "with custom base URL",
-			apiKey: "test-key",
+			name:    "with custom base URL",
+			apiKey:  "test-key",
 			baseURL: "https://custom.api.com/v1",
 			want: struct {
 				apiKey  string
@@ -59,8 +59,8 @@ func TestNewClient(t *testing.T) {
 			},
 		},
 		{
-			name:   "with default base URL",
-			apiKey: "test-key",
+			name:    "with default base URL",
+			apiKey:  "test-key",
 			baseURL: "",
 			want: struct {
 				apiKey  string
@@ -71,11 +71,11 @@ func TestNewClient(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := NewClient(tt.apiKey, tt.baseURL, logger)
-			
+
 			if client.apiKey != tt.want.apiKey {
 				t.Errorf("apiKey = %q, want %q", client.apiKey, tt.want.apiKey)
 			}
@@ -169,7 +169,7 @@ func TestClient_GenerateResponse(t *testing.T) {
 				if len(messages) != 2 {
 					t.Fatalf("expected 2 messages, got %d", len(messages))
 				}
-				
+
 				// Check system message
 				systemMsg := messages[0].(map[string]interface{})
 				if systemMsg["role"] != "system" {
@@ -178,7 +178,7 @@ func TestClient_GenerateResponse(t *testing.T) {
 				if systemMsg["content"] != "You are a helpful math tutor." {
 					t.Errorf("system content = %v, want 'You are a helpful math tutor.'", systemMsg["content"])
 				}
-				
+
 				// Check user message
 				userMsg := messages[1].(map[string]interface{})
 				if userMsg["role"] != "user" {
@@ -197,9 +197,9 @@ func TestClient_GenerateResponse(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name:   "API error response",
-			apiKey: "test-key",
-			prompt: "Hello",
+			name:    "API error response",
+			apiKey:  "test-key",
+			prompt:  "Hello",
 			options: &core.AIOptions{Model: "gpt-3.5-turbo"},
 			serverResponse: `{
 				"error": {
@@ -212,27 +212,27 @@ func TestClient_GenerateResponse(t *testing.T) {
 			wantError:    true,
 		},
 		{
-			name:   "malformed response",
-			apiKey: "test-key",
-			prompt: "Hello",
-			options: &core.AIOptions{Model: "gpt-3.5-turbo"},
+			name:           "malformed response",
+			apiKey:         "test-key",
+			prompt:         "Hello",
+			options:        &core.AIOptions{Model: "gpt-3.5-turbo"},
 			serverResponse: `{invalid json}`,
-			serverStatus: http.StatusOK,
-			wantError:    true,
+			serverStatus:   http.StatusOK,
+			wantError:      true,
 		},
 		{
-			name:   "empty choices array",
-			apiKey: "test-key",
-			prompt: "Hello",
-			options: &core.AIOptions{Model: "gpt-3.5-turbo"},
+			name:           "empty choices array",
+			apiKey:         "test-key",
+			prompt:         "Hello",
+			options:        &core.AIOptions{Model: "gpt-3.5-turbo"},
 			serverResponse: `{"choices": []}`,
-			serverStatus: http.StatusOK,
-			wantError:    true,
+			serverStatus:   http.StatusOK,
+			wantError:      true,
 		},
 		{
-			name:   "with usage information",
-			apiKey: "test-key",
-			prompt: "Hello",
+			name:    "with usage information",
+			apiKey:  "test-key",
+			prompt:  "Hello",
 			options: &core.AIOptions{Model: "gpt-3.5-turbo"},
 			serverResponse: `{
 				"model": "gpt-3.5-turbo",
@@ -251,7 +251,7 @@ func TestClient_GenerateResponse(t *testing.T) {
 			wantContent:  "Hi there!",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create test server
@@ -264,39 +264,39 @@ func TestClient_GenerateResponse(t *testing.T) {
 				if ct := r.Header.Get("Content-Type"); ct != "application/json" {
 					t.Errorf("Content-Type header = %q, want application/json", ct)
 				}
-				
+
 				// Capture request body
 				if r.Body != nil {
 					body, _ := io.ReadAll(r.Body)
 					json.Unmarshal(body, &capturedRequest)
 				}
-				
+
 				// Send response
 				w.WriteHeader(tt.serverStatus)
 				w.Write([]byte(tt.serverResponse))
 			}))
 			defer server.Close()
-			
+
 			// Create client
 			logger := &mockLogger{}
 			client := NewClient(tt.apiKey, server.URL, logger)
-			
+
 			// Make request
 			ctx := context.Background()
 			resp, err := client.GenerateResponse(ctx, tt.prompt, tt.options)
-			
+
 			// Check error
 			if (err != nil) != tt.wantError {
 				t.Errorf("GenerateResponse() error = %v, wantError %v", err, tt.wantError)
 			}
-			
+
 			// If successful, check response
 			if !tt.wantError && resp != nil {
 				if resp.Content != tt.wantContent {
 					t.Errorf("response content = %q, want %q", resp.Content, tt.wantContent)
 				}
 			}
-			
+
 			// Validate request if provided
 			if tt.validateReq != nil && capturedRequest != nil {
 				tt.validateReq(t, capturedRequest)
@@ -310,7 +310,7 @@ func TestClient_GenerateResponseWithDefaults(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		var req map[string]interface{}
 		json.Unmarshal(body, &req)
-		
+
 		// Verify defaults were applied
 		if req["model"] != "gpt-3.5-turbo" {
 			t.Errorf("model = %v, want gpt-3.5-turbo (default)", req["model"])
@@ -321,20 +321,20 @@ func TestClient_GenerateResponseWithDefaults(t *testing.T) {
 		if req["max_tokens"] != float64(1000) {
 			t.Errorf("max_tokens = %v, want 1000 (default)", req["max_tokens"])
 		}
-		
+
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"choices": [{"message": {"content": "response"}}]}`))
 	}))
 	defer server.Close()
-	
+
 	logger := &mockLogger{}
 	client := NewClient("test-key", server.URL, logger)
-	
+
 	// Set defaults
 	client.DefaultModel = "gpt-3.5-turbo"
 	client.DefaultTemperature = 0.7
 	client.DefaultMaxTokens = 1000
-	
+
 	// Call with nil options to use defaults
 	_, err := client.GenerateResponse(context.Background(), "test", nil)
 	if err != nil {
@@ -350,14 +350,14 @@ func TestClient_GenerateResponseContextCancellation(t *testing.T) {
 		w.Write([]byte(`{"choices": [{"message": {"content": "too late"}}]}`))
 	}))
 	defer server.Close()
-	
+
 	logger := &mockLogger{}
 	client := NewClient("test-key", server.URL, logger)
-	
+
 	// Create context with immediate cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
-	
+
 	_, err := client.GenerateResponse(ctx, "test", &core.AIOptions{Model: "gpt-3.5-turbo"})
 	if err == nil {
 		t.Error("expected error from cancelled context")
@@ -369,12 +369,12 @@ func TestClient_GenerateResponseContextCancellation(t *testing.T) {
 
 func TestClient_ResponseParsing(t *testing.T) {
 	tests := []struct {
-		name           string
-		response       string
-		wantError      bool
-		wantContent    string
-		wantModel      string
-		wantTokens     int
+		name        string
+		response    string
+		wantError   bool
+		wantContent string
+		wantModel   string
+		wantTokens  int
 	}{
 		{
 			name: "complete response with all fields",
@@ -417,7 +417,7 @@ func TestClient_ResponseParsing(t *testing.T) {
 			wantError: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -429,20 +429,20 @@ func TestClient_ResponseParsing(t *testing.T) {
 				w.Write([]byte(tt.response))
 			}))
 			defer server.Close()
-			
+
 			logger := &mockLogger{}
 			client := NewClient("test-key", server.URL, logger)
-			
+
 			resp, err := client.GenerateResponse(
 				context.Background(),
 				"test",
 				&core.AIOptions{Model: "gpt-3.5-turbo"},
 			)
-			
+
 			if (err != nil) != tt.wantError {
 				t.Errorf("error = %v, wantError %v", err, tt.wantError)
 			}
-			
+
 			if !tt.wantError && resp != nil {
 				if resp.Content != tt.wantContent {
 					t.Errorf("content = %q, want %q", resp.Content, tt.wantContent)

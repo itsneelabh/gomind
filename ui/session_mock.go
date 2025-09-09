@@ -12,13 +12,13 @@ import (
 // MockSessionManager implements SessionManager interface for testing
 // without Redis dependency
 type MockSessionManager struct {
-	mu           sync.RWMutex
-	sessions     map[string]*Session
-	messages     map[string][]Message
-	rateLimits   map[string]*rateLimitEntry
-	config       SessionConfig
-	shouldFail   bool // For testing error conditions
-	failPattern  string // Specific method to fail
+	mu          sync.RWMutex
+	sessions    map[string]*Session
+	messages    map[string][]Message
+	rateLimits  map[string]*rateLimitEntry
+	config      SessionConfig
+	shouldFail  bool   // For testing error conditions
+	failPattern string // Specific method to fail
 }
 
 type rateLimitEntry struct {
@@ -34,6 +34,12 @@ func NewMockSessionManager(config SessionConfig) *MockSessionManager {
 		rateLimits: make(map[string]*rateLimitEntry),
 		config:     config,
 	}
+}
+
+// NewInMemorySessionManager is an alias for NewMockSessionManager
+// for use in examples and non-Redis deployments
+func NewInMemorySessionManager(config SessionConfig) *MockSessionManager {
+	return NewMockSessionManager(config)
 }
 
 // SetFailure configures the mock to fail for testing
@@ -58,13 +64,13 @@ func (m *MockSessionManager) Create(ctx context.Context, metadata map[string]int
 	}
 
 	session := &Session{
-		ID:          uuid.New().String(),
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ExpiresAt:   time.Now().Add(m.config.TTL),
-		TokenCount:  0,
+		ID:           uuid.New().String(),
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(m.config.TTL),
+		TokenCount:   0,
 		MessageCount: 0,
-		Metadata:    metadata,
+		Metadata:     metadata,
 	}
 
 	m.sessions[session.ID] = session

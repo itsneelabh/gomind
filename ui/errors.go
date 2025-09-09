@@ -15,28 +15,28 @@ var (
 	ErrTransportNotStarted    = errors.New("transport not started")
 	ErrTransportShutdown      = errors.New("transport is shutting down")
 	ErrTransportUnhealthy     = errors.New("transport health check failed")
-	
+
 	// Session errors
-	ErrSessionNotFound     = errors.New("session not found")
-	ErrSessionExpired      = errors.New("session expired")
-	ErrSessionRateLimited  = errors.New("session rate limited")
-	ErrSessionTokenLimit   = errors.New("session token limit exceeded")
-	ErrSessionInvalid      = errors.New("invalid session")
-	
+	ErrSessionNotFound    = errors.New("session not found")
+	ErrSessionExpired     = errors.New("session expired")
+	ErrSessionRateLimited = errors.New("session rate limited")
+	ErrSessionTokenLimit  = errors.New("session token limit exceeded")
+	ErrSessionInvalid     = errors.New("invalid session")
+
 	// Message errors
-	ErrMessageTooLarge     = errors.New("message too large")
-	ErrMessageInvalid      = errors.New("invalid message format")
-	ErrMessageEmpty        = errors.New("message cannot be empty")
-	
+	ErrMessageTooLarge = errors.New("message too large")
+	ErrMessageInvalid  = errors.New("invalid message format")
+	ErrMessageEmpty    = errors.New("message cannot be empty")
+
 	// Configuration errors
-	ErrInvalidConfig       = errors.New("invalid configuration")
-	ErrMissingRedis        = errors.New("redis connection required")
-	ErrMissingAIClient     = errors.New("AI client required")
-	
+	ErrInvalidConfig   = errors.New("invalid configuration")
+	ErrMissingRedis    = errors.New("redis connection required")
+	ErrMissingAIClient = errors.New("AI client required")
+
 	// Stream errors
-	ErrStreamClosed        = errors.New("stream closed")
-	ErrStreamTimeout       = errors.New("stream timeout")
-	ErrStreamCancelled     = errors.New("stream cancelled")
+	ErrStreamClosed    = errors.New("stream closed")
+	ErrStreamTimeout   = errors.New("stream timeout")
+	ErrStreamCancelled = errors.New("stream cancelled")
 )
 
 // UIError provides structured error information
@@ -98,7 +98,7 @@ func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	// Check for specific retryable errors
 	switch {
 	case errors.Is(err, ErrTransportUnhealthy):
@@ -110,7 +110,7 @@ func IsRetryable(err error) bool {
 	case errors.Is(err, context.DeadlineExceeded):
 		return true
 	}
-	
+
 	// Check if it's a UIError with retryable kind
 	var uiErr *UIError
 	if errors.As(err, &uiErr) {
@@ -119,7 +119,7 @@ func IsRetryable(err error) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -128,7 +128,7 @@ func IsFatal(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	// Check for specific fatal errors
 	switch {
 	case errors.Is(err, ErrInvalidConfig):
@@ -142,7 +142,7 @@ func IsFatal(err error) bool {
 	case errors.Is(err, ErrMessageTooLarge):
 		return true
 	}
-	
+
 	// Check if it's a UIError with fatal kind
 	var uiErr *UIError
 	if errors.As(err, &uiErr) {
@@ -151,7 +151,7 @@ func IsFatal(err error) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -167,11 +167,11 @@ func ToErrorResponse(err error) ErrorResponse {
 	if err == nil {
 		return ErrorResponse{Error: "unknown error"}
 	}
-	
+
 	response := ErrorResponse{
 		Error: err.Error(),
 	}
-	
+
 	// Add specific error codes
 	switch {
 	case errors.Is(err, ErrTransportNotFound):
@@ -187,7 +187,7 @@ func ToErrorResponse(err error) ErrorResponse {
 	case errors.Is(err, ErrInvalidConfig):
 		response.Code = "INVALID_CONFIG"
 	}
-	
+
 	// Add metadata if it's a UIError
 	var uiErr *UIError
 	if errors.As(err, &uiErr) && uiErr.Metadata != nil {
@@ -195,6 +195,6 @@ func ToErrorResponse(err error) ErrorResponse {
 			response.Details = details
 		}
 	}
-	
+
 	return response
 }

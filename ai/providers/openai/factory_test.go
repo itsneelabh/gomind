@@ -38,7 +38,7 @@ func TestFactory_Priority(t *testing.T) {
 
 func TestFactory_DetectEnvironment(t *testing.T) {
 	factory := &Factory{}
-	
+
 	tests := []struct {
 		name      string
 		setup     func()
@@ -118,7 +118,7 @@ func TestFactory_DetectEnvironment(t *testing.T) {
 			wantAvail: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear all relevant env vars first
@@ -128,12 +128,12 @@ func TestFactory_DetectEnvironment(t *testing.T) {
 			os.Unsetenv("DEEPSEEK_API_KEY")
 			os.Unsetenv("XAI_API_KEY")
 			os.Unsetenv("QWEN_API_KEY")
-			
+
 			tt.setup()
 			defer tt.cleanup()
-			
+
 			prio, avail := factory.DetectEnvironment()
-			
+
 			if prio != tt.wantPrio {
 				t.Errorf("expected priority %d, got %d", tt.wantPrio, prio)
 			}
@@ -146,7 +146,7 @@ func TestFactory_DetectEnvironment(t *testing.T) {
 
 func TestFactory_Create(t *testing.T) {
 	factory := &Factory{}
-	
+
 	tests := []struct {
 		name   string
 		config *ai.AIConfig
@@ -230,13 +230,13 @@ func TestFactory_Create(t *testing.T) {
 			},
 		},
 		{
-			name: "with API key from environment",
+			name:   "with API key from environment",
 			config: &ai.AIConfig{},
 			verify: func(t *testing.T, c *Client) {
 				// Set env var for this test
 				os.Setenv("OPENAI_API_KEY", "env-key")
 				defer os.Unsetenv("OPENAI_API_KEY")
-				
+
 				// Recreate client to pick up env var
 				newClient := factory.Create(&ai.AIConfig{})
 				if openaiClient, ok := newClient.(*Client); ok {
@@ -247,13 +247,13 @@ func TestFactory_Create(t *testing.T) {
 			},
 		},
 		{
-			name: "with base URL from environment",
+			name:   "with base URL from environment",
 			config: &ai.AIConfig{},
 			verify: func(t *testing.T, c *Client) {
 				// Set env var for this test
 				os.Setenv("OPENAI_BASE_URL", "https://env.api.com/v1")
 				defer os.Unsetenv("OPENAI_BASE_URL")
-				
+
 				// Recreate client to pick up env var
 				newClient := factory.Create(&ai.AIConfig{})
 				if openaiClient, ok := newClient.(*Client); ok {
@@ -264,7 +264,7 @@ func TestFactory_Create(t *testing.T) {
 			},
 		},
 		{
-			name: "default configuration",
+			name:   "default configuration",
 			config: &ai.AIConfig{},
 			verify: func(t *testing.T, c *Client) {
 				if c.DefaultModel != "gpt-3.5-turbo" {
@@ -279,21 +279,21 @@ func TestFactory_Create(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := factory.Create(tt.config)
-			
+
 			if client == nil {
 				t.Fatal("expected non-nil client")
 			}
-			
+
 			// Type assert to access internal fields for verification
 			openaiClient, ok := client.(*Client)
 			if !ok {
 				t.Fatal("expected *Client type")
 			}
-			
+
 			tt.verify(t, openaiClient)
 		})
 	}
@@ -301,31 +301,31 @@ func TestFactory_Create(t *testing.T) {
 
 func TestFactory_CreateWithHeaders(t *testing.T) {
 	factory := &Factory{}
-	
+
 	config := &ai.AIConfig{
 		Headers: map[string]string{
 			"X-Custom-Header": "custom-value",
 			"Authorization":   "Bearer custom-token",
 		},
 	}
-	
+
 	client := factory.Create(config)
-	
+
 	if client == nil {
 		t.Fatal("expected non-nil client")
 	}
-	
+
 	// Verify that custom headers are applied via transport
 	openaiClient, ok := client.(*Client)
 	if !ok {
 		t.Fatal("expected *Client type")
 	}
-	
+
 	// Check that transport was set
 	if openaiClient.HTTPClient.Transport == nil {
 		t.Error("expected custom transport for headers, got nil")
 	}
-	
+
 	// Verify it's a headerTransport
 	if _, ok := openaiClient.HTTPClient.Transport.(*headerTransport); !ok {
 		t.Error("expected headerTransport type")
@@ -337,23 +337,23 @@ func TestHeaderTransport_RoundTrip(t *testing.T) {
 		"X-Custom-Header": "test-value",
 		"X-Another":       "another-value",
 	}
-	
+
 	transport := &headerTransport{
 		headers: headers,
 		base:    &mockRoundTripper{},
 	}
-	
+
 	req, _ := http.NewRequest("GET", "http://test.com", nil)
-	
+
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if resp == nil {
 		t.Fatal("expected non-nil response")
 	}
-	
+
 	// Verify headers were added
 	if req.Header.Get("X-Custom-Header") != "test-value" {
 		t.Errorf("expected header X-Custom-Header='test-value', got %q", req.Header.Get("X-Custom-Header"))

@@ -11,7 +11,7 @@ func TestConfigurationApplication(t *testing.T) {
 	// Register a test provider to verify configuration application
 	testFactory := &testProviderFactory{}
 	_ = Register(testFactory)
-	
+
 	// Test that configuration is properly applied to providers
 	tests := []struct {
 		name   string
@@ -74,7 +74,7 @@ func TestConfigurationApplication(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create config
@@ -85,17 +85,17 @@ func TestConfigurationApplication(t *testing.T) {
 				Temperature: 0.7,
 				MaxTokens:   1000,
 			}
-			
+
 			// Apply options
 			for _, opt := range tt.opts {
 				opt(config)
 			}
-			
+
 			// Verify configuration
 			if !tt.verify(config) {
 				t.Errorf("Configuration not properly applied")
 			}
-			
+
 			// Test that client can be created with configuration
 			client, err := NewClient(tt.opts...)
 			if err != nil {
@@ -107,7 +107,6 @@ func TestConfigurationApplication(t *testing.T) {
 		})
 	}
 }
-
 
 // testProviderFactory is a mock implementation for testing
 type testProviderFactory struct {

@@ -68,27 +68,27 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	c.CallCount++
 	c.LastPrompt = prompt
 	c.LastOptions = options
-	
+
 	// Check for context cancellation
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
-	
+
 	// Return configured error if set
 	if c.Error != nil {
 		return nil, c.Error
 	}
-	
+
 	// Return next response from list
 	if c.ResponseIndex >= len(c.Responses) {
 		return nil, errors.New("no more mock responses")
 	}
-	
+
 	response := c.Responses[c.ResponseIndex]
 	c.ResponseIndex++
-	
+
 	// Use options if provided, otherwise use defaults
 	model := "mock-model"
 	if options != nil && options.Model != "" {
@@ -96,7 +96,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	} else if c.Config != nil && c.Config.Model != "" {
 		model = c.Config.Model
 	}
-	
+
 	return &core.AIResponse{
 		Content: response,
 		Model:   model,

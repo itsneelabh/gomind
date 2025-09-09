@@ -40,7 +40,7 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 			apiKey = os.Getenv("GOOGLE_API_KEY")
 		}
 	}
-	
+
 	// Use base URL from config or environment, with default
 	baseURL := config.BaseURL
 	if baseURL == "" {
@@ -49,38 +49,38 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 			baseURL = DefaultBaseURL
 		}
 	}
-	
+
 	// Create logger (nil will use NoOpLogger)
 	var logger core.Logger
-	
+
 	// Create the client with full configuration
 	client := NewClient(apiKey, baseURL, logger)
-	
+
 	// Apply timeout if specified
 	if config.Timeout > 0 {
 		client.BaseClient.HTTPClient.Timeout = config.Timeout
 	}
-	
+
 	// Apply retry configuration
 	if config.MaxRetries > 0 {
 		client.BaseClient.MaxRetries = config.MaxRetries
 	}
-	
+
 	// Apply model defaults
 	if config.Model != "" {
 		client.BaseClient.DefaultModel = config.Model
 	}
-	
+
 	// Apply temperature default
 	if config.Temperature > 0 {
 		client.BaseClient.DefaultTemperature = config.Temperature
 	}
-	
+
 	// Apply max tokens default
 	if config.MaxTokens > 0 {
 		client.BaseClient.DefaultMaxTokens = config.MaxTokens
 	}
-	
+
 	return client
 }
 
