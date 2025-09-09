@@ -148,16 +148,24 @@ func (t *InterfaceBasedCircuitBreakerTransport) CreateHandler(agent ChatAgent) h
 					"message": "Circuit breaker is open due to recent failures",
 					"retry":   "Please try again later",
 				}
-				json.NewEncoder(w).Encode(response)
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					// Response partially written, log the error
+					// Can't return error to client at this point
+					fmt.Printf("Failed to encode circuit breaker response: %v\n", err)
+				}
 				return
 			}
 
 			// For other errors, return internal server error
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]string{
+			if err := json.NewEncoder(w).Encode(map[string]string{
 				"error": "Internal server error",
-			})
+			}); err != nil {
+				// Response partially written, log the error
+				// Can't return error to client at this point
+				fmt.Printf("Failed to encode error response: %v\n", err)
+			}
 		}
 	})
 }

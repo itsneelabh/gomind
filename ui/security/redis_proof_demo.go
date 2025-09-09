@@ -36,7 +36,9 @@
 //
 // Usage:
 // This demo can be run standalone to validate Redis integration:
-//   go run -tags security redis_proof_demo.go
+//
+//	go run -tags security redis_proof_demo.go
+//
 // Or called from tests to ensure Redis rate limiting works correctly.
 //
 // Requirements:

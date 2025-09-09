@@ -414,12 +414,13 @@ func (b *BaseAgent) Start(port int) error {
 	handler = RecoveryMiddleware(b.Logger)(handler)
 
 	b.server = &http.Server{
-		Addr:           addr,
-		Handler:        handler,
-		ReadTimeout:    b.Config.HTTP.ReadTimeout,
-		WriteTimeout:   b.Config.HTTP.WriteTimeout,
-		IdleTimeout:    b.Config.HTTP.IdleTimeout,
-		MaxHeaderBytes: b.Config.HTTP.MaxHeaderBytes,
+		Addr:              addr,
+		Handler:           handler,
+		ReadTimeout:       b.Config.HTTP.ReadTimeout,
+		ReadHeaderTimeout: b.Config.HTTP.ReadHeaderTimeout,
+		WriteTimeout:      b.Config.HTTP.WriteTimeout,
+		IdleTimeout:       b.Config.HTTP.IdleTimeout,
+		MaxHeaderBytes:    b.Config.HTTP.MaxHeaderBytes,
 	}
 
 	// Mark server as started (before actually starting to prevent race conditions)

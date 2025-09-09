@@ -69,6 +69,7 @@ type Config struct {
 // All timeout values use time.Duration for flexibility.
 type HTTPConfig struct {
 	ReadTimeout       time.Duration `json:"read_timeout" env:"GOMIND_HTTP_READ_TIMEOUT" default:"30s"`
+	ReadHeaderTimeout time.Duration `json:"read_header_timeout" env:"GOMIND_HTTP_READ_HEADER_TIMEOUT" default:"10s"`
 	WriteTimeout      time.Duration `json:"write_timeout" env:"GOMIND_HTTP_WRITE_TIMEOUT" default:"30s"`
 	IdleTimeout       time.Duration `json:"idle_timeout" env:"GOMIND_HTTP_IDLE_TIMEOUT" default:"120s"`
 	MaxHeaderBytes    int           `json:"max_header_bytes" env:"GOMIND_HTTP_MAX_HEADER_BYTES" default:"1048576"`
@@ -255,6 +256,7 @@ func DefaultConfig() *Config {
 		Namespace: "default",
 		HTTP: HTTPConfig{
 			ReadTimeout:       30 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
 			WriteTimeout:      30 * time.Second,
 			IdleTimeout:       120 * time.Second,
 			MaxHeaderBytes:    1 << 20, // 1MB

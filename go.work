@@ -2,10 +2,10 @@ go 1.25
 
 use (
 	.
-	./core
 	./ai
-	./telemetry
+	./core
 	./orchestration
 	./resilience
+	./telemetry
 	./ui
 )

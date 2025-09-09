@@ -312,7 +312,12 @@ func (c *DefaultChatAgent) HandleHealth(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(health)
+	if err := json.NewEncoder(w).Encode(health); err != nil {
+		// Response partially written, log the error
+		c.BaseAgent.Logger.Error("Failed to encode health response", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
 }
 
 // CreateSession creates a new chat session
@@ -643,10 +648,21 @@ func (c *DefaultChatAgent) Start(port int) error {
 	mux.HandleFunc("/chat/transports", c.HandleTransportDiscovery)
 	mux.HandleFunc("/chat/health", c.HandleHealth)
 
-	// Create server
+	// Create server with proper timeouts from BaseAgent config
+	// Use default config if BaseAgent.Config is nil
+	config := c.BaseAgent.Config
+	if config == nil {
+		config = core.DefaultConfig()
+	}
+	
 	c.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           mux,
+		ReadTimeout:       config.HTTP.ReadTimeout,
+		ReadHeaderTimeout: config.HTTP.ReadHeaderTimeout,
+		WriteTimeout:      config.HTTP.WriteTimeout,
+		IdleTimeout:       config.HTTP.IdleTimeout,
+		MaxHeaderBytes:    config.HTTP.MaxHeaderBytes,
 	}
 
 	// Start server
