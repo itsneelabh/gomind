@@ -15,7 +15,18 @@ import (
 // Agent interface - agents have full discovery capabilities
 type Agent interface {
 	Component
+	Start(ctx context.Context, port int) error
+	RegisterCapability(cap Capability)
 	Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error)
+}
+
+// HTTPComponent represents a component that can be run with HTTP server.
+// Both Tools and Agents implement this interface, allowing the Framework
+// to work with both types of components uniformly.
+type HTTPComponent interface {
+	Component
+	Start(ctx context.Context, port int) error
+	RegisterCapability(cap Capability)
 }
 
 // Capability represents a capability that an agent provides
@@ -134,8 +145,8 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 		}
 	}
 
-	// Register with discovery if available
-	if b.Discovery != nil && b.Config.Discovery.Enabled {
+	// Register with discovery if available (regardless of how Discovery was set)
+	if b.Discovery != nil {
 		capabilities := make([]string, len(b.Capabilities))
 		for i, cap := range b.Capabilities {
 			capabilities[i] = cap.Name
@@ -164,6 +175,15 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 				"agent_name": b.Name,
 			})
 			// Continue anyway - graceful degradation
+		} else {
+			// Start heartbeat to keep registration alive (Redis-specific)
+			if redisDiscovery, ok := b.Discovery.(*RedisDiscovery); ok {
+				redisDiscovery.StartHeartbeat(ctx, b.ID)
+				b.Logger.Debug("Started heartbeat for agent registration", map[string]interface{}{
+					"agent_id": b.ID,
+					"ttl":      redisDiscovery.ttl,
+				})
+			}
 		}
 	}
 
@@ -340,7 +360,7 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 }
 
 // Start starts the HTTP server for the agent
-func (b *BaseAgent) Start(port int) error {
+func (b *BaseAgent) Start(ctx context.Context, port int) error {
 	b.mu.Lock()
 
 	// Check if already started
@@ -349,8 +369,16 @@ func (b *BaseAgent) Start(port int) error {
 		return fmt.Errorf("server already started")
 	}
 
-	if b.Config != nil && b.Config.Port != 0 {
+	// Apply configuration precedence: explicit parameter > config > default
+	// Only use Config.Port if no explicit port provided (port < 0)
+	if port < 0 && b.Config != nil && b.Config.Port >= 0 {
 		port = b.Config.Port
+	}
+
+	// Validate port range (0 is allowed for automatic assignment)
+	if port < 0 || port > 65535 {
+		b.mu.Unlock()
+		return fmt.Errorf("invalid port %d: must be between 0-65535 (0 for automatic assignment)", port)
 	}
 
 	addr := fmt.Sprintf("%s:%d", b.Config.Address, port)
@@ -500,22 +528,30 @@ func RecoveryMiddleware(logger Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// Framework provides a simple way to run agents
+// Framework provides a simple way to run components (both Tools and Agents)
 type Framework struct {
-	agent  Agent
-	config *Config
+	component HTTPComponent
+	config    *Config
 }
 
-// NewFramework creates a new framework instance with options
-func NewFramework(agent Agent, opts ...Option) (*Framework, error) {
+// NewFramework creates a new framework instance with options.
+// It accepts any HTTPComponent (Tool or Agent) and provides uniform initialization and execution.
+func NewFramework(component HTTPComponent, opts ...Option) (*Framework, error) {
 	// Create configuration with options
 	config, err := NewConfig(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
 
-	// If agent is a BaseAgent, update its config
-	if base, ok := agent.(*BaseAgent); ok {
+	// Update config for BaseAgent or BaseTool
+	switch base := component.(type) {
+	case *BaseAgent:
+		base.Config = config
+		base.Name = config.Name
+		if config.ID != "" {
+			base.ID = config.ID
+		}
+	case *BaseTool:
 		base.Config = config
 		base.Name = config.Name
 		if config.ID != "" {
@@ -524,24 +560,18 @@ func NewFramework(agent Agent, opts ...Option) (*Framework, error) {
 	}
 
 	return &Framework{
-		agent:  agent,
-		config: config,
+		component: component,
+		config:    config,
 	}, nil
 }
 
-// Run initializes and starts the agent
+// Run initializes and starts the component (Tool or Agent)
 func (f *Framework) Run(ctx context.Context) error {
-	// Initialize agent
-	if err := f.agent.Initialize(ctx); err != nil {
-		return fmt.Errorf("failed to initialize agent: %w", err)
+	// Initialize component
+	if err := f.component.Initialize(ctx); err != nil {
+		return fmt.Errorf("failed to initialize component: %w", err)
 	}
 
-	// Start HTTP server if BaseAgent
-	if base, ok := f.agent.(*BaseAgent); ok {
-		return base.Start(f.config.Port)
-	}
-
-	// For custom agents, they need to implement their own server
-	<-ctx.Done()
-	return ctx.Err()
+	// Start HTTP server
+	return f.component.Start(ctx, f.config.Port)
 }

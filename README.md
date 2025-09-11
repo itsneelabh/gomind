@@ -5,6 +5,129 @@
 
 A modular framework for building AI agents in Go with production-grade resilience, observability, and orchestration capabilities built-in from the start.
 
+## What Makes GoMind Unique: Beyond Traditional Agent Frameworks
+
+While popular frameworks like LangChain, CrewAI, and AutoGen focus on orchestrating predefined agent workflows, GoMind provides something fundamentally different: **infrastructure for autonomous agent networks that can discover, communicate, and collaborate without centralized orchestration**.
+
+### The Key Differentiator: From Orchestrated Workflows to Autonomous Networks
+
+**Traditional Frameworks (LangChain, CrewAI, AutoGen):**
+- Agents require predefined orchestration patterns (supervisor, hierarchical, sequential)
+- Communication flows must be explicitly programmed
+- Agents are tightly coupled to their orchestration logic
+- Adding new agents requires updating the orchestration code
+
+**GoMind's Approach:**
+- Agents autonomously discover and communicate with each other
+- No predefined orchestration required - agents form dynamic collaboration networks
+- New agents can join the network and immediately become discoverable
+- Communication patterns emerge from agent capabilities, not hardcoded flows
+
+### Architectural Innovation: Compile-Time Enforcement
+
+GoMind uniquely enforces architectural boundaries at compile time through Go interfaces:
+
+```go
+// Tools can ONLY register themselves (passive components)
+type Registry interface {
+    Register(ctx context.Context, info *ServiceInfo) error
+    // No discovery methods - tools cannot find other components
+}
+
+// Agents can BOTH register AND discover (active orchestrators)
+type Discovery interface {
+    Registry  // Inherits registration capability
+    Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error)
+    FindByCapability(ctx context.Context, capability string) ([]*ServiceInfo, error)
+}
+```
+
+This isn't just a convention - it's enforced by the type system. Tools literally cannot access discovery methods, preventing architectural violations before your code even runs.
+
+### Production-First DNA
+
+Unlike frameworks that evolved from notebooks and experiments, GoMind was architected from day one for production deployment:
+
+| Aspect | GoMind | Traditional Frameworks |
+|--------|--------|----------------------|
+| **Container Size** | 15MB (verified) | 200-900MB (Python + deps) |
+| **Memory per Agent** | 10-50MB | 100-500MB |
+| **Startup Time** | <1 second | 5-30 seconds |
+| **Concurrent Agents** | 1000s (goroutines) | 10s-100s (GIL/processes) |
+| **Health Checks** | Built-in from start | Added via extensions |
+| **Circuit Breakers** | Native support | External libraries needed |
+| **Service Discovery** | Redis-based, automatic | Manual configuration |
+
+### Real-World Example: The Power of Autonomous Discovery
+
+Consider building a data analysis system. Here's how it differs:
+
+**Traditional Approach (Hardcoded Orchestration):**
+```python
+# You must explicitly wire every connection
+orchestrator = Orchestrator()
+orchestrator.add_agent("data_fetcher", DataFetcherAgent())
+orchestrator.add_agent("analyzer", AnalyzerAgent())
+orchestrator.add_agent("reporter", ReporterAgent())
+orchestrator.define_flow([
+    ("data_fetcher", "analyzer"),
+    ("analyzer", "reporter")
+])
+```
+
+**GoMind Approach (Autonomous Discovery):**
+```go
+// Agents discover each other by capabilities
+// Start a new analyzer agent - it automatically becomes discoverable
+analyzer := NewAnalyzerAgent()
+analyzer.AddCapability(core.Capability{Name: "analyze_data"})
+analyzer.Start(8080)  // That's it!
+
+// Any agent can now find and use it
+dataAgents, _ := discovery.FindByCapability(ctx, "analyze_data")
+// Returns all agents capable of analyzing data, even ones added after startup
+```
+
+When you add a new specialized analyzer later, existing agents automatically discover and can use it - no orchestration updates needed.
+
+### Dual-Mode Orchestration: Choose Your Approach
+
+While GoMind's strength is autonomous agent networks, it **also provides traditional workflow-based orchestration** for scenarios requiring explicit control. You can choose the right approach for each use case:
+
+**Workflow-Based (Explicit Control):**
+```yaml
+# Define deterministic workflows in YAML
+name: data-pipeline
+steps:
+  - name: fetch
+    agent: data-fetcher
+    action: get_data
+  - name: analyze
+    agent: analyzer
+    action: process
+    depends_on: [fetch]
+  - name: report
+    agent: reporter
+    action: generate
+    depends_on: [analyze]
+```
+
+**Autonomous (Dynamic Flexibility):**
+```go
+// Let AI orchestrate agents based on natural language
+orchestrator.ProcessRequest(ctx, 
+    "Fetch sales data, analyze trends, and generate a report",
+    nil,  // AI determines the execution plan dynamically
+)
+```
+
+**Choosing Your Approach:**
+- **Use Workflows** for: Regulated processes, audit requirements, deterministic execution
+- **Use Autonomous** for: Exploratory tasks, dynamic scenarios, natural language interfaces
+- **Deploy Both** in your system: Different services can use different orchestration modes
+
+Both orchestration modes leverage the same underlying agent discovery infrastructure, ensuring your agents work seamlessly regardless of how they're orchestrated.
+
 ## Why GoMind? The Evolution Towards Production AI Agents
 
 ### 1. Intelligent Agents and Tools Are the Future of AI Architecture
