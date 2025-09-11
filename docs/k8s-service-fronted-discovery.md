@@ -28,71 +28,58 @@ This document specifies how discovery works when each agent is deployed as a Kub
 
 ### Configuration (minimal)
 Required:
-- AGENT_NAME
+- GOMIND_AGENT_NAME
 - REDIS_URL (e.g., redis://redis-service:6379)
 
 Optional (defaults in parentheses):
-- AGENT_SERVICE_NAME (defaults to AGENT_NAME)
-- SERVICE_PORT (8080)
-- DISCOVERY_REGISTRATION_SCOPE (service)
-- DISCOVERY_STRICT_STARTUP (false)
-- DISCOVERY_CACHE_PERSIST_ENABLED (false)
+- GOMIND_K8S_SERVICE_NAME (defaults to GOMIND_AGENT_NAME)
+- GOMIND_K8S_SERVICE_PORT (80)
+- GOMIND_DISCOVERY_CACHE (true, local caching enabled)
+- GOMIND_DISCOVERY_ENABLED (auto-enabled in Kubernetes)
+- GOMIND_PORT (8080, container port)
 
-### Redis key model
-- Service scope (recommended, lock-free):
-  - agents:<agent_name> → JSON AgentRegistration {Name, Address: "http://<AGENT_SERVICE_NAME>:<SERVICE_PORT>", Port, Capabilities, Status, KubernetesMetadata}
-  - capabilities:<capability_name> → Set of agent names that provide it
-  - Note: Any pod may write/refresh these keys; content is identical → last-write-wins is benign.
+### Redis key model (Current Implementation)
+The framework currently implements a standard registration pattern:
+- agents:<agent_id> → JSON AgentRegistration {ID, Name, Address, Port, Capabilities, Status, Metadata}
+- capabilities:<capability_name> → Set of agent IDs providing the capability
+- Heartbeat mechanism: 10-second intervals with 30-second TTL
+- Auto-discovery: Framework detects Kubernetes environment and configures appropriately
 
-- Pod scope:
-  - agents:<agent_id> → JSON AgentRegistration {ID, Name, Address: "<POD_IP>", Port, ...}
-  - capabilities:<capability_name> → Set of agent IDs
+**Note**: Service-scoped registration (single logical entry per agent name) is planned for future releases.
 
-### Lock-free, idempotent service-scoped writes (recommended)
-- Every pod writes the same service-scoped record and SADDs the agent name to capability sets.
-- Heartbeat: any pod may refresh TTLs on agents:<agent_name> and capabilities:<capability> keys.
-- Benefits: no Redis locks or leader election; resilient (as long as one pod is alive, TTLs stay fresh); simple to operate.
-
-Alternative (optional): leader election
-- If stricter write minimization is desired, a Redis lock (agents:<agent_name>:lock) can be used so only one pod refreshes. The rest of the design remains unchanged.
-
-### Discovery and calling flow (service scope)
-1) Caller FindCapability("cap") → returns agent names that provide it.
-2) Caller FindAgent("my-agent") → returns AgentRegistration with Address=http://my-agent:8080.
-3) HTTP traffic goes via the Service and load-balances across ready pods.
+### Discovery and calling flow (current implementation)
+1) Agent.Discover(ctx, DiscoveryFilter{Type: "tool", Capabilities: ["calculate"]}) → returns agent registrations
+2) Framework handles service discovery automatically when WithDiscovery(true, "redis") is used
+3) HTTP traffic uses the discovered agent addresses
 
 ### Autoscaling behavior
-- Scaling replicas up/down does not change registry cardinality in service scope.
-- New pods write idempotently; the registry remains stable.
-- Readiness probes ensure only ready pods receive traffic via the Service.
+- Each pod instance registers individually with unique agent ID
+- Scaling up creates additional registrations; scaling down removes them via TTL expiration
+- Framework provides automatic discovery with local caching for resilience
 
-### Step-by-step (service scope)
-1. Pod starts; framework discovers capabilities.
-2. Pod writes agents:<agent_name> with Address=Service DNS and sets TTL (idempotent).
-3. Pod SADDs agent_name into capabilities:<capability_name> and sets/refreshes TTLs.
-4. Heartbeat loop: any pod refreshes both agent record and capability indices.
-5. Callers query capabilities, resolve the agent name, then call the Service address.
+### Step-by-step (current implementation)
+1. Pod starts; framework detects Kubernetes environment via KUBERNETES_SERVICE_HOST
+2. Framework auto-initializes Registry/Discovery when WithDiscovery(true, "redis") is used
+3. Agent registers with agents:<agent_id> containing Address=PodIP:Port and TTL=30s
+4. Heartbeat loop: agent refreshes registration every 10 seconds
+5. Other agents discover via agent.Discover() and connect directly to pod IPs
 
-### Step-by-step (pod scope)
-1. Each pod registers agents:<agent_id> with Address=POD_IP:PORT and TTL.
-2. Each pod SADDs its agent_id to capabilities:<capability_name> with TTL.
-3. Heartbeat refresh per pod updates its agent record TTL.
-4. Callers query capabilities, select an instance, and call directly.
-
-### Migration strategy
-- Default to service scope in K8s (DISCOVERY_REGISTRATION_SCOPE=service).
-- Keep pod scope for local/dev and advanced routing.
-- The framework can detect scope and return identifiers accordingly (names vs IDs).
+**Planned Features** (not yet implemented):
+- Service-scoped registration for stable endpoints
+- Leader election for reduced Redis writes
+- Advanced cache persistence and circuit breakers
 
 ### Minimal K8s manifest hints
-- Downward API env:
-  - name: KUBERNETES_NAMESPACE; valueFrom: fieldRef: fieldPath: metadata.namespace
-  - name: POD_IP; valueFrom: fieldRef: fieldPath: status.podIP
+- Downward API env (framework auto-detects Kubernetes via KUBERNETES_SERVICE_HOST):
+  - name: GOMIND_K8S_NAMESPACE; valueFrom: fieldRef: fieldPath: metadata.namespace
+  - name: GOMIND_K8S_POD_IP; valueFrom: fieldRef: fieldPath: status.podIP
+  - name: HOSTNAME; valueFrom: fieldRef: fieldPath: metadata.name
 - Service name and port:
-  - name: AGENT_SERVICE_NAME; value: "my-agent"
-  - name: SERVICE_PORT; value: "8080"
-- Scope:
-  - name: DISCOVERY_REGISTRATION_SCOPE; value: "service"
+  - name: GOMIND_K8S_SERVICE_NAME; value: "my-agent"
+  - name: GOMIND_K8S_SERVICE_PORT; value: "8080"
+- Core agent configuration:
+  - name: GOMIND_AGENT_NAME; value: "my-agent"
+  - name: REDIS_URL; value: "redis://redis-service:6379"
 
 ### Notes
 - This design avoids registry churn on HPA events and provides stable discovery endpoints.
@@ -103,19 +90,19 @@ Alternative (optional): leader election
 ## Quick starts
 
 ### Directed agent (default)
-Set:
-- AGENT_NAME, REDIS_URL
+Required:
+- GOMIND_AGENT_NAME, REDIS_URL
 Optional:
-- AGENT_SERVICE_NAME, SERVICE_PORT
+- GOMIND_K8S_SERVICE_NAME, GOMIND_K8S_SERVICE_PORT
 
 Behavior: starts immediately, registers when Redis is up, serves via Service; keeps working using cache if Redis goes down.
 
 ### Autonomous agent (recommended flags)
-Set:
-- AGENT_NAME, REDIS_URL
+Required:
+- GOMIND_AGENT_NAME, REDIS_URL
 Optional:
-- DISCOVERY_STRICT_STARTUP=true (stays NotReady until a catalog exists)
-- DISCOVERY_CACHE_PERSIST_ENABLED=true (boot from last-good snapshot if Redis is down)
+- GOMIND_DISCOVERY_CACHE=true (local caching, enabled by default)
+- GOMIND_DEV_MODE=false (disable development mode for production)
 
 Behavior: gates readiness on having a catalog; once available, routes autonomously via Service.
 
@@ -247,10 +234,10 @@ Probe guidance:
 - LivenessProbe: should not depend on Redis; check process health and internal components only. Keeps pod running during outages.
 - ReadinessProbe: can reflect the chosen policy (strict or non-strict). In strict mode, gate on (redis_ok || snapshot_loaded_not_empty).
 
-Config knobs:
-- DISCOVERY_STRICT_STARTUP=true|false (default: false)
-- DISCOVERY_REQUIRE_SNAPSHOT_AT_STARTUP=true|false (default: false)
-- DISCOVERY_MIN_SNAPSHOT_SIZE=1 (optional, to avoid being ready with an empty snapshot)
+Config knobs (current implementation):
+- GOMIND_DISCOVERY_ENABLED=true (auto-enabled in Kubernetes)
+- GOMIND_DISCOVERY_CACHE=true (local caching enabled by default)
+- GOMIND_DEV_MODE=false (disable development mode for production readiness)
 
 Rationale:
 - K8s best practice favors readiness-gating over liveness failures for external dependencies. This avoids unnecessary restarts and allows fast recovery once Redis returns.
@@ -321,20 +308,23 @@ Behavior:
 
 ### Suggested configuration set (cheat sheet)
 
-- DISCOVERY_REGISTRATION_SCOPE=service
-- AGENT_NAME, AGENT_SERVICE_NAME, SERVICE_PORT
-- DISCOVERY_CACHE_ENABLED=true
-- DISCOVERY_CACHE_REFRESH_INTERVAL=15s
-- DISCOVERY_CACHE_BACKOFF_INITIAL=1s
-- DISCOVERY_CACHE_BACKOFF_MAX=60s
-- DISCOVERY_CACHE_CB_THRESHOLD=5
-- DISCOVERY_CACHE_CB_COOLDOWN=2m
-- DISCOVERY_CACHE_WARN_STALE=10m
-- DISCOVERY_CACHE_PERSIST_ENABLED=true
-- DISCOVERY_CACHE_PERSIST_PATH=/data/discovery_snapshot.json
-- DISCOVERY_STRICT_STARTUP=true (for autonomous agents)
-- DISCOVERY_REQUIRE_SNAPSHOT_AT_STARTUP=true (strict readiness until data available)
-- CATALOG_URL=https://catalog-service.svc/agents (optional)
-- K8S_FALLBACK_ENABLED=true (optional)
-- SEED_SERVICES=analysis-agent:8080,chat-agent:8080 (optional)
-- KNOWN_PEERS=coordinator-agent:8080 (optional)
+**Currently Implemented:**
+- GOMIND_AGENT_NAME=my-agent
+- REDIS_URL=redis://redis-service:6379
+- GOMIND_K8S_SERVICE_NAME=my-agent (optional, defaults to agent name)
+- GOMIND_K8S_SERVICE_PORT=80 (optional, K8s service port)
+- GOMIND_PORT=8080 (container port)
+- GOMIND_DISCOVERY_CACHE=true (enabled by default)
+- GOMIND_DISCOVERY_TTL=30s (registration TTL)
+- GOMIND_DISCOVERY_HEARTBEAT=10s (heartbeat interval)
+- GOMIND_DEV_MODE=false (disable for production)
+
+**Downward API (recommended for K8s):**
+- GOMIND_K8S_NAMESPACE from metadata.namespace
+- GOMIND_K8S_POD_IP from status.podIP
+- HOSTNAME from metadata.name
+
+**Future Features** (not yet implemented):
+- Service-scoped registration options
+- Advanced cache persistence
+- Circuit breaker configuration

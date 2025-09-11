@@ -567,6 +567,68 @@ func (e *errorRegistry) Unregister(ctx context.Context, id string) error {
 	return e.unregisterErr
 }
 
+// TestToolStartBlocks verifies that tool.Start() blocks properly and doesn't return immediately.
+// This test prevents regression to the old non-blocking behavior.
+func TestToolStartBlocks(t *testing.T) {
+	// Create tool with config that doesn't override port
+	config := DefaultConfig()
+	config.Name = "blocking-test-tool"
+	config.Port = 0 // Don't override the port parameter
+	tool := NewToolWithConfig(config)
+	
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	
+	// Channel to track when Start() returns
+	startReturned := make(chan bool, 1)
+	startError := make(chan error, 1)
+	
+	// Start the tool in a goroutine
+	go func() {
+		err := tool.Start(ctx, 0) // Use port 0 for automatic assignment
+		startError <- err
+		startReturned <- true
+	}()
+	
+	// Give the server a moment to initialize
+	time.Sleep(50 * time.Millisecond)
+	
+	// Verify that Start() has NOT returned yet (it should be blocking)
+	select {
+	case <-startReturned:
+		t.Fatal("tool.Start() returned immediately - it should block until server stops")
+	default:
+		// Good! Start() is still blocking as expected
+	}
+	
+	// Now shutdown the tool to make Start() return
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer shutdownCancel()
+	
+	err := tool.Shutdown(shutdownCtx)
+	if err != nil {
+		t.Fatalf("Shutdown() failed: %v", err)
+	}
+	
+	// Now Start() should return
+	select {
+	case err := <-startError:
+		if err != nil && err != http.ErrServerClosed {
+			t.Errorf("Start() returned unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start() did not return after shutdown")
+	}
+	
+	// Verify Start() actually returned
+	select {
+	case <-startReturned:
+		// Good! Start() returned after shutdown
+	case <-time.After(1 * time.Second):
+		t.Fatal("Start() notification not received")
+	}
+}
+
 // BenchmarkToolCreation benchmarks tool creation
 func BenchmarkToolCreation(b *testing.B) {
 	for i := 0; i < b.N; i++ {

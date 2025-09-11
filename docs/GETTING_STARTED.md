@@ -34,6 +34,7 @@ Create `main.go`:
 package main
 
 import (
+    "context"
     "log"
     "github.com/itsneelabh/gomind/core"
 )
@@ -48,9 +49,20 @@ func main() {
         Description: "Says hello",
     })
     
-    // 3. Run it
+    // 3. Use framework for automatic setup
+    framework, err := core.NewFramework(agent,
+        core.WithPort(8080),
+        core.WithDiscovery(true, "redis"),
+        core.WithRedisURL("redis://localhost:6379"),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 4. Run it (framework handles initialization and discovery automatically)
     log.Printf("Starting agent on :8080")
-    if err := agent.Start(8080); err != nil {
+    ctx := context.Background()
+    if err := framework.Run(ctx); err != nil {
         log.Fatal(err)
     }
 }
@@ -105,15 +117,6 @@ func main() {
     // Create calculator agent
     agent := core.NewBaseAgent("calculator")
     
-    // Connect to agent discovery registry (optional but recommended)
-    discovery, err := core.NewRedisDiscovery("redis://localhost:6379")
-    if err != nil {
-        log.Printf("Warning: No discovery registry, agent running standalone")
-    } else {
-        agent.Discovery = discovery
-        log.Printf("Agent registered in discovery registry")
-    }
-    
     // Register this agent's capabilities
     agent.RegisterCapability(core.Capability{
         Name:        "add",
@@ -126,7 +129,6 @@ func main() {
     })
     
     // Add custom HTTP handler for calculations
-    // Note: We should ideally register this with the agent's handler
     agent.RegisterCapability(core.Capability{
         Name:        "calculate",
         Description: "Performs calculations",
@@ -134,9 +136,20 @@ func main() {
         Handler:     handleCalculate,
     })
     
-    // Start agent
+    // Use framework for automatic discovery setup
+    framework, err := core.NewFramework(agent,
+        core.WithPort(8080),
+        core.WithDiscovery(true, "redis"),
+        core.WithRedisURL("redis://localhost:6379"),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Start agent (framework auto-initializes discovery and starts heartbeat)
     log.Printf("Calculator agent starting on :8080")
-    if err := agent.Start(8080); err != nil {
+    ctx := context.Background()
+    if err := framework.Run(ctx); err != nil {
         log.Fatal(err)
     }
 }
@@ -210,24 +223,14 @@ import (
 
 type Assistant struct {
     *core.BaseAgent
-    discovery core.Discovery
 }
 
 func main() {
-    // Create assistant agent on different port
+    // Create assistant agent
     agent := core.NewBaseAgent("assistant")
-    agent.Config.Port = 8081
-    
-    // Setup discovery to find other agents
-    discovery, err := core.NewRedisDiscovery("redis://localhost:6379")
-    if err != nil {
-        log.Fatal("Redis required for multi-agent: ", err)
-    }
-    agent.Discovery = discovery
     
     assistant := &Assistant{
         BaseAgent: agent,
-        discovery: discovery,
     }
     
     // Register this assistant agent's capability
@@ -244,9 +247,20 @@ func main() {
         Handler:     assistant.handleSolve,
     })
     
-    // Start on configured port
-    log.Printf("Assistant starting on :%d", config.Port)
-    if err := agent.Start(config.Port); err != nil {
+    // Use framework for automatic discovery setup
+    framework, err := core.NewFramework(agent,
+        core.WithPort(8081),
+        core.WithDiscovery(true, "redis"),
+        core.WithRedisURL("redis://localhost:6379"),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Start assistant (framework auto-initializes discovery)
+    log.Printf("Assistant starting on :8081")
+    ctx := context.Background()
+    if err := framework.Run(ctx); err != nil {
         log.Fatal(err)
     }
 }
@@ -261,9 +275,12 @@ func (a *Assistant) handleSolve(w http.ResponseWriter, r *http.Request) {
         return
     }
     
-    // Find calculator agent
+    // Find calculator agent (using framework-injected discovery)
     ctx := context.Background()
-    agents, err := a.discovery.FindByCapability(ctx, "add")
+    agents, err := a.Discover(ctx, core.DiscoveryFilter{
+        Type: core.ComponentTypeAgent,
+        Capabilities: []string{"add"},
+    })
     if err != nil || len(agents) == 0 {
         http.Error(w, "Calculator not available", http.StatusServiceUnavailable)
         return
@@ -473,15 +490,26 @@ spec:
 
 ## Common Agent Patterns
 
-### Pattern 1: Agent Discovery
+### Pattern 1: Agent Discovery with Framework
 
 ```go
-// Register your agent
-discovery, _ := core.NewRedisDiscovery("redis://localhost:6379")
-agent.Discovery = discovery
+// Create agent with framework for automatic discovery setup
+agent := core.NewBaseAgent("discovery-agent")
 
-// Find other agents
-services, _ := discovery.FindByCapability(ctx, "calculate")
+framework, _ := core.NewFramework(agent,
+    core.WithPort(8080),
+    core.WithDiscovery(true, "redis"),
+    core.WithRedisURL("redis://localhost:6379"),
+)
+
+// Start framework (auto-initializes Discovery)
+go framework.Run(context.Background())
+
+// Find other agents (Discovery is automatically available)
+services, _ := agent.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeAgent,
+    Capabilities: []string{"calculate"},
+})
 for _, service := range services {
     fmt.Printf("Found: %s at %s:%d\n", service.Name, service.Address, service.Port)
 }
@@ -499,34 +527,59 @@ import (
 func main() {
     agent := core.NewBaseAgent("my-agent")
     
-    // Handle agent shutdown gracefully
+    // Use framework for proper lifecycle management
+    framework, err := core.NewFramework(agent,
+        core.WithPort(8080),
+        core.WithDiscovery(true, "redis"),
+        core.WithRedisURL("redis://localhost:6379"),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Handle graceful shutdown
+    ctx, cancel := context.WithCancel(context.Background())
     sigChan := make(chan os.Signal, 1)
     signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
     
     go func() {
         <-sigChan
         log.Println("Agent shutting down gracefully...")
-        agent.Stop(context.Background())
+        cancel() // This stops the framework
         os.Exit(0)
     }()
     
-    agent.Start(8080)
+    // Framework handles initialization and starts with context
+    framework.Run(ctx)
 }
 ```
 
 ### Pattern 3: Inter-Agent Error Handling
 
 ```go
-// Always check agent discovery registry
-discovery, err := core.NewRedisDiscovery(redisURL)
+// Framework handles discovery setup gracefully
+agent := core.NewBaseAgent("resilient-agent")
+
+// Use development mode for mock discovery fallback
+framework, err := core.NewFramework(agent,
+    core.WithPort(8080),
+    core.WithDiscovery(true, "redis"),
+    core.WithRedisURL(redisURL),
+    core.WithDevelopmentMode(true), // Falls back to mock if Redis unavailable
+)
 if err != nil {
-    log.Printf("Agent discovery not available: %v", err)
-    // Agent can run standalone or use mock discovery
-    discovery = core.NewMockDiscovery()
+    log.Printf("Framework setup failed: %v", err)
+    return err
 }
 
-// Check if required agents are available
-agents, err := discovery.FindByCapability(ctx, "capability")
+// Start framework (handles Redis connection and fallback automatically)
+go framework.Run(context.Background())
+
+// Check if required agents are available (Discovery auto-initialized)
+agents, err := agent.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeAgent,
+    Capabilities: []string{"capability"},
+})
 if err != nil {
     return fmt.Errorf("agent discovery failed: %w", err)
 }
@@ -669,26 +722,41 @@ agent.RegisterCapability(core.Capability{
 })
 ```
 
-### Agent Discovery Registry
+### Agent Discovery with Framework
 ```go
-// Register this agent in the discovery registry
-discovery, _ := core.NewRedisDiscovery("redis://localhost:6379")
-agent.Discovery = discovery
+// Framework automatically handles discovery setup
+agent := core.NewBaseAgent("my-agent")
 
+framework, _ := core.NewFramework(agent,
+    core.WithPort(8080),
+    core.WithDiscovery(true, "redis"),
+    core.WithRedisURL("redis://localhost:6379"),
+)
+
+// After framework.Run(), agent.Discovery is automatically initialized!
 // Discover other agents by their capabilities
-agents, _ := discovery.FindByCapability(ctx, "calculate")
-for _, agent := range agents {
-    fmt.Printf("Found %s agent at %s:%d\n", agent.Name, agent.Address, agent.Port)
+agents, _ := agent.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeAgent,
+    Capabilities: []string{"calculate"},
+})
+for _, discoveredAgent := range agents {
+    fmt.Printf("Found %s agent at %s:%d\n", discoveredAgent.Name, discoveredAgent.Address, discoveredAgent.Port)
 }
 ```
 
-### Starting Your Agent
+### Starting Your Agent with Framework
 ```go
-// Initialize agent (registers with discovery)
-agent.Initialize(ctx)
+// Create agent and framework
+agent := core.NewBaseAgent("my-agent")
+framework, _ := core.NewFramework(agent,
+    core.WithPort(8080),
+    core.WithDiscovery(true, "redis"),
+    core.WithRedisURL("redis://localhost:6379"),
+)
 
-// Start the agent's HTTP server
-agent.Start(port)  // Blocks until shutdown
+// Framework handles initialization, registration, heartbeat, and HTTP server
+ctx := context.Background()
+framework.Run(ctx)  // Blocks until shutdown
 ```
 
 ## Next Steps

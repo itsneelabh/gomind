@@ -812,7 +812,7 @@ func WithRedisURL(url string) Option {
 
 // WithDiscovery enables or disables service discovery with the specified provider.
 // Currently supported providers:
-//   - "redis": Redis-based discovery (requires WithRedisURL)
+//   - "redis": Redis-based discovery (auto-configures RedisURL from environment or defaults to localhost)
 //   - "mock": In-memory mock for testing
 //
 // When disabled, the agent runs in standalone mode without discovery.
@@ -820,6 +820,46 @@ func WithDiscovery(enabled bool, provider string) Option {
 	return func(c *Config) error {
 		c.Discovery.Enabled = enabled
 		c.Discovery.Provider = provider
+		
+		// Auto-configure Redis URL for Redis provider
+		if enabled && provider == "redis" {
+			// Check if RedisURL was explicitly set by user configuration
+			// We can distinguish this from LoadFromEnv by checking if it's not one of the common env values
+			currentURL := c.Discovery.RedisURL
+			wasExplicitlySet := currentURL != "" && 
+				currentURL != os.Getenv("REDIS_URL") && 
+				currentURL != os.Getenv("GOMIND_REDIS_URL")
+			
+			if !wasExplicitlySet {
+				// Apply proper precedence: REDIS_URL takes precedence over GOMIND_REDIS_URL
+				redisURL := os.Getenv("REDIS_URL")
+				if redisURL != "" {
+					c.Discovery.RedisURL = redisURL
+				} else if gomindRedisURL := os.Getenv("GOMIND_REDIS_URL"); gomindRedisURL != "" {
+					c.Discovery.RedisURL = gomindRedisURL
+				} else if currentURL == "" {
+					// Use sensible default for development only if no URL was set
+					c.Discovery.RedisURL = "redis://localhost:6379"
+				}
+			}
+		} else if !enabled || provider != "redis" {
+			// Clear RedisURL if discovery is disabled or non-Redis provider
+			c.Discovery.RedisURL = ""
+		}
+		return nil
+	}
+}
+
+// WithRedisDiscovery is a convenience function that configures Redis-based discovery
+// with the specified Redis URL. This is equivalent to calling:
+//   WithDiscovery(true, "redis") + WithRedisURL(redisURL)
+// but more explicit and convenient for Redis-specific setups.
+func WithRedisDiscovery(redisURL string) Option {
+	return func(c *Config) error {
+		c.Discovery.Enabled = true
+		c.Discovery.Provider = "redis"
+		c.Discovery.RedisURL = redisURL
+		c.Memory.RedisURL = redisURL // Also use for memory if not already set
 		return nil
 	}
 }

@@ -400,9 +400,9 @@ spec:
         env:
         - name: REDIS_URL
           value: "redis://redis.default.svc.cluster.local:6379"
-        - name: OTEL_ENDPOINT
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: "http://otel-collector.observability:4317"
-        - name: NAMESPACE
+        - name: GOMIND_K8S_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace

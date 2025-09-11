@@ -78,7 +78,7 @@ func TestHandleFuncAfterStart(t *testing.T) {
 
 	// Start server in background
 	go func() {
-		_ = agent.Start(0) // Use port 0 for random port
+		_ = agent.Start(context.Background(), 8092) // Use a specific port
 	}()
 
 	// Give server time to start
