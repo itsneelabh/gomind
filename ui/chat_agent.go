@@ -627,7 +627,7 @@ func (c *DefaultChatAgent) Initialize(ctx context.Context) error {
 }
 
 // Start starts the HTTP server on the specified port
-func (c *DefaultChatAgent) Start(port int) error {
+func (c *DefaultChatAgent) Start(ctx context.Context, port int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -664,6 +664,9 @@ func (c *DefaultChatAgent) Start(port int) error {
 		IdleTimeout:       config.HTTP.IdleTimeout,
 		MaxHeaderBytes:    config.HTTP.MaxHeaderBytes,
 	}
+
+	// Start background health monitoring
+	c.startHealthMonitoring(ctx)
 
 	// Start server
 	return c.server.ListenAndServe()

@@ -71,28 +71,72 @@ type RedisClientOptions struct {
 
 // NewRedisClient creates a new Redis client with specified options
 func NewRedisClient(opts RedisClientOptions) (*RedisClient, error) {
+	if opts.Logger != nil {
+		opts.Logger.Debug("Initializing Redis client", map[string]interface{}{
+			"redis_url": opts.RedisURL,
+			"db":        opts.DB,
+			"namespace": opts.Namespace,
+		})
+	}
+
 	if opts.RedisURL == "" {
+		if opts.Logger != nil {
+			opts.Logger.Error("Failed to initialize Redis client", map[string]interface{}{
+				"error":      "Redis URL is required",
+				"error_type": "ErrInvalidConfiguration",
+			})
+		}
 		return nil, fmt.Errorf("Redis URL is required: %w", ErrInvalidConfiguration)
 	}
 
 	// Parse Redis URL
 	redisOpt, err := redis.ParseURL(opts.RedisURL)
 	if err != nil {
+		if opts.Logger != nil {
+			opts.Logger.Error("Failed to parse Redis URL", map[string]interface{}{
+				"error":      err,
+				"error_type": fmt.Sprintf("%T", err),
+				"redis_url":  opts.RedisURL,
+			})
+		}
 		return nil, fmt.Errorf("invalid Redis URL: %w", ErrInvalidConfiguration)
 	}
 
 	// Override DB for isolation
 	if opts.DB >= 0 && opts.DB <= 15 {
 		redisOpt.DB = opts.DB
+		if opts.Logger != nil {
+			opts.Logger.Debug("Using Redis DB isolation", map[string]interface{}{
+				"db":      opts.DB,
+				"db_name": GetRedisDBName(opts.DB),
+			})
+		}
 	}
 
 	client := redis.NewClient(redisOpt)
+
+	if opts.Logger != nil {
+		opts.Logger.Debug("Testing Redis connection", map[string]interface{}{
+			"db":        opts.DB,
+			"namespace": opts.Namespace,
+			"timeout":   "5s",
+		})
+	}
 
 	// Test connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
+		if opts.Logger != nil {
+			opts.Logger.Error("Failed to connect to Redis", map[string]interface{}{
+				"error":      err,
+				"error_type": fmt.Sprintf("%T", err),
+				"db":         opts.DB,
+				"db_name":    GetRedisDBName(opts.DB),
+				"namespace":  opts.Namespace,
+			})
+		}
 		return nil, fmt.Errorf("failed to connect to Redis DB %d: %w", opts.DB, ErrConnectionFailed)
 	}
 
@@ -106,6 +150,7 @@ func NewRedisClient(opts RedisClientOptions) (*RedisClient, error) {
 	if rc.logger != nil {
 		rc.logger.Info("Redis client connected", map[string]interface{}{
 			"db":        opts.DB,
+			"db_name":   GetRedisDBName(opts.DB),
 			"namespace": opts.Namespace,
 		})
 	}
@@ -115,7 +160,25 @@ func NewRedisClient(opts RedisClientOptions) (*RedisClient, error) {
 
 // Close closes the Redis connection
 func (r *RedisClient) Close() error {
-	return r.client.Close()
+	if r.logger != nil {
+		r.logger.Info("Closing Redis client connection", map[string]interface{}{
+			"db":        r.dbID,
+			"db_name":   GetRedisDBName(r.dbID),
+			"namespace": r.namespace,
+		})
+	}
+	
+	err := r.client.Close()
+	if err != nil && r.logger != nil {
+		r.logger.Error("Failed to close Redis client", map[string]interface{}{
+			"error":      err,
+			"error_type": fmt.Sprintf("%T", err),
+			"db":         r.dbID,
+			"namespace":  r.namespace,
+		})
+	}
+	
+	return err
 }
 
 // GetDB returns the DB number being used
@@ -210,7 +273,34 @@ func (r *RedisClient) Pipeline() redis.Pipeliner {
 
 // HealthCheck verifies Redis connectivity
 func (r *RedisClient) HealthCheck(ctx context.Context) error {
-	return r.client.Ping(ctx).Err()
+	if r.logger != nil {
+		r.logger.Debug("Performing Redis health check", map[string]interface{}{
+			"db":        r.dbID,
+			"namespace": r.namespace,
+		})
+	}
+
+	err := r.client.Ping(ctx).Err()
+	if err != nil {
+		if r.logger != nil {
+			r.logger.Error("Redis health check failed", map[string]interface{}{
+				"error":      err,
+				"error_type": fmt.Sprintf("%T", err),
+				"db":         r.dbID,
+				"db_name":    GetRedisDBName(r.dbID),
+				"namespace":  r.namespace,
+			})
+		}
+	} else {
+		if r.logger != nil {
+			r.logger.Debug("Redis health check passed", map[string]interface{}{
+				"db":        r.dbID,
+				"namespace": r.namespace,
+			})
+		}
+	}
+	
+	return err
 }
 
 // --- Standard Redis DB Allocation ---

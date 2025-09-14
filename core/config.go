@@ -63,6 +63,9 @@ type Config struct {
 
 	// Kubernetes specific configuration
 	Kubernetes KubernetesConfig `json:"kubernetes"`
+
+	// Logger instance for configuration operations (excluded from JSON)
+	logger Logger `json:"-"`
 }
 
 // HTTPConfig contains HTTP server configuration including timeouts, limits, and CORS settings.
@@ -386,9 +389,23 @@ func (c *Config) DetectEnvironment() {
 //
 // Returns an error if environment variables contain invalid values.
 func (c *Config) LoadFromEnv() error {
+	if c.logger != nil {
+		c.logger.Debug("Loading configuration from environment variables", map[string]interface{}{
+			"environment_detected": c.Kubernetes.Enabled,
+		})
+	}
+
+	envVarsLoaded := 0
+
 	// Core settings
 	if v := os.Getenv("GOMIND_AGENT_NAME"); v != "" {
 		c.Name = v
+		envVarsLoaded++
+		if c.logger != nil {
+			c.logger.Debug("Loaded agent name from environment", map[string]interface{}{
+				"name": v,
+			})
+		}
 	}
 	if v := os.Getenv("GOMIND_AGENT_ID"); v != "" {
 		c.ID = v
@@ -396,6 +413,13 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			c.Port = port
+			envVarsLoaded++
+		} else if c.logger != nil {
+			c.logger.Warn("Invalid port in environment variable", map[string]interface{}{
+				"GOMIND_PORT": v,
+				"error":       err,
+				"error_type":  fmt.Sprintf("%T", err),
+			})
 		}
 	}
 	if v := os.Getenv("GOMIND_ADDRESS"); v != "" {
@@ -558,6 +582,15 @@ func (c *Config) LoadFromEnv() error {
 		}
 	}
 
+	if c.logger != nil {
+		c.logger.Info("Environment configuration loaded", map[string]interface{}{
+			"env_vars_loaded": envVarsLoaded,
+			"agent_name":      c.Name,
+			"port":            c.Port,
+			"namespace":       c.Namespace,
+		})
+	}
+
 	return nil
 }
 
@@ -578,12 +611,26 @@ func (c *Config) LoadFromEnv() error {
 //	    }
 //	}
 func (c *Config) LoadFromFile(path string) error {
+	if c.logger != nil {
+		c.logger.Info("Loading configuration from file", map[string]interface{}{
+			"file_path": path,
+		})
+	}
+
 	// Clean the path to prevent directory traversal attacks
 	cleanPath := filepath.Clean(path)
 
 	// Verify the file has a safe extension
 	ext := filepath.Ext(cleanPath)
 	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+		if c.logger != nil {
+			c.logger.Error("Unsupported config file extension", map[string]interface{}{
+				"file_path":         path,
+				"clean_path":        cleanPath,
+				"extension":         ext,
+				"supported_formats": []string{".json", ".yaml", ".yml"},
+			})
+		}
 		return fmt.Errorf("unsupported config file extension %s: %w", ext, ErrInvalidConfiguration)
 	}
 
@@ -592,24 +639,90 @@ func (c *Config) LoadFromFile(path string) error {
 		// If relative, resolve it relative to current directory
 		wd, err := os.Getwd()
 		if err != nil {
+			if c.logger != nil {
+				c.logger.Error("Failed to get working directory for relative config path", map[string]interface{}{
+					"error":      err,
+					"error_type": fmt.Sprintf("%T", err),
+					"clean_path": cleanPath,
+				})
+			}
 			return fmt.Errorf("failed to get working directory: %w", err)
 		}
 		cleanPath = filepath.Join(wd, cleanPath)
+		
+		if c.logger != nil {
+			c.logger.Debug("Resolved relative config path", map[string]interface{}{
+				"original_path": path,
+				"resolved_path": cleanPath,
+				"working_dir":   wd,
+			})
+		}
+	}
+
+	if c.logger != nil {
+		c.logger.Debug("Reading configuration file", map[string]interface{}{
+			"file_path": cleanPath,
+			"extension": ext,
+		})
 	}
 
 	// Read the file with the cleaned path
 	data, err := os.ReadFile(filepath.Clean(cleanPath)) // nosec G304 -- path is validated
 	if err != nil {
+		if c.logger != nil {
+			c.logger.Error("Failed to read config file", map[string]interface{}{
+				"error":      err,
+				"error_type": fmt.Sprintf("%T", err),
+				"file_path":  cleanPath,
+			})
+		}
 		return fmt.Errorf("failed to read config file %s: %w", cleanPath, err)
+	}
+
+	if c.logger != nil {
+		c.logger.Debug("Config file read successfully", map[string]interface{}{
+			"file_path": cleanPath,
+			"file_size": len(data),
+		})
 	}
 
 	// Parse based on extension
 	switch ext {
 	case ".json":
+		if c.logger != nil {
+			c.logger.Debug("Parsing JSON configuration file", map[string]interface{}{
+				"file_path": cleanPath,
+			})
+		}
+		
 		if err := json.Unmarshal(data, c); err != nil {
+			if c.logger != nil {
+				c.logger.Error("Failed to parse JSON config file", map[string]interface{}{
+					"error":      err,
+					"error_type": fmt.Sprintf("%T", err),
+					"file_path":  cleanPath,
+					"file_size":  len(data),
+				})
+			}
 			return fmt.Errorf("failed to parse JSON config file: %w", ErrInvalidConfiguration)
 		}
+		
+		if c.logger != nil {
+			c.logger.Info("Configuration file loaded successfully", map[string]interface{}{
+				"file_path": cleanPath,
+				"format":    "JSON",
+				"file_size": len(data),
+			})
+		}
+		
 	case ".yaml", ".yml":
+		if c.logger != nil {
+			c.logger.Error("YAML configuration files not supported", map[string]interface{}{
+				"file_path":         cleanPath,
+				"extension":         ext,
+				"supported_formats": []string{".json"},
+			})
+		}
 		// For YAML support, we'd need to import gopkg.in/yaml.v3
 		// For now, return an error for YAML files
 		return fmt.Errorf("YAML config files not yet supported: %w", ErrInvalidConfiguration)
@@ -1134,6 +1247,23 @@ func WithMockDiscovery(enabled bool) Option {
 		if enabled {
 			c.Discovery.Enabled = true // Enable discovery with mock provider
 		}
+		return nil
+	}
+}
+
+// WithLogger sets a logger for configuration operations.
+// This logger will be used for logging during config loading, parsing, and validation.
+// If not set, configuration operations will be performed silently.
+//
+// Example:
+//
+//	cfg, err := NewConfig(
+//	    WithLogger(myLogger),
+//	    WithName("my-agent"),
+//	)
+func WithLogger(logger Logger) Option {
+	return func(c *Config) error {
+		c.logger = logger
 		return nil
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -287,6 +288,35 @@ func (cb *CircuitBreaker) ExecuteWithTimeout(ctx context.Context, timeout time.D
 	// Execute the function in a goroutine
 	done := make(chan error, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Preserve stack trace for debugging
+				stack := debug.Stack()
+				
+				// Create descriptive error based on panic type
+				var panicErr error
+				switch v := r.(type) {
+				case error:
+					panicErr = fmt.Errorf("panic in circuit breaker: %w\nStack:\n%s", v, stack)
+				case string:
+					panicErr = fmt.Errorf("panic in circuit breaker: %s\nStack:\n%s", v, stack)
+				default:
+					panicErr = fmt.Errorf("panic in circuit breaker: %v (%T)\nStack:\n%s", v, v, stack)
+				}
+				
+				// Log immediately for debugging
+				cb.config.Logger.Error("Circuit breaker caught panic", map[string]interface{}{
+					"name":  cb.config.Name,
+					"panic": fmt.Sprintf("%v", r),
+					"type":  fmt.Sprintf("%T", r),
+				})
+				
+				// Send error through channel - this ensures channel always receives a value
+				done <- panicErr
+			}
+		}()
+		
+		// Execute the function
 		done <- fn()
 	}()
 

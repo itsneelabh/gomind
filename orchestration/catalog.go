@@ -127,7 +127,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 // It calls the agent's /api/capabilities endpoint to get enhanced metadata
 // about what the agent can do, including parameter schemas and examples.
 // If the endpoint is unavailable, it falls back to basic capability names from registration.
-func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.ServiceRegistration) (*AgentInfo, error) {
+func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.ServiceInfo) (*AgentInfo, error) {
 	// Call the agent's /api/capabilities endpoint
 	url := fmt.Sprintf("http://%s:%d/api/capabilities", service.Address, service.Port)
 
@@ -136,21 +136,24 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 		return nil, err
 	}
 
+	var capabilities []EnhancedCapability
+	
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			// Log error but don't fail the operation
-			fmt.Printf("Error closing response body: %v\n", closeErr)
-		}
-	}()
-
-	var capabilities []EnhancedCapability
-	if err := json.NewDecoder(resp.Body).Decode(&capabilities); err != nil {
-		// Fallback to basic capabilities from registration
+		// HTTP call failed, fallback to basic capabilities from registration
 		capabilities = c.convertBasicCapabilities(service.Capabilities)
+	} else {
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				// Log error but don't fail the operation
+				fmt.Printf("Error closing response body: %v\n", closeErr)
+			}
+		}()
+
+		if err := json.NewDecoder(resp.Body).Decode(&capabilities); err != nil {
+			// JSON decode failed, fallback to basic capabilities from registration
+			capabilities = c.convertBasicCapabilities(service.Capabilities)
+		}
 	}
 
 	return &AgentInfo{
@@ -180,30 +183,10 @@ func (c *AgentCatalog) convertBasicCapabilities(caps []core.Capability) []Enhanc
 	return enhanced
 }
 
-// getAllServices gets all services from discovery
-// This is a workaround since core.Discovery doesn't have a GetAll method
-func (c *AgentCatalog) getAllServices(ctx context.Context) ([]*core.ServiceRegistration, error) {
-	// For MVP, we'll use a known list of agent names
-	// In production, this should be enhanced in core.Discovery
-	knownAgents := []string{
-		"orchestrator",
-		"stock-analyzer",
-		"market-data",
-		"news-agent",
-		"portfolio-advisor",
-		"technical-analyst",
-	}
-
-	var allServices []*core.ServiceRegistration
-	for _, name := range knownAgents {
-		services, err := c.discovery.FindService(ctx, name)
-		if err != nil {
-			continue
-		}
-		allServices = append(allServices, services...)
-	}
-
-	return allServices, nil
+// getAllServices gets all services from discovery using the new Discover API
+func (c *AgentCatalog) getAllServices(ctx context.Context) ([]*core.ServiceInfo, error) {
+	// Use the new Discover method with empty filter to get all services
+	return c.discovery.Discover(ctx, core.DiscoveryFilter{})
 }
 
 // GetAgents returns all agents in the catalog
