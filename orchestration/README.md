@@ -191,16 +191,24 @@ discovery := core.NewRedisDiscovery("redis://localhost:6379")
 // Step 2: Set up AI (the brain)
 aiClient := ai.NewOpenAIClient(apiKey)
 
-// Step 3: Create orchestrator (the conductor)
+// Step 3: Create orchestrator with dependencies
+deps := orchestration.OrchestratorDependencies{
+    Discovery: discovery,  // Required: Agent/tool discovery
+    AIClient:  aiClient,   // Required: LLM for routing decisions
+    // Optional dependencies (can be nil):
+    // CircuitBreaker: cb,  // For sophisticated resilience
+    // Logger: logger,      // For structured logging
+    // Telemetry: telemetry,// For observability
+}
+
 config := orchestration.DefaultConfig()
 config.CacheEnabled = true  // Remember recent decisions
 config.ExecutionOptions.MaxConcurrency = 10  // Run up to 10 tools/agents at once
 
-orchestrator := orchestration.NewAIOrchestrator(
-    config,
-    discovery,
-    aiClient,
-)
+orchestrator, err := orchestration.CreateOrchestrator(config, deps)
+if err != nil {
+    log.Fatal(err)
+}
 
 // Step 4: Start the orchestrator
 orchestrator.Start(ctx)
@@ -213,6 +221,19 @@ response, _ := orchestrator.ProcessRequest(ctx,
 fmt.Println(response.Response)
 // Output: "Current NYC weather is 72°F and sunny. 
 //          Traffic is moderate with 25 min delays on I-95..."
+```
+
+#### Quick Start with Simple Orchestrator
+
+```go
+// For rapid prototyping - zero configuration required!
+orchestrator := orchestration.CreateSimpleOrchestrator(discovery, aiClient)
+
+// That's it! Start using immediately
+response, _ := orchestrator.ProcessRequest(ctx,
+    "Analyze Apple stock performance",
+    nil,
+)
 ```
 
 ## 🔧 Workflow Engine in Detail
@@ -604,6 +625,10 @@ config := &orchestration.OrchestratorConfig{
     // Synthesis strategy  
     SynthesisStrategy: orchestration.StrategyLLM, // Options: StrategyLLM, StrategyTemplate, StrategySimple
     
+    // Capability Provider (for scaling)
+    CapabilityProviderType: "default",  // Options: "default" or "service"
+    EnableFallback: true,                // Fallback to default provider on service failure
+    
     // Execution configuration
     ExecutionOptions: orchestration.ExecutionOptions{
         MaxConcurrency:   5,                // Maximum parallel tool/agent calls
@@ -633,6 +658,131 @@ The orchestration module supports various usage patterns as demonstrated in the 
 - **OpenAI API Key** - For AI orchestration (or compatible LLM)
 - **Running Components** - Tools and agents registered with discovery
 
+## 🚀 Scaling to Hundreds of Agents - Capability Provider Architecture
+
+### The Problem: Token Overflow at Scale
+
+When you have hundreds or thousands of agents and tools, sending ALL their capabilities to the LLM causes:
+- **Token limit overflow** (even with 1M+ token models)  
+- **Increased costs** (more tokens = more money)
+- **Slower responses** (processing huge contexts)
+
+### The Solution: Smart Capability Discovery
+
+The orchestration module provides two strategies:
+
+#### 1. Default Provider (Small Scale: < 200 agents)
+```go
+// Sends ALL capabilities to LLM (original behavior)
+config := orchestration.DefaultConfig()
+config.CapabilityProviderType = "default"  // This is the default
+
+// Simple, no external dependencies, perfect for getting started
+```
+
+#### 2. Service Provider (Large Scale: 100s-1000s of agents)
+```go
+// Uses external RAG service for semantic search
+config := orchestration.DefaultConfig()
+config.CapabilityProviderType = "service"
+config.CapabilityService = orchestration.ServiceCapabilityConfig{
+    Endpoint:  "http://capability-service:8080",
+    TopK:      20,       // Return top 20 most relevant agents
+    Threshold: 0.7,      // Minimum relevance score
+    Timeout:   10 * time.Second,
+}
+config.EnableFallback = true  // Fall back to default if service fails
+
+deps := orchestration.OrchestratorDependencies{
+    Discovery: discovery,
+    AIClient:  aiClient,
+}
+
+orchestrator, _ := orchestration.CreateOrchestrator(config, deps)
+```
+
+### How Service Provider Works
+
+```
+User Request: "Analyze customer sentiment"
+         ↓
+1. Query RAG Service with semantic search
+         ↓
+2. Service returns ONLY relevant agents:
+   - sentiment-analyzer (score: 0.95)
+   - text-processor (score: 0.88)
+   - emotion-detector (score: 0.85)
+         ↓
+3. Send only these 3 to LLM (not all 1000!)
+         ↓
+4. LLM makes decision with focused context
+```
+
+### Production Configuration with Resilience
+
+```go
+// For production: Add circuit breaker and monitoring
+import "github.com/itsneelabh/gomind/resilience"
+
+// Create circuit breaker for the external service
+cb, _ := resilience.NewCircuitBreaker(&resilience.CircuitBreakerConfig{
+    Name:           "capability-service",
+    ErrorThreshold: 0.5,
+    VolumeThreshold: 10,
+    SleepWindow:    30 * time.Second,
+})
+
+// Create logger for observability
+logger := myapp.NewLogger()
+
+// Configure with full resilience
+config := orchestration.DefaultConfig()
+config.CapabilityProviderType = "service"
+config.CapabilityService = orchestration.ServiceCapabilityConfig{
+    Endpoint:  "http://capability-service:8080",
+    TopK:      50,  // More results for production
+    Threshold: 0.8, // Higher quality threshold
+}
+config.EnableFallback = true  // Graceful degradation
+
+deps := orchestration.OrchestratorDependencies{
+    Discovery:      discovery,
+    AIClient:       aiClient,
+    CircuitBreaker: cb,      // Optional: Sophisticated resilience
+    Logger:         logger,  // Optional: Structured logging
+}
+
+orchestrator, _ := orchestration.CreateOrchestrator(config, deps)
+```
+
+### Environment-Based Configuration
+
+```bash
+# Configure via environment variables
+export GOMIND_CAPABILITY_SERVICE_URL="http://capability-service:8080"
+export GOMIND_CAPABILITY_TOP_K="30"
+export GOMIND_CAPABILITY_THRESHOLD="0.75"
+
+# The orchestrator auto-configures when these are set
+```
+
+### Three Layers of Resilience
+
+The service provider includes built-in resilience:
+
+1. **Circuit Breaker** (if injected) - Prevents cascading failures
+2. **Retry Logic** (built-in) - 3 retries with exponential backoff
+3. **Fallback Provider** (configurable) - Falls back to default provider
+
+### When to Use Each Provider
+
+| Scenario | Provider | Why |
+|----------|----------|-----|
+| **Development/Testing** | Default | Simple, no dependencies |
+| **< 200 agents** | Default | Token usage acceptable |
+| **100s-1000s agents** | Service | Semantic search scales better |
+| **Production critical** | Service + Circuit Breaker | Maximum resilience |
+
 ## ⚡ Performance Considerations
 
 1. **Workflow Execution** - DAG-based execution with automatic parallelization
@@ -640,16 +790,17 @@ The orchestration module supports various usage patterns as demonstrated in the 
 3. **Discovery** - Component catalog refreshes every 10 seconds by default
 4. **Concurrency** - Default 5 parallel tool/agent calls, configurable via `MaxConcurrency`
 5. **Timeouts** - Configure appropriate timeouts for your use case
+6. **Capability Provider** - Use service provider for 100s+ agents to avoid token overflow
 
 ## 🔮 Potential Enhancements
 
 These features are not yet implemented but could be added:
 - Visual workflow designer UI
 - Distributed workflow execution across nodes
-- Semantic similarity-based tool/agent discovery
 - Streaming response support
 - WebSocket for real-time updates
 - Workflow versioning and migration tools
+- Custom capability provider implementations (e.g., GraphQL-based)
 
 ## 📖 API Reference
 
@@ -657,15 +808,26 @@ These features are not yet implemented but could be added:
 - `Orchestrator` - Main orchestration interface
 - `WorkflowEngine` - Workflow execution engine
 - `OrchestratorConfig` - Configuration structure
+- `OrchestratorDependencies` - Dependency injection container
+- `CapabilityProvider` - Interface for capability discovery
+- `ServiceCapabilityConfig` - Configuration for service-based provider
 - `WorkflowDefinition` - YAML workflow structure
 - `ExecutionResult` - Execution results
 
 ### Key Functions
-- `NewAIOrchestrator()` - Create AI-powered orchestrator
-- `NewWorkflowEngine()` - Create workflow engine
-- `ProcessRequest()` - Process natural language request
-- `ExecuteWorkflow()` - Execute defined workflow
-- `ParseWorkflowYAML()` - Parse workflow from YAML
+- `CreateOrchestrator(config, deps)` - Create orchestrator with dependencies
+- `CreateSimpleOrchestrator(discovery, aiClient)` - Quick start orchestrator
+- `CreateOrchestratorWithOptions(deps, opts...)` - Create with option functions
+- `NewAIOrchestrator(config, discovery, aiClient)` - Low-level orchestrator creation
+- `NewWorkflowEngine(discovery)` - Create workflow engine
+- `ProcessRequest(ctx, request, metadata)` - Process natural language request
+- `ExecuteWorkflow(ctx, workflow, inputs)` - Execute defined workflow
+- `ParseWorkflowYAML(data)` - Parse workflow from YAML
+
+### Configuration Options
+- `WithCapabilityProvider(type, url)` - Configure capability provider type and URL
+- `WithTelemetry(enabled)` - Enable/disable telemetry
+- `WithFallback(enabled)` - Enable/disable fallback provider
 
 ## 💡 Best Practices & Tips
 

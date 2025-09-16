@@ -20,6 +20,35 @@ The workflow engine makes sure everything happens in the right order!
 
 ## 🔧 How It Works
 
+### Understanding Tools vs Agents
+
+The workflow engine distinguishes between **tools** (passive components) and **agents** (active orchestrators):
+
+**Tools** - Like hammers and screwdrivers:
+- Perform specific tasks when called
+- Don't make decisions
+- Examples: data fetchers, calculators, formatters, API clients
+
+**Agents** - Like project managers:
+- Make intelligent decisions
+- Can orchestrate other tools/agents
+- Examples: AI advisors, coordinators, analyzers that use LLMs
+
+```yaml
+steps:
+  # Tool: Just fetches data
+  - name: get-weather
+    tool: weather-api
+    action: get_current
+    
+  # Agent: Makes decisions based on data
+  - name: travel-advisor
+    agent: ai-travel-planner
+    action: recommend_activities
+    inputs:
+      weather: ${steps.get-weather.output}
+```
+
 ### 1. Discovery Integration - Finding Your Workers
 
 The workflow engine doesn't need to know WHERE your agents are - it uses Discovery to find them:
@@ -28,8 +57,12 @@ The workflow engine doesn't need to know WHERE your agents are - it uses Discove
 # Your workflow just uses names
 steps:
   - name: get-price
-    agent: stock-price-tool  # Discovery finds where this lives!
+    tool: stock-price-tool  # Tools are passive components (data fetchers, calculators)
     action: fetch_price
+    
+  - name: analyze-data
+    agent: ai-analyst     # Agents are active orchestrators (make decisions, coordinate)
+    action: analyze
 ```
 
 **What happens behind the scenes:**
@@ -90,16 +123,16 @@ inputs:
     required: true
 
 steps:
-  # Step 1: Get stock price
+  # Step 1: Get stock price (using a tool)
   - name: get-price
-    agent: stock-price-tool
+    tool: stock-price-tool       # Tool: passive data fetcher
     action: get_current_price
     inputs:
       symbol: ${inputs.symbol}
     
-  # Step 2: Analyze the price
+  # Step 2: Analyze the price (using an agent)
   - name: analyze
-    agent: technical-analyst
+    agent: technical-analyst     # Agent: active decision maker
     action: analyze
     inputs:
       price_data: ${steps.get-price.output}  # Use output from step 1
@@ -176,22 +209,22 @@ steps:
 ```yaml
 name: investment-analysis
 steps:
-  # Gather data in parallel
+  # Gather data in parallel (tools fetch data)
   - name: market-data
-    capability: market_data_provider
+    capability: market_data_provider    # Finds any tool/agent with this capability
     action: get_data
     
   - name: news
-    capability: news_aggregator
+    capability: news_aggregator         # Capability-based discovery
     action: get_news
     
   - name: social-sentiment
-    capability: social_media_analyzer
+    tool: social-media-tool            # Explicit tool: passive data collector
     action: analyze_sentiment
     
-  # Analyze everything
+  # Analyze everything (agent makes decisions)
   - name: ai-analysis
-    agent: ai-advisor
+    agent: ai-advisor                  # Agent: orchestrates and analyzes
     action: analyze
     inputs:
       market: ${steps.market-data.output}
@@ -199,9 +232,9 @@ steps:
       sentiment: ${steps.social-sentiment.output}
     depends_on: [market-data, news, social-sentiment]
     
-  # Generate report
+  # Generate report (tool formats output)
   - name: report
-    agent: report-generator
+    tool: report-generator             # Tool: passive formatter/generator
     action: create_report
     inputs:
       analysis: ${steps.ai-analysis.output}
@@ -214,13 +247,17 @@ steps:
 ```yaml
 steps:
   - name: check-market
-    agent: market-checker
+    tool: market-status-tool    # Tool to check if market is open
+    action: check_status
     
   - name: buy-stock
+    agent: trading-agent        # Agent to execute trade
+    action: execute_trade
     condition:
       if: ${steps.check-market.output.is_open}
       then: execute
       else: skip
+    depends_on: [check-market]
 ```
 
 ### Scatter-Gather Pattern

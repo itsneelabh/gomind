@@ -207,8 +207,13 @@ func (s *ServiceCapabilityProvider) isCircuitOpen() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	
+	// If no failures yet, circuit is closed
+	if s.failureCount == 0 {
+		return false
+	}
+	
 	// Reset failure count after cooldown period
-	if time.Since(s.lastFailureTime) > 30*time.Second {
+	if !s.lastFailureTime.IsZero() && time.Since(s.lastFailureTime) > 30*time.Second {
 		return false
 	}
 	
@@ -267,7 +272,10 @@ func (s *ServiceCapabilityProvider) queryExternalService(ctx context.Context, re
 	// Check HTTP status code
 	if resp.StatusCode != http.StatusOK {
 		var errorBody bytes.Buffer
-		errorBody.ReadFrom(resp.Body)
+		_, err := errorBody.ReadFrom(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("capability service returned %d: unable to read error body: %w", resp.StatusCode, err)
+		}
 		return "", fmt.Errorf("capability service returned %d: %s", resp.StatusCode, errorBody.String())
 	}
 

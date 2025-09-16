@@ -162,18 +162,7 @@ func TestServiceCapabilityProvider_Success(t *testing.T) {
 	}
 }
 
-// mockCapabilityProvider for testing
-type mockCapabilityProvider struct {
-	response string
-	err      error
-}
-
-func (m *mockCapabilityProvider) GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (string, error) {
-	if m.err != nil {
-		return "", m.err
-	}
-	return m.response, nil
-}
+// mockCapabilityProvider is now in test_mocks.go
 
 // stringContains helper to check if a string contains a substring
 func stringContains(s, substr string) bool {

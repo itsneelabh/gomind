@@ -82,7 +82,14 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 		// Check if we should retry
 		if attempt < b.MaxRetries {
 			// Calculate delay with exponential backoff
-			delay := b.RetryDelay * time.Duration(1<<uint(attempt))
+			// Ensure safe conversion to uint to prevent overflow
+			var shiftAmount uint
+			if attempt >= 0 && attempt < 32 {
+				shiftAmount = uint(attempt)
+			} else {
+				shiftAmount = 31 // Cap at max reasonable value
+			}
+			delay := b.RetryDelay * time.Duration(1<<shiftAmount)
 
 			b.Logger.Debug("Retrying request", map[string]interface{}{
 				"attempt":     attempt + 1,

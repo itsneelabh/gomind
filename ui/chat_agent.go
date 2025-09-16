@@ -276,13 +276,18 @@ func (c *DefaultChatAgent) HandleTransportDiscovery(w http.ResponseWriter, r *ht
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"transports": transports,
 		"config": map[string]interface{}{
 			"rate_limit":       c.config.SecurityConfig.RateLimit,
 			"max_message_size": c.config.SecurityConfig.MaxMessageSize,
 		},
-	})
+	}); err != nil {
+		c.Logger.Error("Failed to encode transport response", map[string]interface{}{
+			"error": err.Error(),
+		})
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // HandleHealth provides health status
@@ -492,11 +497,21 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 			Content:    fullResponse,
 			TokenCount: tokenCount,
 		}
-		c.sessions.AddMessage(ctx, sessionID, assistantMsg)
+		if err := c.sessions.AddMessage(ctx, sessionID, assistantMsg); err != nil {
+			c.Logger.Error("Failed to add message to session", map[string]interface{}{
+				"error":     err.Error(),
+				"sessionID": sessionID,
+			})
+		}
 
 		// Update session
 		session.TokenCount += tokenCount
-		c.sessions.Update(ctx, session)
+		if err := c.sessions.Update(ctx, session); err != nil {
+			c.Logger.Error("Failed to update session", map[string]interface{}{
+				"error":     err.Error(),
+				"sessionID": sessionID,
+			})
+		}
 	}()
 
 	return events, nil
