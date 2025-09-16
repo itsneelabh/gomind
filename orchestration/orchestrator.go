@@ -19,6 +19,12 @@ type AIOrchestrator struct {
 	executor    *SmartExecutor
 	synthesizer *AISynthesizer
 
+	// Capability provider for flexible capability discovery
+	capabilityProvider CapabilityProvider
+	
+	// Telemetry for observability (uses framework telemetry module)
+	telemetry core.Telemetry
+
 	// Metrics and history
 	metrics      *OrchestratorMetrics
 	history      []ExecutionRecord
@@ -39,7 +45,7 @@ func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiC
 	ctx, cancel := context.WithCancel(context.Background())
 	catalog := NewAgentCatalog(discovery)
 
-	return &AIOrchestrator{
+	o := &AIOrchestrator{
 		config:      config,
 		discovery:   discovery,
 		aiClient:    aiClient,
@@ -50,7 +56,26 @@ func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiC
 		history:     make([]ExecutionRecord, 0, config.HistorySize),
 		ctx:         ctx,
 		cancel:      cancel,
+		// Default to no-op telemetry
+		telemetry: &core.NoOpTelemetry{},
 	}
+	
+	// Initialize capability provider based on configuration
+	switch config.CapabilityProviderType {
+	case "service":
+		// Use service-based provider for large-scale deployments
+		if config.EnableFallback {
+			// Use default provider as fallback for graceful degradation
+			config.CapabilityService.FallbackProvider = NewDefaultCapabilityProvider(catalog)
+		}
+		o.capabilityProvider = NewServiceCapabilityProvider(&config.CapabilityService)
+	default:
+		// Default to catalog-based provider (sends all capabilities to LLM)
+		// This is the quick-start default that works without additional setup
+		o.capabilityProvider = NewDefaultCapabilityProvider(catalog)
+	}
+
+	return o
 }
 
 // Start initializes the orchestrator and starts background processes
@@ -69,6 +94,29 @@ func (o *AIOrchestrator) Start(ctx context.Context) error {
 // Stop gracefully shuts down the orchestrator
 func (o *AIOrchestrator) Stop() {
 	o.cancel()
+}
+
+// SetCapabilityProvider sets a custom capability provider
+func (o *AIOrchestrator) SetCapabilityProvider(provider CapabilityProvider) {
+	o.capabilityProvider = provider
+}
+
+// SetTelemetry sets the telemetry provider (integrates with framework telemetry module)
+func (o *AIOrchestrator) SetTelemetry(telemetry core.Telemetry) {
+	if telemetry == nil {
+		o.telemetry = &core.NoOpTelemetry{}
+	} else {
+		o.telemetry = telemetry
+	}
+	// Propagate telemetry to executor and synthesizer if they support it
+	if o.executor != nil {
+		// If executor supports telemetry, set it here
+		// o.executor.SetTelemetry(telemetry)
+	}
+	if o.synthesizer != nil {
+		// If synthesizer supports telemetry, set it here
+		// o.synthesizer.SetTelemetry(telemetry)
+	}
 }
 
 // catalogRefreshLoop periodically refreshes the agent catalog
@@ -91,14 +139,48 @@ func (o *AIOrchestrator) catalogRefreshLoop() {
 
 // ProcessRequest handles a natural language request using AI-powered orchestration
 func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, metadata map[string]interface{}) (*OrchestratorResponse, error) {
+	// Start telemetry span if telemetry is available
+	var span core.Span
+	if o.telemetry != nil {
+		ctx, span = o.telemetry.StartSpan(ctx, "orchestrator.process_request")
+		defer span.End()
+	} else {
+		// Create a no-op span
+		span = &core.NoOpSpan{}
+	}
+	
 	startTime := time.Now()
 	requestID := generateID()
+	
+	if span != nil {
+		span.SetAttribute("request_id", requestID)
+		span.SetAttribute("request_length", len(request))
+	}
+	
+	// Record metric for request count if telemetry is available
+	if o.telemetry != nil {
+		o.telemetry.RecordMetric("orchestrator.requests.total", 1, map[string]string{
+			"mode": string(o.config.RoutingMode),
+		})
+	}
 
 	// Step 1: Get execution plan from LLM
 	plan, err := o.generateExecutionPlan(ctx, request)
 	if err != nil {
+		if span != nil {
+			span.RecordError(err)
+		}
+		if o.telemetry != nil {
+			o.telemetry.RecordMetric("orchestrator.requests.failed", 1, map[string]string{
+				"stage": "planning",
+			})
+		}
 		o.updateMetrics(time.Since(startTime), false)
 		return nil, fmt.Errorf("failed to generate execution plan: %w", err)
+	}
+	
+	if span != nil {
+		span.SetAttribute("plan_steps", len(plan.Steps))
 	}
 
 	// Step 2: Validate the plan
@@ -140,14 +222,32 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	// Update metrics and history
 	o.updateMetrics(response.ExecutionTime, true)
 	o.addToHistory(response)
+	
+	// Record success metrics if telemetry is available
+	if o.telemetry != nil {
+		o.telemetry.RecordMetric("orchestrator.requests.success", 1, map[string]string{
+			"mode": string(o.config.RoutingMode),
+		})
+		o.telemetry.RecordMetric("orchestrator.latency_ms", float64(time.Since(startTime).Milliseconds()), map[string]string{
+			"operation": "process_request",
+		})
+	}
 
 	return response, nil
 }
 
 // generateExecutionPlan uses LLM to create an execution plan
 func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request string) (*RoutingPlan, error) {
-	// Build prompt with agent catalog
-	prompt := o.buildPlanningPrompt(request)
+	// Check if AI client is available
+	if o.aiClient == nil {
+		return nil, fmt.Errorf("AI client not configured")
+	}
+	
+	// Build prompt with capability information
+	prompt, err := o.buildPlanningPrompt(ctx, request)
+	if err != nil {
+		return nil, err
+	}
 
 	// Call LLM
 	aiResponse, err := o.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
@@ -163,9 +263,34 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 	return o.parsePlan(aiResponse.Content)
 }
 
-// buildPlanningPrompt constructs the prompt for the LLM
-func (o *AIOrchestrator) buildPlanningPrompt(request string) string {
-	catalogInfo := o.catalog.FormatForLLM()
+// buildPlanningPrompt constructs the prompt for the LLM using capability provider
+func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string) (string, error) {
+	// Start telemetry span if available
+	var span core.Span
+	if o.telemetry != nil {
+		ctx, span = o.telemetry.StartSpan(ctx, "orchestrator.build_prompt")
+		defer span.End()
+	} else {
+		span = &core.NoOpSpan{}
+	}
+	
+	// Check if capability provider is available
+	if o.capabilityProvider == nil {
+		return "", fmt.Errorf("capability provider not configured")
+	}
+	
+	// Get capabilities from provider
+	capabilityInfo, err := o.capabilityProvider.GetCapabilities(ctx, request, nil)
+	if err != nil {
+		if span != nil {
+			span.RecordError(err)
+		}
+		return "", fmt.Errorf("failed to get capabilities: %w", err)
+	}
+	
+	if span != nil {
+		span.SetAttribute("capability_info_size", len(capabilityInfo))
+	}
 
 	return fmt.Sprintf(`You are an AI orchestrator managing a multi-agent system.
 
@@ -202,7 +327,7 @@ Important:
 4. Include all necessary steps to fulfill the request
 5. Be specific in instructions
 
-Response (JSON only, no explanation):`, catalogInfo, request)
+Response (JSON only, no explanation):`, capabilityInfo, request), nil
 }
 
 // parsePlan parses the LLM response into a RoutingPlan
@@ -233,6 +358,11 @@ func (o *AIOrchestrator) parsePlan(llmResponse string) (*RoutingPlan, error) {
 
 // validatePlan checks if the plan is executable
 func (o *AIOrchestrator) validatePlan(plan *RoutingPlan) error {
+	// Check if discovery is available
+	if o.discovery == nil {
+		return fmt.Errorf("discovery service not configured")
+	}
+	
 	for _, step := range plan.Steps {
 		// Check if agent exists
 		agents, err := o.discovery.FindService(context.Background(), step.AgentName)
@@ -279,12 +409,22 @@ func (o *AIOrchestrator) validatePlan(plan *RoutingPlan) error {
 
 // regeneratePlan attempts to fix a plan based on validation errors
 func (o *AIOrchestrator) regeneratePlan(ctx context.Context, request string, validationErr error) (*RoutingPlan, error) {
+	// Check if AI client is available
+	if o.aiClient == nil {
+		return nil, fmt.Errorf("AI client not configured for plan regeneration")
+	}
+	
+	basePrompt, err := o.buildPlanningPrompt(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	
 	prompt := fmt.Sprintf(`%s
 
 The previous plan failed validation with error: %s
 
 Please generate a corrected plan that addresses this error.`,
-		o.buildPlanningPrompt(request), validationErr.Error())
+		basePrompt, validationErr.Error())
 
 	aiResponse, err := o.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
 		Temperature: 0.2,
@@ -313,6 +453,9 @@ func (o *AIOrchestrator) extractAgentsFromPlan(plan *RoutingPlan) []string {
 
 // ExecutePlan executes a pre-defined routing plan
 func (o *AIOrchestrator) ExecutePlan(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
+	if o.executor == nil {
+		return nil, fmt.Errorf("executor not configured")
+	}
 	return o.executor.Execute(ctx, plan)
 }
 
@@ -412,20 +555,3 @@ func generateID() string {
 	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().Nanosecond())
 }
 
-// StandardOrchestrator is kept for backward compatibility
-type StandardOrchestrator struct {
-	*AIOrchestrator
-}
-
-// NewOrchestrator creates a new orchestrator (backward compatibility)
-func NewOrchestrator(config *OrchestratorConfig) *StandardOrchestrator {
-	// This is a stub for backward compatibility
-	// Real usage should use NewAIOrchestrator with proper dependencies
-	return &StandardOrchestrator{
-		AIOrchestrator: &AIOrchestrator{
-			config:  config,
-			metrics: &OrchestratorMetrics{},
-			history: make([]ExecutionRecord, 0, config.HistorySize),
-		},
-	}
-}

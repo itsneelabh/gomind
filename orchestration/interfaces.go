@@ -2,7 +2,10 @@ package orchestration
 
 import (
 	"context"
+	"os"
 	"time"
+	
+	"github.com/itsneelabh/gomind/core"
 )
 
 // RouterMode defines the routing strategy
@@ -164,6 +167,21 @@ type ExecutionOptions struct {
 	RecoveryTimeout  time.Duration `json:"recovery_timeout"`
 }
 
+// ServiceCapabilityConfig holds configuration for the service capability provider
+type ServiceCapabilityConfig struct {
+	// Required configuration
+	Endpoint  string        `json:"endpoint"`
+	TopK      int           `json:"top_k"`      // Default: 20
+	Threshold float64       `json:"threshold"`  // Default: 0.7
+	Timeout   time.Duration `json:"timeout"`    // Default: 30s
+	
+	// Optional dependencies (not serializable, injected by application)
+	CircuitBreaker   core.CircuitBreaker   `json:"-"` // Optional: sophisticated resilience
+	Logger           core.Logger           `json:"-"` // Optional: observability
+	Telemetry        core.Telemetry        `json:"-"` // Optional: metrics
+	FallbackProvider CapabilityProvider    `json:"-"` // Optional: graceful degradation
+}
+
 // OrchestratorConfig configures the orchestrator
 type OrchestratorConfig struct {
 	RoutingMode       RouterMode        `json:"routing_mode"`
@@ -173,11 +191,19 @@ type OrchestratorConfig struct {
 	MetricsEnabled    bool              `json:"metrics_enabled"`
 	CacheEnabled      bool              `json:"cache_enabled"`
 	CacheTTL          time.Duration     `json:"cache_ttl"`
+	
+	// CapabilityProvider configuration
+	CapabilityProviderType string                  `json:"capability_provider_type"` // "default" or "service"
+	CapabilityService      ServiceCapabilityConfig `json:"capability_service"`       // Service provider config
+	EnableFallback         bool                    `json:"enable_fallback"`          // Graceful degradation
+	
+	// Telemetry configuration (uses framework telemetry)
+	EnableTelemetry bool `json:"enable_telemetry"`
 }
 
-// DefaultConfig returns default orchestrator configuration
+// DefaultConfig returns default orchestrator configuration with intelligent defaults
 func DefaultConfig() *OrchestratorConfig {
-	return &OrchestratorConfig{
+	config := &OrchestratorConfig{
 		RoutingMode:       ModeHybrid,
 		SynthesisStrategy: StrategyLLM,
 		HistorySize:       100,
@@ -194,7 +220,20 @@ func DefaultConfig() *OrchestratorConfig {
 			FailureThreshold: 5,
 			RecoveryTimeout:  30 * time.Second,
 		},
+		// CapabilityProvider defaults
+		CapabilityProviderType: "default", // Quick start default
+		EnableTelemetry:        true,      // Production-first
+		EnableFallback:         true,      // Graceful degradation
 	}
+	
+	// Auto-configure based on environment (intelligent configuration)
+	if serviceURL := os.Getenv("GOMIND_CAPABILITY_SERVICE_URL"); serviceURL != "" {
+		// User intent is clear - auto-configure for service provider
+		config.CapabilityProviderType = "service"
+		config.CapabilityService.Endpoint = serviceURL
+	}
+	
+	return config
 }
 
 // ExecutionError represents an error during execution
