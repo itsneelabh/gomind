@@ -293,8 +293,8 @@ func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
 	// Check defaults
-	if config.RoutingMode != ModeHybrid {
-		t.Errorf("Expected ModeHybrid, got %s", config.RoutingMode)
+	if config.RoutingMode != ModeAutonomous {
+		t.Errorf("Expected ModeAutonomous, got %s", config.RoutingMode)
 	}
 	if config.SynthesisStrategy != StrategyLLM {
 		t.Errorf("Expected StrategyLLM, got %s", config.SynthesisStrategy)

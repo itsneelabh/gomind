@@ -9,12 +9,12 @@ import (
 )
 
 // RouterMode defines the routing strategy
+// Note: This is currently only used for metrics and logging, not actual routing behavior
 type RouterMode string
 
 const (
-	ModeAutonomous RouterMode = "autonomous"
-	ModeWorkflow   RouterMode = "workflow"
-	ModeHybrid     RouterMode = "hybrid"
+	ModeAutonomous RouterMode = "autonomous" // AI-driven orchestration
+	ModeWorkflow   RouterMode = "workflow"   // Workflow-based execution (separate system)
 )
 
 // RoutingStep represents a single step in a routing plan
@@ -204,7 +204,7 @@ type OrchestratorConfig struct {
 // DefaultConfig returns default orchestrator configuration with intelligent defaults
 func DefaultConfig() *OrchestratorConfig {
 	config := &OrchestratorConfig{
-		RoutingMode:       ModeHybrid,
+		RoutingMode:       ModeAutonomous, // Default to AI-driven orchestration
 		SynthesisStrategy: StrategyLLM,
 		HistorySize:       100,
 		MetricsEnabled:    true,

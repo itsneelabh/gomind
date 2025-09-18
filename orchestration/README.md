@@ -620,7 +620,7 @@ if metrics.ComponentCallsFailed > 10 {
 ```go
 config := &orchestration.OrchestratorConfig{
     // Routing mode
-    RoutingMode: orchestration.ModeHybrid,  // Options: ModeAutonomous, ModeWorkflow, ModeHybrid
+    RoutingMode: orchestration.ModeAutonomous,  // Options: ModeAutonomous, ModeWorkflow
     
     // Synthesis strategy  
     SynthesisStrategy: orchestration.StrategyLLM, // Options: StrategyLLM, StrategyTemplate, StrategySimple
