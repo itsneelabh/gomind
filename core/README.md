@@ -1686,6 +1686,11 @@ All components automatically provide health endpoints:
 - Suitable for long-running orchestrators
 - Ideal for AI-powered coordination
 
+### Production Reliability
+- **Redis Failure Resilience**: Components automatically handle Redis outages and recover without manual intervention
+- **Self-Healing Discovery**: Services re-register themselves when Redis comes back online
+- **Atomic Operations**: Registration uses Redis transactions to prevent partial state issues
+
 ## 🎉 Summary
 
 The GoMind Core module provides two fundamental building blocks:

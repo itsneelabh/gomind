@@ -588,4 +588,134 @@ GoMind's discovery system embodies several distributed systems principles:
 
 Understanding these principles helps you work **with** the system rather than fighting against its design. When you see behaviors that seem unusual, ask yourself: "How does this serve the goal of keeping agents and tools discoverable and available?"
 
+## Redis Failure Resilience and Self-Healing
+
+One of the most important aspects of a production discovery system is what happens when the discovery backend (Redis) fails. GoMind is designed to handle Redis outages gracefully and recover automatically.
+
+### What Happens During a Redis Outage
+
+When Redis goes offline, here's what you can expect:
+
+**✅ What Continues Working:**
+- All existing agents and tools keep running normally
+- Business logic and AI processing continue uninterrupted
+- HTTP endpoints remain accessible
+- Existing connections between components stay active
+
+**❌ What Stops Working:**
+- New discovery requests fail (can't find new components)
+- Service registration fails (new components can't register)
+- Heartbeat updates fail (but components stay alive)
+
+**The Key Point**: Your AI system doesn't crash when Redis fails - it just can't discover new components until Redis recovers.
+
+### Automatic Self-Healing Recovery
+
+When Redis comes back online, GoMind automatically heals itself without any manual intervention:
+
+#### 1. Intelligent Heartbeat Recovery
+Every component runs a smart heartbeat that detects when it's no longer registered in Redis:
+
+```
+Normal Operation:
+└── Heartbeat: "I'm healthy" → Redis: "OK, you're still registered"
+
+During Redis Outage:
+└── Heartbeat: "I'm healthy" → Redis: [connection failed]
+
+After Redis Recovery:
+└── Heartbeat: "I'm healthy" → Redis: "Service not found"
+└── Self-Healing: "Let me re-register myself" → Redis: "Registration successful"
+```
+
+#### 2. Atomic Registration
+To prevent partial failures during registration, all service data is registered atomically:
+
+- **Before**: Service data and capability indexes could get out of sync during failures
+- **After**: Either everything registers successfully, or nothing does (no partial state)
+
+This ensures that when a component re-registers during recovery, it's completely discoverable or not at all.
+
+### What You'll Observe During Recovery
+
+#### Scenario 1: Brief Redis Outage (< 30 seconds)
+- Most components will automatically re-register themselves
+- Discovery resumes within 15-30 seconds
+- No manual intervention needed
+
+#### Scenario 2: Extended Redis Outage (> 30 seconds)
+- All component registrations expire from Redis
+- When Redis returns, components detect they're missing and re-register
+- Full discovery capability restored within 60 seconds
+- No manual intervention needed
+
+#### Scenario 3: Redis Maintenance Windows
+- Schedule during low-traffic periods when possible
+- Components will automatically re-register when Redis returns
+- Zero manual restarts required
+
+### Production Best Practices
+
+#### Use Redis Cluster for High Availability
+```yaml
+# Redis cluster provides automatic failover
+redis-cluster:
+  nodes: 3
+  replicas: 1
+  failover: automatic
+```
+
+#### Monitor Redis Health
+```bash
+# Check Redis connectivity
+redis-cli ping
+
+# Monitor component registrations
+redis-cli KEYS "gomind:*" | wc -l
+
+# Check for expired services
+redis-cli SCAN 0 MATCH "gomind:services:*"
+```
+
+#### Expected Recovery Times
+- **Redis cluster failover**: < 30 seconds (components may not even notice)
+- **Redis restart**: 30-60 seconds for full recovery
+- **Network partition**: Recovery time depends on partition duration
+
+### Troubleshooting Redis Issues
+
+#### If Discovery Seems Broken
+```bash
+# 1. Check Redis connectivity
+redis-cli ping
+
+# 2. Check if services are registered
+redis-cli KEYS "gomind:services:*"
+
+# 3. Check component health endpoints
+curl http://your-component:8080/health
+```
+
+#### If Components Aren't Re-Registering
+Most likely causes:
+1. **Components are actually down** - check their health endpoints
+2. **Redis URL mismatch** - verify components are connecting to the same Redis
+3. **Network connectivity** - ensure components can reach Redis
+
+#### If You See Partial Registration Errors
+Before the atomic registration fix, you might have seen services that were partially registered. With the current implementation:
+- Services are either fully discoverable or not discoverable at all
+- No more "ghost services" that appear in some queries but not others
+
+### The Philosophy of Resilient Discovery
+
+GoMind's approach to Redis failures follows these principles:
+
+1. **Services Over Discovery**: Your business logic is more important than perfect discovery
+2. **Automatic Recovery**: Systems should heal themselves without human intervention
+3. **Graceful Degradation**: When parts fail, the system continues with reduced functionality
+4. **Zero Manual Restarts**: Redis outages should not require restarting your components
+
+This design ensures that your AI agents and tools remain resilient in production environments, automatically adapting to infrastructure issues without losing their core functionality.
+
 Most of the time, you'll find that the system is making intelligent trade-offs to maintain overall system health.

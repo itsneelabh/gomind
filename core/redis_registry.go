@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -15,6 +18,10 @@ type RedisRegistry struct {
 	namespace string
 	ttl       time.Duration
 	logger    Logger // Optional logger for better observability
+
+	// Self-healing state management (internal enhancement)
+	registrationState map[string]*ServiceInfo
+	stateMutex       sync.RWMutex
 }
 
 // NewRedisRegistry creates a new Redis registry client
@@ -29,20 +36,44 @@ func NewRedisRegistryWithNamespace(redisURL, namespace string) (*RedisRegistry, 
 		return nil, fmt.Errorf("invalid Redis URL: %w", ErrInvalidConfiguration)
 	}
 
+	// Enhanced: Production-grade connection settings (internal enhancement)
+	opt.PoolSize = 10                            // Handle 10 concurrent operations
+	opt.MinIdleConns = 5                         // Keep 5 connections warm
+	opt.MaxRetries = 3                           // Retry failed operations 3 times
+	opt.MinRetryBackoff = time.Millisecond * 100 // Start with 100ms delay
+	opt.MaxRetryBackoff = time.Second * 1        // Cap delay at 1 second
+	opt.DialTimeout = time.Second * 5            // 5s to establish connection
+	opt.ReadTimeout = time.Second * 5            // 5s for read operations
+	opt.WriteTimeout = time.Second * 5           // 5s for write operations
+	opt.PoolTimeout = time.Second * 10           // 10s to get connection from pool
+
 	client := redis.NewClient(opt)
 
-	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Enhanced: Connection verification with retry (internal enhancement)
+	for i := 0; i < 3; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = client.Ping(ctx).Err()
+		cancel()
 
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %w", ErrConnectionFailed)
+		if err == nil {
+			break
+		}
+
+		if i < 2 { // Exponential backoff
+			time.Sleep(time.Duration(i+1) * time.Second)
+		}
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Redis after retries: %w", ErrConnectionFailed)
 	}
 
 	registry := &RedisRegistry{
-		client:    client,
-		namespace: namespace,
-		ttl:       30 * time.Second,
+		client:            client,
+		namespace:         namespace,
+		ttl:               30 * time.Second,
+		registrationState: make(map[string]*ServiceInfo), // Enhanced: state storage
+		stateMutex:        sync.RWMutex{},                // Enhanced: thread safety
 	}
 
 	// Note: Logger will be set later via SetLogger method if needed
@@ -64,8 +95,14 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 		})
 	}
 
-	key := fmt.Sprintf("%s:services:%s", r.namespace, info.ID)
+	// Store registration state for potential recovery (internal enhancement)
+	r.storeRegistrationState(info)
 
+	// Use atomic transactions (Issue #1 fix)
+	pipe := r.client.TxPipeline()
+
+	// Store main service data
+	key := fmt.Sprintf("%s:services:%s", r.namespace, info.ID)
 	data, err := json.Marshal(info)
 	if err != nil {
 		if r.logger != nil {
@@ -78,138 +115,43 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 		}
 		return fmt.Errorf("failed to marshal service info for %s: %w", info.ID, err)
 	}
+	pipe.Set(ctx, key, data, r.ttl)
 
-	if r.logger != nil {
-		r.logger.Debug("Storing service data in Redis", map[string]interface{}{
-			"service_id": info.ID,
-			"key":        key,
-			"data_size":  len(data),
-			"ttl":        r.ttl.String(),
-		})
-	}
-
-	// Store service data with TTL
-	if err := r.client.Set(ctx, key, data, r.ttl).Err(); err != nil {
-		if r.logger != nil {
-			r.logger.Error("Failed to store service in Redis", map[string]interface{}{
-				"error":        err,
-				"error_type":   fmt.Sprintf("%T", err),
-				"service_id":   info.ID,
-				"key":          key,
-				"ttl":          r.ttl.String(),
-			})
-		}
-		return fmt.Errorf("failed to register service %s: %w", info.ID, err)
-	}
-
-	// Add to capability indexes
-	if r.logger != nil && len(info.Capabilities) > 0 {
-		r.logger.Debug("Adding service to capability indexes", map[string]interface{}{
-			"service_id":         info.ID,
-			"capabilities_count": len(info.Capabilities),
-		})
-	}
-
+	// Add to all indexes atomically
 	for _, capability := range info.Capabilities {
 		capKey := fmt.Sprintf("%s:capabilities:%s", r.namespace, capability.Name)
-		if err := r.client.SAdd(ctx, capKey, info.ID).Err(); err != nil {
-			// Log but don't fail
-			if r.logger != nil {
-				r.logger.Warn("Failed to add to capability index", map[string]interface{}{
-					"capability":   capability.Name,
-					"service_id":   info.ID,
-					"capability_key": capKey,
-					"error":        err,
-					"error_type":   fmt.Sprintf("%T", err),
-				})
-			}
-			continue
-		}
-		// Set expiry on capability set
-		if err := r.client.Expire(ctx, capKey, r.ttl*2).Err(); err != nil && r.logger != nil {
-			r.logger.Warn("Failed to set capability index expiry", map[string]interface{}{
-				"capability":     capability.Name,
-				"capability_key": capKey,
-				"error":          err,
-				"error_type":     fmt.Sprintf("%T", err),
-			})
-		}
-		
-		if r.logger != nil {
-			r.logger.Debug("Added service to capability index", map[string]interface{}{
-				"capability":     capability.Name,
-				"capability_key": capKey,
-				"service_id":     info.ID,
-				"expiry":         (r.ttl * 2).String(),
-			})
-		}
+		pipe.SAdd(ctx, capKey, info.ID)
+		pipe.Expire(ctx, capKey, r.ttl*2)
 	}
 
-	// Add to service name index
 	nameKey := fmt.Sprintf("%s:names:%s", r.namespace, info.Name)
-	if err := r.client.SAdd(ctx, nameKey, info.ID).Err(); err != nil {
-		if r.logger != nil {
-			r.logger.Warn("Failed to add to name index", map[string]interface{}{
-				"service_name": info.Name,
-				"service_id":   info.ID,
-				"name_key":     nameKey,
-				"error":        err,
-				"error_type":   fmt.Sprintf("%T", err),
-			})
-		}
-	} else {
-		if r.logger != nil {
-			r.logger.Debug("Added service to name index", map[string]interface{}{
-				"service_name": info.Name,
-				"service_id":   info.ID,
-				"name_key":     nameKey,
-			})
-		}
-	}
-	
-	if err := r.client.Expire(ctx, nameKey, r.ttl*2).Err(); err != nil && r.logger != nil {
-		r.logger.Warn("Failed to set name index expiry", map[string]interface{}{
-			"name_key":   nameKey,
-			"error":      err,
-			"error_type": fmt.Sprintf("%T", err),
-		})
-	}
+	pipe.SAdd(ctx, nameKey, info.ID)
+	pipe.Expire(ctx, nameKey, r.ttl*2)
 
-	// Add to type index
 	typeKey := fmt.Sprintf("%s:types:%s", r.namespace, info.Type)
-	if err := r.client.SAdd(ctx, typeKey, info.ID).Err(); err != nil {
+	pipe.SAdd(ctx, typeKey, info.ID)
+	pipe.Expire(ctx, typeKey, r.ttl*2)
+
+	// Execute all operations atomically
+	_, err = pipe.Exec(ctx)
+	if err != nil {
 		if r.logger != nil {
-			r.logger.Warn("Failed to add to type index", map[string]interface{}{
-				"service_type": info.Type,
-				"service_id":   info.ID,
-				"type_key":     typeKey,
+			r.logger.Error("Failed to register service atomically", map[string]interface{}{
 				"error":        err,
 				"error_type":   fmt.Sprintf("%T", err),
-			})
-		}
-	} else {
-		if r.logger != nil {
-			r.logger.Debug("Added service to type index", map[string]interface{}{
-				"service_type": info.Type,
 				"service_id":   info.ID,
-				"type_key":     typeKey,
+				"service_name": info.Name,
 			})
 		}
-	}
-	
-	if err := r.client.Expire(ctx, typeKey, r.ttl*2).Err(); err != nil && r.logger != nil {
-		r.logger.Warn("Failed to set type index expiry", map[string]interface{}{
-			"type_key":   typeKey,
-			"error":      err,
-			"error_type": fmt.Sprintf("%T", err),
-		})
+		return fmt.Errorf("failed to register service atomically: %w", err)
 	}
 
 	if r.logger != nil {
-		r.logger.Debug("Service registered", map[string]interface{}{
-			"service_id":   info.ID,
-			"service_name": info.Name,
-			"type":         info.Type,
+		r.logger.Info("Service registered successfully", map[string]interface{}{
+			"service_id":         info.ID,
+			"service_name":       info.Name,
+			"service_type":       info.Type,
+			"capabilities_count": len(info.Capabilities),
 		})
 	}
 
@@ -406,6 +348,11 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 		return fmt.Errorf("failed to unregister service %s: %w", serviceID, err)
 	}
 
+	// Clean up registration state (prevents memory leaks)
+	r.stateMutex.Lock()
+	delete(r.registrationState, serviceID)
+	r.stateMutex.Unlock()
+
 	if r.logger != nil {
 		r.logger.Info("Service unregistered successfully", map[string]interface{}{
 			"service_id": serviceID,
@@ -486,9 +433,118 @@ func (r *RedisRegistry) SetLogger(logger Logger) {
 	r.logger = logger
 }
 
-// StartHeartbeat starts a heartbeat goroutine to keep registration alive
+// storeRegistrationState stores service info for potential re-registration (internal helper)
+func (r *RedisRegistry) storeRegistrationState(serviceInfo *ServiceInfo) {
+	r.stateMutex.Lock()
+	defer r.stateMutex.Unlock()
+
+	// Store minimal copy for re-registration
+	r.registrationState[serviceInfo.ID] = &ServiceInfo{
+		ID:           serviceInfo.ID,
+		Name:         serviceInfo.Name,
+		Type:         serviceInfo.Type,
+		Address:      serviceInfo.Address,
+		Port:         serviceInfo.Port,
+		Capabilities: append([]Capability{}, serviceInfo.Capabilities...),
+		Health:       HealthHealthy,
+		Metadata:     copyMetadata(serviceInfo.Metadata),
+	}
+}
+
+// getStoredRegistrationState retrieves stored service info for re-registration (internal helper)
+func (r *RedisRegistry) getStoredRegistrationState(serviceID string) *ServiceInfo {
+	r.stateMutex.RLock()
+	defer r.stateMutex.RUnlock()
+
+	if info, exists := r.registrationState[serviceID]; exists {
+		// Return copy to prevent external modification
+		return &ServiceInfo{
+			ID:           info.ID,
+			Name:         info.Name,
+			Type:         info.Type,
+			Address:      info.Address,
+			Port:         info.Port,
+			Capabilities: append([]Capability{}, info.Capabilities...),
+			Health:       HealthHealthy,
+			Metadata:     copyMetadata(info.Metadata),
+		}
+	}
+	return nil
+}
+
+// copyMetadata creates a deep copy of metadata map (internal helper)
+func copyMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+	result := make(map[string]interface{})
+	for k, v := range metadata {
+		result[k] = v
+	}
+	return result
+}
+
+// isServiceNotFoundError checks if error indicates service not found (internal helper)
+func (r *RedisRegistry) isServiceNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Handle UpdateHealth errors
+	if err == redis.Nil {
+		return true
+	}
+
+	// Handle atomic registration errors
+	errorStr := err.Error()
+	return strings.Contains(errorStr, "service not found") ||
+		strings.Contains(errorStr, "key does not exist")
+}
+
+// maintainRegistration provides intelligent heartbeat with self-healing (internal helper)
+func (r *RedisRegistry) maintainRegistration(ctx context.Context, serviceID string) {
+	// Try lightweight health update first (normal operation)
+	err := r.UpdateHealth(ctx, serviceID, HealthHealthy)
+
+	if err != nil && r.isServiceNotFoundError(err) {
+		// Service expired from Redis - attempt re-registration
+		if serviceInfo := r.getStoredRegistrationState(serviceID); serviceInfo != nil {
+			// Use jittered backoff to prevent thundering herd during recovery
+			jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+			time.Sleep(jitter)
+
+			if regErr := r.Register(ctx, serviceInfo); regErr != nil {
+				if r.logger != nil {
+					r.logger.Error("Failed to re-register service during recovery", map[string]interface{}{
+						"service_id":               serviceID,
+						"error":                    regErr,
+						"will_retry_next_heartbeat": true,
+					})
+				}
+			} else {
+				if r.logger != nil {
+					r.logger.Info("Successfully re-registered service after Redis recovery", map[string]interface{}{
+						"service_id": serviceID,
+					})
+				}
+			}
+		}
+	} else if err != nil && r.logger != nil {
+		r.logger.Error("Failed to send heartbeat", map[string]interface{}{
+			"service_id": serviceID,
+			"error":      err.Error(),
+		})
+	}
+}
+
+// StartHeartbeat starts a heartbeat goroutine to keep registration alive (enhanced for self-healing)
 func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
-	ticker := time.NewTicker(r.ttl / 2)
+	// Base interval with jitter to distribute load
+	baseInterval := r.ttl / 2
+	jitter := time.Duration(rand.Intn(int(baseInterval.Milliseconds()/4))) * time.Millisecond
+	interval := baseInterval + jitter
+
+	ticker := time.NewTicker(interval)
 	go func() {
 		defer ticker.Stop()
 		for {
@@ -496,14 +552,8 @@ func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := r.UpdateHealth(ctx, serviceID, HealthHealthy); err != nil {
-					if r.logger != nil {
-						r.logger.Error("Failed to send heartbeat", map[string]interface{}{
-							"service_id": serviceID,
-							"error":      err.Error(),
-						})
-					}
-				}
+				// Use enhanced maintenance logic with self-healing
+				r.maintainRegistration(ctx, serviceID)
 			}
 		}
 	}()
