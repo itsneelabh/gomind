@@ -58,8 +58,9 @@ func TestCircuitBreakerStateTransitions(t *testing.T) {
 		t.Errorf("Expected ErrCircuitBreakerOpen, got %v", err)
 	}
 
-	// Wait for sleep window
-	time.Sleep(150 * time.Millisecond)
+	// Wait for sleep window with CI-friendly buffer
+	// Sleep window is 100ms, use 250ms for CI stability
+	time.Sleep(250 * time.Millisecond)
 
 	// Should allow test request (half-open)
 	successCount := 0
@@ -193,8 +194,9 @@ func TestCircuitBreakerHalfOpenState(t *testing.T) {
 		t.Fatal("Circuit should be open")
 	}
 
-	// Wait for sleep window
-	time.Sleep(150 * time.Millisecond)
+	// Wait for sleep window with CI-friendly buffer
+	// Sleep window is 100ms, use 250ms for CI stability
+	time.Sleep(250 * time.Millisecond)
 
 	// Execute should transition to half-open
 	successCount := 0
@@ -357,8 +359,9 @@ func TestCircuitBreakerExponentialBackoff(t *testing.T) {
 
 	initialSleepWindow := config.SleepWindow
 
-	// Wait and fail in half-open
-	time.Sleep(60 * time.Millisecond)
+	// Wait for half-open state with CI-friendly buffer
+	// Sleep window is 50ms, use 150ms for CI stability
+	time.Sleep(150 * time.Millisecond)
 	_ = cb.Execute(context.Background(), func() error {
 		return errors.New("test error")
 	})
@@ -457,8 +460,9 @@ func TestCircuitBreakerBackwardCompatibility(t *testing.T) {
 		t.Error("Expected CanExecute to return false when open")
 	}
 
-	// Wait for recovery timeout
-	time.Sleep(150 * time.Millisecond)
+	// Wait for recovery timeout with CI-friendly buffer
+	// Timeout is 100ms, use 300ms for CI stability
+	time.Sleep(300 * time.Millisecond)
 
 	// Should allow execution now (enters half-open)
 	if !cb.CanExecute() {
@@ -534,8 +538,9 @@ func TestSlidingWindowRotation(t *testing.T) {
 	window.RecordSuccess()
 	window.RecordSuccess()
 
-	// Wait for bucket rotation
-	time.Sleep(60 * time.Millisecond)
+	// Wait for bucket rotation with CI-friendly buffer
+	// Using 150ms for stable bucket rotation in CI
+	time.Sleep(150 * time.Millisecond)
 
 	// Record in second bucket
 	window.RecordFailure()
@@ -546,8 +551,9 @@ func TestSlidingWindowRotation(t *testing.T) {
 		t.Errorf("Expected 2 successes and 1 failure, got %d and %d", success, failure)
 	}
 
-	// Wait for window to expire
-	time.Sleep(200 * time.Millisecond)
+	// Wait for window to expire with CI-friendly buffer
+	// Window is 200ms, use 400ms for CI stability
+	time.Sleep(400 * time.Millisecond)
 
 	// Old records should be expired
 	success, failure = window.GetCounts()

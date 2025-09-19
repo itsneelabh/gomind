@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package core
 
 import (
@@ -156,10 +159,7 @@ func TestWithRedisDiscoveryHelper(t *testing.T) {
 
 // TestAgentDependencyInjectionFixed verifies that agents now auto-initialize discovery
 func TestAgentDependencyInjectionFixed(t *testing.T) {
-	// Skip if no Redis available
-	if testing.Short() {
-		t.Skip("Skipping Redis dependency injection test in short mode")
-	}
+	requireRedis(t)
 
 	ctx := context.Background()
 
@@ -179,10 +179,6 @@ func TestAgentDependencyInjectionFixed(t *testing.T) {
 		// Initialize should now create Redis discovery automatically
 		err = agent.Initialize(ctx)
 		if err != nil {
-			// If Redis is not available, that's expected
-			if config.Discovery.RedisURL == "redis://localhost:6379" {
-				t.Skipf("Redis not available at localhost: %v", err)
-			}
 			t.Fatalf("Agent.Initialize() failed: %v", err)
 		}
 
@@ -211,7 +207,7 @@ func TestAgentDependencyInjectionFixed(t *testing.T) {
 
 		err = agent.Initialize(ctx)
 		if err != nil {
-			t.Skipf("Redis not available: %v", err)
+			t.Fatalf("Agent.Initialize() failed: %v", err)
 		}
 
 		// Verify discovery was auto-initialized
@@ -228,10 +224,7 @@ func TestAgentDependencyInjectionFixed(t *testing.T) {
 
 // TestToolDependencyInjectionFixed verifies that tools now auto-initialize registry
 func TestToolDependencyInjectionFixed(t *testing.T) {
-	// Skip if no Redis available
-	if testing.Short() {
-		t.Skip("Skipping Redis dependency injection test in short mode")
-	}
+	requireRedis(t)
 
 	ctx := context.Background()
 
@@ -251,7 +244,7 @@ func TestToolDependencyInjectionFixed(t *testing.T) {
 	if config.Discovery.RedisURL != "" {
 		registry, err := NewRedisRegistry(config.Discovery.RedisURL)
 		if err != nil {
-			t.Skipf("Redis not available: %v", err)
+			t.Fatalf("Failed to create Redis registry: %v", err)
 		}
 		tool.Registry = registry
 
@@ -270,9 +263,7 @@ func TestToolDependencyInjectionFixed(t *testing.T) {
 
 // TestFrameworkIntegrationWithDependencyInjection verifies end-to-end framework usage
 func TestFrameworkIntegrationWithDependencyInjection(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping framework integration test in short mode")
-	}
+	requireRedis(t)
 
 	ctx := context.Background()
 

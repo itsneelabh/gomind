@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package core
 
 import (
@@ -13,18 +16,13 @@ import (
 // TestTTLAndHeartbeatIntegration verifies Issue #6 fix from TESTING_RESULTS.md
 // This tests the TTL expiration and heartbeat functionality end-to-end
 func TestTTLAndHeartbeatIntegration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping TTL integration test in short mode")
-	}
-
-	// Skip if Redis not available
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-	defer client.Close()
+	requireRedis(t)
 
 	ctx := context.Background()
-	if err := client.Ping(ctx).Err(); err != nil {
-		t.Skip("Redis not available, skipping TTL integration tests")
-	}
+
+	// Create Redis client for test operations
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	defer client.Close()
 
 	// Clean Redis before testing
 	client.FlushAll(ctx)

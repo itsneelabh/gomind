@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package core
 
 import (
@@ -10,21 +13,18 @@ import (
 
 // TestToolHeartbeatRedisRegistry verifies that tools start heartbeat with Redis registry
 func TestToolHeartbeatRedisRegistry(t *testing.T) {
-	// Skip if no Redis available
-	if testing.Short() {
-		t.Skip("Skipping Redis heartbeat test in short mode")
-	}
+	requireRedis(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Create tool with Redis registry
 	tool := NewTool("heartbeat-test-tool")
-	
-	// Setup Redis registry (use test Redis or mock)
+
+	// Setup Redis registry
 	registry, err := NewRedisRegistry("redis://localhost:6379")
 	if err != nil {
-		t.Skipf("Redis not available: %v", err)
+		t.Fatalf("Failed to create Redis registry: %v", err)
 	}
 	tool.Registry = registry
 
@@ -91,21 +91,18 @@ func TestToolHeartbeatNonRedisRegistry(t *testing.T) {
 
 // TestAgentHeartbeatRedisDiscovery verifies that agents start heartbeat with Redis discovery
 func TestAgentHeartbeatRedisDiscovery(t *testing.T) {
-	// Skip if no Redis available
-	if testing.Short() {
-		t.Skip("Skipping Redis heartbeat test in short mode")
-	}
+	requireRedis(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Create agent with Redis discovery
 	agent := NewBaseAgent("heartbeat-test-agent")
-	
+
 	// Setup Redis discovery
 	discovery, err := NewRedisDiscovery("redis://localhost:6379")
 	if err != nil {
-		t.Skipf("Redis not available: %v", err)
+		t.Fatalf("Failed to create Redis discovery: %v", err)
 	}
 	agent.Discovery = discovery
 
@@ -170,19 +167,16 @@ func TestAgentHeartbeatRegistrationFailure(t *testing.T) {
 
 // TestHeartbeatContextCancellation verifies heartbeat stops on context cancellation
 func TestHeartbeatContextCancellation(t *testing.T) {
-	// Skip if no Redis available
-	if testing.Short() {
-		t.Skip("Skipping Redis heartbeat test in short mode")
-	}
+	requireRedis(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create tool with Redis registry
 	tool := NewTool("context-cancel-tool")
-	
+
 	registry, err := NewRedisRegistry("redis://localhost:6379")
 	if err != nil {
-		t.Skipf("Redis not available: %v", err)
+		t.Fatalf("Failed to create Redis registry: %v", err)
 	}
 	tool.Registry = registry
 
@@ -204,20 +198,17 @@ func TestHeartbeatContextCancellation(t *testing.T) {
 
 // TestHeartbeatPersistence verifies registration persists beyond TTL
 func TestHeartbeatPersistence(t *testing.T) {
-	// Skip if no Redis available or in short mode (this test takes ~35 seconds)
-	if testing.Short() {
-		t.Skip("Skipping long-running heartbeat persistence test in short mode")
-	}
+	requireRedis(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Create tool with Redis registry
 	tool := NewTool("persistence-test-tool")
-	
+
 	registry, err := NewRedisRegistry("redis://localhost:6379")
 	if err != nil {
-		t.Skipf("Redis not available: %v", err)
+		t.Fatalf("Failed to create Redis registry: %v", err)
 	}
 	tool.Registry = registry
 

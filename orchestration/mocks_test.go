@@ -2,11 +2,14 @@ package orchestration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 // MockHTTPClient implements a mock HTTP client for testing
@@ -233,4 +236,97 @@ func (m *MockAgentServer) SetCapabilities(caps []EnhancedCapability) {
 // SetResponse sets a response for a capability
 func (m *MockAgentServer) SetResponse(capability string, response interface{}) {
 	m.responses[capability] = response
+}
+
+// MockDiscovery for unit tests
+type MockDiscovery struct {
+	services map[string][]*core.ServiceRegistration
+}
+
+func NewMockDiscovery() *MockDiscovery {
+	return &MockDiscovery{
+		services: make(map[string][]*core.ServiceRegistration),
+	}
+}
+
+func (m *MockDiscovery) Register(ctx context.Context, registration *core.ServiceRegistration) error {
+	m.services[registration.Name] = append(m.services[registration.Name], registration)
+	return nil
+}
+
+func (m *MockDiscovery) Unregister(ctx context.Context, serviceID string) error {
+	return nil
+}
+
+func (m *MockDiscovery) FindService(ctx context.Context, serviceName string) ([]*core.ServiceRegistration, error) {
+	return m.services[serviceName], nil
+}
+
+func (m *MockDiscovery) FindByCapability(ctx context.Context, capability string) ([]*core.ServiceRegistration, error) {
+	var results []*core.ServiceRegistration
+	for _, services := range m.services {
+		for _, service := range services {
+			for _, cap := range service.Capabilities {
+				if cap.Name == capability {
+					results = append(results, service)
+					break
+				}
+			}
+		}
+	}
+	return results, nil
+}
+
+func (m *MockDiscovery) FindByType(ctx context.Context, serviceType core.ComponentType) ([]*core.ServiceRegistration, error) {
+	var results []*core.ServiceRegistration
+	for _, services := range m.services {
+		for _, service := range services {
+			if service.Type == serviceType {
+				results = append(results, service)
+			}
+		}
+	}
+	return results, nil
+}
+
+func (m *MockDiscovery) Health(ctx context.Context) error {
+	return nil
+}
+
+func (m *MockDiscovery) UpdateHealth(ctx context.Context, serviceID string, health core.HealthStatus) error {
+	// Mock implementation - just return success
+	return nil
+}
+
+func (m *MockDiscovery) Discover(ctx context.Context, filter core.DiscoveryFilter) ([]*core.ServiceInfo, error) {
+	var results []*core.ServiceInfo
+	for _, services := range m.services {
+		for _, service := range services {
+			// Convert ServiceRegistration to ServiceInfo
+			serviceInfo := &core.ServiceInfo{
+				ID:           service.ID,
+				Name:         service.Name,
+				Type:         service.Type,
+				Address:      service.Address,
+				Port:         service.Port,
+				Capabilities: service.Capabilities,
+				Health:       core.HealthHealthy,
+			}
+
+			// Apply filter if needed (simplified for mock)
+			if filter.Type != "" && filter.Type != service.Type {
+				continue
+			}
+			if filter.Name != "" && filter.Name != service.Name {
+				continue
+			}
+			results = append(results, serviceInfo)
+		}
+	}
+	return results, nil
+}
+
+// Helper function
+func stringContains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

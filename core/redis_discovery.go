@@ -350,10 +350,12 @@ func intersect(a, b []string) []string {
 	for _, v := range a {
 		set[v] = true
 	}
-	
+
+	seen := make(map[string]bool)
 	var result []string
 	for _, v := range b {
-		if set[v] {
+		if set[v] && !seen[v] {
+			seen[v] = true
 			result = append(result, v)
 		}
 	}
