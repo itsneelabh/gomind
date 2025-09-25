@@ -1,0 +1,312 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-tools-config
+  namespace: gomind-examples
+  labels:
+    app.kubernetes.io/name: ai-tools-showcase
+    app.kubernetes.io/component: config
+data:
+  # Service Configuration
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  
+  # Framework Configuration
+  GOMIND_NAMESPACE: "gomind-examples"
+  GOMIND_DEV_MODE: "false"
+
+  # Redis Configuration for Service Discovery
+  REDIS_URL: "redis://redis:6379"
+
+  # Telemetry Configuration
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  
+  # AI Tools Configuration
+  AI_TOOLS_MODE: "composite"
+  INTERACTIVE_DEMOS: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ai-tools-secrets
+  namespace: gomind-examples
+  labels:
+    app.kubernetes.io/name: ai-tools-showcase
+    app.kubernetes.io/component: secrets
+type: Opaque
+data:
+  # Base64 encoded API keys - replace with actual values
+  # At least one AI provider key is required for AI tools to function
+  OPENAI_API_KEY: "your-base64-encoded-openai-api-key"
+  GROQ_API_KEY: "your-base64-encoded-groq-api-key"
+  ANTHROPIC_API_KEY: "your-base64-encoded-anthropic-api-key"
+  DEEPSEEK_API_KEY: "your-base64-encoded-deepseek-api-key"
+  GEMINI_API_KEY: "your-base64-encoded-gemini-api-key"
+  # Example: echo -n "sk-your-key-here" | base64
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-tools-showcase
+  namespace: gomind-examples
+  labels:
+    app.kubernetes.io/name: ai-tools-showcase
+    app.kubernetes.io/component: ai-tools
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/part-of: gomind-framework
+    gomind.framework/type: tool
+    gomind.framework/ai-powered: "true"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ai-tools-showcase
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ai-tools-showcase
+        app.kubernetes.io/component: ai-tools
+        app.kubernetes.io/version: "1.0.0"
+        gomind.framework/type: tool
+        gomind.framework/ai-powered: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: ai-tools-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+      - name: ai-tools-showcase
+        image: gomind/ai-tools-showcase:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        # Load configuration from ConfigMap
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: ai-tools-config
+              key: PORT
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: ai-tools-config
+              key: LOG_LEVEL
+        - name: GOMIND_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: ai-tools-config
+              key: GOMIND_NAMESPACE
+        - name: GOMIND_DEV_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: ai-tools-config
+              key: GOMIND_DEV_MODE
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: ai-tools-config
+              key: REDIS_URL
+        - name: AI_TOOLS_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: ai-tools-config
+              key: AI_TOOLS_MODE
+        - name: INTERACTIVE_DEMOS
+          valueFrom:
+            configMapKeyRef:
+              name: ai-tools-config
+              key: INTERACTIVE_DEMOS
+        # Load AI provider secrets (at least one required)
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-provider-keys
+              key: OPENAI_API_KEY
+              optional: true
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-provider-keys
+              key: GROQ_API_KEY
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-provider-keys
+              key: ANTHROPIC_API_KEY
+              optional: true
+        - name: DEEPSEEK_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-provider-keys
+              key: DEEPSEEK_API_KEY
+              optional: true
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-provider-keys
+              key: GEMINI_API_KEY
+              optional: true
+        # Pod metadata for service discovery
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/capabilities
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: ai-cache
+          mountPath: /app/cache
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: ai-cache
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - ai-tools-showcase
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+      - key: "gomind.ai/ai-tools"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-tools-service
+  namespace: gomind-examples
+  labels:
+    app.kubernetes.io/name: ai-tools-showcase
+    app.kubernetes.io/component: service
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: ai-tools-showcase
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-tools-service-account
+  namespace: gomind-examples
+  labels:
+    app.kubernetes.io/name: ai-tools-showcase
+    app.kubernetes.io/component: service-account
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ai-tools-role
+  namespace: gomind-examples
+  labels:
+    app.kubernetes.io/name: ai-tools-showcase
+    app.kubernetes.io/component: role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ai-tools-role-binding
+  namespace: gomind-examples
+  labels:
+    app.kubernetes.io/name: ai-tools-showcase
+    app.kubernetes.io/component: role-binding
+subjects:
+- kind: ServiceAccount
+  name: ai-tools-service-account
+  namespace: gomind-examples
+roleRef:
+  kind: Role
+  name: ai-tools-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Ingress for AI Tools Showcase (Cloud Provider Specific)
+#
+# NOTE: Ingress resources are commented out for cloud compatibility.
+# Each cloud provider uses different ingress controllers and annotations.
+#
+# See k8-deployment/grafana.yaml for complete cloud-specific examples.
+# Uncomment and modify the appropriate configuration for your environment.

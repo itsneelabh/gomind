@@ -1,0 +1,188 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: research-agent
+  namespace: gomind-examples
+  labels:
+    app: research-agent
+    component: agent
+    version: v1.0.0
+    gomind.framework/type: agent
+spec:
+  replicas: 1  # Agents typically run as singletons for coordination
+  selector:
+    matchLabels:
+      app: research-agent
+  template:
+    metadata:
+      labels:
+        app: research-agent
+        component: agent
+        version: v1.0.0
+        gomind.framework/type: agent
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8090"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: research-agent
+        image: research-agent-example:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8090
+          name: http
+          protocol: TCP
+        env:
+        - name: GOMIND_AGENT_NAME
+          value: "research-assistant"
+        - name: GOMIND_PORT
+          value: "8090"
+        - name: GOMIND_NAMESPACE
+          value: "gomind-examples"
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        - name: GOMIND_REDIS_URL
+          value: "redis://redis:6379"
+        - name: GOMIND_DEV_MODE
+          value: "false"
+        # Telemetry Configuration
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4318"
+        # AI Provider Configuration (optional)
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-provider-keys
+              key: OPENAI_API_KEY
+              optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-provider-keys
+              key: ANTHROPIC_API_KEY
+              optional: true
+        - name: GROQ_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ai-provider-keys
+              key: GROQ_API_KEY
+              optional: true
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "200m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8090
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/capabilities
+            port: 8090
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 1001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: research-agent-service
+  namespace: gomind-examples
+  labels:
+    app: research-agent
+    component: agent
+    gomind.framework/type: agent
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8090
+    protocol: TCP
+    name: http
+  selector:
+    app: research-agent
+---
+# Optional: Ingress for external access to the agent (Cloud Provider Specific)
+#
+# NOTE: Ingress resources are commented out for cloud compatibility.
+# Uncomment and modify based on your cloud provider:
+#
+# FOR KIND/NGINX INGRESS:
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: research-agent-ingress
+#   namespace: gomind-examples
+#   annotations:
+#     nginx.ingress.kubernetes.io/rewrite-target: /
+#     nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+#     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+#     nginx.ingress.kubernetes.io/cors-allow-headers: "Content-Type, Authorization"
+# spec:
+#   ingressClassName: nginx
+#   rules:
+#   - host: research-agent.local
+#     http:
+#       paths:
+#       - path: /
+#         pathType: Prefix
+#         backend:
+#           service:
+#             name: research-agent-service
+#             port:
+#               number: 80
+#
+# FOR EKS/GKE/AKS: See k8-deployment/grafana.yaml for cloud-specific examples
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: research-agent-config
+  namespace: gomind-examples
+  labels:
+    app: research-agent
+    component: agent
+data:
+  config.yaml: |
+    service:
+      name: research-assistant
+      port: 8090
+      namespace: gomind-examples
+    discovery:
+      enabled: true
+      provider: redis
+      redis_url: redis://redis:6379
+      cache_enabled: true
+    ai:
+      auto_detect: true
+      temperature: 0.7
+      max_tokens: 1000
+      timeout: 30s
+    logging:
+      level: info
+      format: json
+    cors:
+      enabled: true
+      origins: ["*"]

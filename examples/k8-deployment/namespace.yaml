@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gomind-examples
+  labels:
+    name: gomind-examples
+    project: gomind
+    environment: development
+  annotations:
+    description: "GoMind framework examples and demos"
+    documentation: "https://github.com/itsneelabh/gomind/examples"
