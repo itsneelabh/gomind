@@ -34,7 +34,7 @@ func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
 	}
 
 	base := providers.NewBaseClient(30*time.Second, logger)
-	base.DefaultModel = "claude-3-sonnet-20240229"
+	base.DefaultModel = "claude-3-5-sonnet-20240620"
 	base.DefaultMaxTokens = 1000
 
 	return &Client{

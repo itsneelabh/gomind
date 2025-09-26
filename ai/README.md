@@ -117,7 +117,7 @@ client, _ := ai.NewClient(
     ai.WithProvider("openai"),  // Same provider!
     ai.WithBaseURL("https://api.groq.com/openai/v1"),
     ai.WithAPIKey("your-groq-key"),
-    ai.WithModel("llama3-70b-8192"),
+    ai.WithModel("llama-3.3-70b-versatile"),
 )
 
 // Using DeepSeek (advanced reasoning)
@@ -293,7 +293,7 @@ client, _ := ai.NewClient(
 client, _ := ai.NewClient(
     ai.WithProvider("gemini"),
     ai.WithAPIKey("..."),
-    ai.WithModel("gemini-pro"),
+    ai.WithModel("gemini-1.5-pro"),
 )
 
 ```
