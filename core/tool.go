@@ -45,6 +45,9 @@ type BaseTool struct {
 	// HTTP server
 	server *http.Server
 	mux    *http.ServeMux
+
+	// Handler registration tracking (same as BaseAgent for consistency)
+	registeredPatterns map[string]bool // Track registered patterns to prevent duplicates
 }
 
 // NewTool creates a new tool with default implementations
@@ -71,54 +74,88 @@ func NewToolWithConfig(config *Config) *BaseTool {
 	}
 
 	return &BaseTool{
-		ID:        config.ID,
-		Name:      config.Name,
-		Type:      ComponentTypeTool,
-		Logger:    &NoOpLogger{},
-		Memory:    NewInMemoryStore(),
-		Telemetry: &NoOpTelemetry{},
-		Config:    config,
-		mux:       http.NewServeMux(),
+		ID:                 config.ID,
+		Name:               config.Name,
+		Type:               ComponentTypeTool,
+		Logger:             &NoOpLogger{},
+		Memory:             NewInMemoryStore(),
+		Telemetry:          &NoOpTelemetry{},
+		Config:             config,
+		mux:                http.NewServeMux(),
+		registeredPatterns: make(map[string]bool), // Initialize pattern tracking
 	}
 }
 
 // Initialize initializes the tool
 func (t *BaseTool) Initialize(ctx context.Context) error {
-	t.Logger.Info("Initializing tool", map[string]interface{}{
-		"name": t.Name,
-		"id":   t.ID,
-		"type": t.Type,
+	// 🔥 ADD: Enhanced initialization context
+	t.Logger.Info("Starting tool initialization", map[string]interface{}{
+		"id":                t.ID,
+		"name":              t.Name,
+		"type":              t.Type,
+		"config_provided":   t.Config != nil,
+		"discovery_enabled": t.Config != nil && t.Config.Discovery.Enabled,
+		"namespace":         getNamespaceFromConfig(t.Config),
 	})
 
 	// Initialize components based on config (following BaseAgent pattern)
 	if t.Config != nil {
 		// Initialize registry if configured
 		if t.Config.Discovery.Enabled && t.Registry == nil {
+			// 🔥 ADD: Registry initialization visibility
+			t.Logger.Info("Initializing service registry", map[string]interface{}{
+				"provider":      t.Config.Discovery.Provider,
+				"mock_mode":     t.Config.Development.MockDiscovery,
+				"redis_url":     t.Config.Discovery.RedisURL != "",
+			})
+
 			if t.Config.Development.MockDiscovery {
 				// Use mock registry for development
 				t.Registry = NewMockDiscovery()
+				// 🔥 ADD: Mock registry confirmation
+				t.Logger.Info("Using mock registry for development", map[string]interface{}{
+					"provider": "mock",
+					"reason":   "development_mode",
+				})
 			} else if t.Config.Discovery.Provider == "redis" && t.Config.Discovery.RedisURL != "" {
 				// Initialize Redis registry
 				if registry, err := NewRedisRegistry(t.Config.Discovery.RedisURL); err == nil {
 					// Set logger for better observability
 					registry.SetLogger(t.Logger)
 					t.Registry = registry
+					// 🔥 ADD: Redis registry success
+					t.Logger.Info("Redis registry initialized successfully", map[string]interface{}{
+						"provider":  "redis",
+						"redis_url": t.Config.Discovery.RedisURL,
+					})
 				} else {
+					// Enhance existing error logging with dependency context
 					t.Logger.Error("Failed to initialize Redis registry", map[string]interface{}{
 						"error":      err,
 						"error_type": fmt.Sprintf("%T", err),
 						"redis_url":  t.Config.Discovery.RedisURL,
+						// 🔥 ADD: Dependency impact context
+						"impact":     "tool_will_run_without_registry",
+						"fallback":   "manual_configuration_required",
 					})
 				}
 			}
 		}
 	}
 
-	// Register with registry if available (regardless of how Registry was set)
+	// 🔥 ADD: Service registration attempt context
 	if t.Registry != nil {
-		// Use the shared resolver to determine address
 		address, port := ResolveServiceAddress(t.Config, t.Logger)
-		
+
+		t.Logger.Info("Attempting service registration", map[string]interface{}{
+			"service_id":         t.ID,
+			"service_name":       t.Name,
+			"resolved_address":   address,
+			"resolved_port":      port,
+			"capabilities_count": len(t.Capabilities),
+			"namespace":          getNamespaceFromConfig(t.Config),
+		})
+
 		info := &ServiceInfo{
 			ID:           t.ID,
 			Name:         t.Name,
@@ -141,7 +178,22 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 				"ttl":     redisRegistry.ttl,
 			})
 		}
+	} else {
+		// 🔥 ADD: No registry context
+		t.Logger.Warn("Tool running without service registry", map[string]interface{}{
+			"reason":          "registry_not_configured",
+			"impact":          "tool_not_discoverable",
+			"manual_config":   "required_for_service_mesh",
+		})
 	}
+
+	// 🔥 ADD: Initialization completion
+	t.Logger.Info("Tool initialization completed", map[string]interface{}{
+		"id":                t.ID,
+		"name":              t.Name,
+		"discovery_enabled": t.Registry != nil,
+		"capabilities_count": len(t.Capabilities),
+	})
 
 	return nil
 }
@@ -195,6 +247,9 @@ func (t *BaseTool) RegisterCapability(cap Capability) {
 		// Use generic handler with telemetry and logging
 		t.mux.HandleFunc(cap.Endpoint, t.handleCapabilityRequest(cap))
 	}
+
+	// Track this pattern to prevent duplicates
+	t.registeredPatterns[cap.Endpoint] = true
 	
 	t.Logger.Info("Registered capability", map[string]interface{}{
 		"name":           cap.Name,
@@ -239,9 +294,16 @@ func (t *BaseTool) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			// Log error but response is already partially written
 			t.Logger.Error("Failed to encode response", map[string]interface{}{
-				"error":      err,
-				"error_type": fmt.Sprintf("%T", err),
-				"path":       r.URL.Path,
+				"error":             err,
+				"error_type":        fmt.Sprintf("%T", err),
+				"tool_id":           t.ID,
+				// 🔥 ADD: Request context for troubleshooting
+				"request_method":    r.Method,
+				"request_path":      r.URL.Path,
+				"request_remote":    r.RemoteAddr,
+				"capabilities_count": len(t.Capabilities),
+				"user_agent":        r.Header.Get("User-Agent"),
+				"content_length":    r.ContentLength,
 			})
 		}
 	}
@@ -250,40 +312,61 @@ func (t *BaseTool) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 // setupStandardEndpoints adds standard endpoints like /api/capabilities and /health
 func (t *BaseTool) setupStandardEndpoints() {
 	// Add capabilities listing endpoint (same as Agent)
-	t.mux.HandleFunc("/api/capabilities", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(t.Capabilities); err != nil {
-			// Log error but response is already partially written
-			t.Logger.Error("Failed to encode capabilities", map[string]interface{}{
-				"error":      err,
-				"error_type": fmt.Sprintf("%T", err),
-				"tool_id":    t.ID,
-			})
-		}
-	})
-	
+	capabilitiesPath := "/api/capabilities"
+	if !t.registeredPatterns[capabilitiesPath] {
+		t.mux.HandleFunc(capabilitiesPath, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(t.Capabilities); err != nil {
+				// Log error but response is already partially written
+				t.Logger.Error("Failed to encode capabilities", map[string]interface{}{
+					"error":             err,
+					"error_type":        fmt.Sprintf("%T", err),
+					"tool_id":           t.ID,
+					// 🔥 ADD: Request context for troubleshooting
+					"request_method":    r.Method,
+					"request_path":      r.URL.Path,
+					"request_remote":    r.RemoteAddr,
+					"capabilities_count": len(t.Capabilities),
+					"user_agent":        r.Header.Get("User-Agent"),
+					"content_length":    r.ContentLength,
+				})
+			}
+		})
+		t.registeredPatterns[capabilitiesPath] = true
+	}
+
 	// Add health endpoint if enabled (same as Agent)
 	if t.Config != nil && t.Config.HTTP.EnableHealthCheck {
 		healthPath := t.Config.HTTP.HealthCheckPath
 		if healthPath == "" {
 			healthPath = "/health"
 		}
-		t.mux.HandleFunc(healthPath, func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(map[string]string{
-				"status": "healthy",
-				"type":   "tool",
-				"name":   t.Name,
-				"id":     t.ID,
-			}); err != nil {
-				// Log error but response is already partially written
-				t.Logger.Error("Failed to encode health response", map[string]interface{}{
-					"error":      err,
-					"error_type": fmt.Sprintf("%T", err),
-					"tool_id":    t.ID,
-				})
-			}
-		})
+		if !t.registeredPatterns[healthPath] {
+			t.mux.HandleFunc(healthPath, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				if err := json.NewEncoder(w).Encode(map[string]string{
+					"status": "healthy",
+					"type":   "tool",
+					"name":   t.Name,
+					"id":     t.ID,
+				}); err != nil {
+					// Log error but response is already partially written
+					t.Logger.Error("Failed to encode health response", map[string]interface{}{
+						"error":             err,
+						"error_type":        fmt.Sprintf("%T", err),
+						"tool_id":           t.ID,
+						// 🔥 ADD: Request context for troubleshooting
+						"request_method":    r.Method,
+						"request_path":      r.URL.Path,
+						"request_remote":    r.RemoteAddr,
+						"capabilities_count": len(t.Capabilities),
+						"user_agent":        r.Header.Get("User-Agent"),
+						"content_length":    r.ContentLength,
+					})
+				}
+			})
+			t.registeredPatterns[healthPath] = true
+		}
 	}
 }
 
@@ -297,6 +380,12 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 	
 	// Validate port range (0 is allowed for automatic assignment)
 	if port < 0 || port > 65535 {
+		// 🔥 ADD: Port validation with context
+		t.Logger.Error("Invalid port specified", map[string]interface{}{
+			"requested_port": port,
+			"valid_range":    "0-65535",
+			"port_zero_note": "0_enables_automatic_assignment",
+		})
 		return fmt.Errorf("invalid port %d: must be between 0-65535 (0 for automatic assignment)", port)
 	}
 	
@@ -309,6 +398,29 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 	
 	// Setup standard endpoints (/api/capabilities, /health)
 	t.setupStandardEndpoints()
+
+	// 🔥 ADD: Server configuration logging
+	t.Logger.Info("Configuring HTTP server", map[string]interface{}{
+		"port":                   port,
+		"cors_enabled":           t.Config.HTTP.CORS.Enabled,
+		"health_check_enabled":   t.Config.HTTP.EnableHealthCheck,
+		"read_timeout":           t.Config.HTTP.ReadTimeout.String(),
+		"write_timeout":          t.Config.HTTP.WriteTimeout.String(),
+		"registered_endpoints":   len(t.registeredPatterns),
+	})
+
+	// 🔥 ADD: Endpoint registration summary
+	if len(t.registeredPatterns) > 0 {
+		endpoints := make([]string, 0, len(t.registeredPatterns))
+		for pattern := range t.registeredPatterns {
+			endpoints = append(endpoints, pattern)
+		}
+		t.Logger.Info("HTTP endpoints registered", map[string]interface{}{
+			"endpoints":      endpoints,
+			"total_count":    len(endpoints),
+			"capabilities":   len(t.Capabilities),
+		})
+	}
 	
 	t.server = &http.Server{
 		Addr:              addr,
@@ -320,16 +432,17 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 		MaxHeaderBytes:    t.Config.HTTP.MaxHeaderBytes,
 	}
 
-	t.Logger.Info("Starting tool HTTP server", map[string]interface{}{
-		"tool":    t.Name,
-		"address": addr,
-	})
-
-	// Update registration with resolved address
+	// 🔥 ADD: Service update registration context
 	if t.Registry != nil {
 		// Use the shared resolver for proper K8s support
 		address, registrationPort := ResolveServiceAddress(t.Config, t.Logger)
-		
+		t.Logger.Info("Updating service registration with server details", map[string]interface{}{
+			"service_id":            t.ID,
+			"registration_address":  address,
+			"registration_port":     registrationPort,
+			"server_port":           port,
+		})
+
 		info := &ServiceInfo{
 			ID:           t.ID,
 			Name:         t.Name,
@@ -347,8 +460,25 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 		}
 	}
 
-	// Start server and block (consistent with BaseAgent)
-	return t.server.ListenAndServe()
+	t.Logger.Info("Starting HTTP server", map[string]interface{}{
+		"address":           addr,
+		"cors":              t.Config.HTTP.CORS.Enabled,
+		"capabilities":      len(t.Capabilities),
+		"registry_enabled":  t.Registry != nil,
+	})
+
+	// 🔥 ADD: Server startup failure context
+	if err := t.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		t.Logger.Error("HTTP server failed to start", map[string]interface{}{
+			"error":      err.Error(),
+			"error_type": fmt.Sprintf("%T", err),
+			"address":    addr,
+			"port":       port,
+		})
+		return err
+	}
+
+	return nil
 }
 
 // Shutdown gracefully shuts down the tool
