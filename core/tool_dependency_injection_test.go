@@ -96,6 +96,11 @@ func TestBaseTool_Initialize_AutoInjectsRegistry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Skip Redis tests when Redis is not available (but allow mock tests)
+			if tt.name == "auto_initializes_redis_registry" {
+				requireRedis(t)
+			}
+
 			// Create tool with test configuration
 			tool := &BaseTool{
 				ID:       "test-tool",

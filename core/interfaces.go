@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 )
 
@@ -155,4 +156,52 @@ func (m *InMemoryStore) Delete(ctx context.Context, key string) error {
 func (m *InMemoryStore) Exists(ctx context.Context, key string) (bool, error) {
 	_, exists := m.data[key]
 	return exists, nil
+}
+
+// ============================================================================
+// Global Registry Pattern for Telemetry Integration
+// ============================================================================
+
+// MetricsRegistry enables telemetry module to register itself with core
+// This avoids circular dependencies while enabling metrics emission
+type MetricsRegistry interface {
+	Counter(name string, labels ...string)
+	EmitWithContext(ctx context.Context, name string, value float64, labels ...string)
+	GetBaggage(ctx context.Context) map[string]string
+}
+
+// Global registry - set by telemetry module when it initializes
+var globalMetricsRegistry MetricsRegistry
+
+// SetMetricsRegistry allows telemetry module to register itself
+func SetMetricsRegistry(registry MetricsRegistry) {
+	globalMetricsRegistry = registry
+
+	// Enable metrics on all existing loggers
+	enableMetricsOnExistingLoggers()
+}
+
+// Track created loggers to enable metrics when telemetry becomes available
+var createdLoggers []*ProductionLogger
+var loggersMutex sync.RWMutex
+
+func trackLogger(logger *ProductionLogger) {
+	loggersMutex.Lock()
+	defer loggersMutex.Unlock()
+
+	createdLoggers = append(createdLoggers, logger)
+
+	// If metrics already available, enable immediately
+	if globalMetricsRegistry != nil {
+		logger.EnableMetrics()
+	}
+}
+
+func enableMetricsOnExistingLoggers() {
+	loggersMutex.Lock()
+	defer loggersMutex.Unlock()
+
+	for _, logger := range createdLoggers {
+		logger.EnableMetrics()
+	}
 }

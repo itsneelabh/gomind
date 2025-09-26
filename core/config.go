@@ -1,8 +1,10 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -380,18 +382,19 @@ func (c *Config) DetectEnvironment() {
 	}
 }
 
-// LoadFromEnv loads configuration from environment variables.
+// LoadFromEnv loads configuration from environment variables and validates the result.
 // Environment variables take precedence over defaults but are overridden by functional options.
 //
 // Variable naming convention:
 //   - Framework-specific: GOMIND_<SETTING>
 //   - Standard variables: REDIS_URL, OPENAI_API_KEY, OTEL_EXPORTER_OTLP_ENDPOINT
 //
-// Returns an error if environment variables contain invalid values.
+// Returns an error if environment variables contain invalid values or if validation fails.
 func (c *Config) LoadFromEnv() error {
+	// 🔥 ADD: Configuration loading start
 	if c.logger != nil {
-		c.logger.Debug("Loading configuration from environment variables", map[string]interface{}{
-			"environment_detected": c.Kubernetes.Enabled,
+		c.logger.Info("Loading configuration from environment", map[string]interface{}{
+			"config_source": "environment_variables",
 		})
 	}
 
@@ -401,19 +404,39 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_AGENT_NAME"); v != "" {
 		c.Name = v
 		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
-			c.logger.Debug("Loaded agent name from environment", map[string]interface{}{
-				"name": v,
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "agent_name",
+				"source":  "GOMIND_AGENT_NAME",
+				"set":     true,
 			})
 		}
 	}
 	if v := os.Getenv("GOMIND_AGENT_ID"); v != "" {
 		c.ID = v
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "agent_id",
+				"source":  "GOMIND_AGENT_ID",
+				"set":     true,
+			})
+		}
 	}
 	if v := os.Getenv("GOMIND_PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			c.Port = port
 			envVarsLoaded++
+			// 🔥 ADD: Config value logging (sanitized)
+			if c.logger != nil {
+				c.logger.Debug("Configuration loaded", map[string]interface{}{
+					"setting": "port",
+					"source":  "GOMIND_PORT",
+					"set":     true,
+				})
+			}
 		} else if c.logger != nil {
 			c.logger.Warn("Invalid port in environment variable", map[string]interface{}{
 				"GOMIND_PORT": v,
@@ -424,9 +447,27 @@ func (c *Config) LoadFromEnv() error {
 	}
 	if v := os.Getenv("GOMIND_ADDRESS"); v != "" {
 		c.Address = v
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "address",
+				"source":  "GOMIND_ADDRESS",
+				"set":     true,
+			})
+		}
 	}
 	if v := os.Getenv("GOMIND_NAMESPACE"); v != "" {
 		c.Namespace = v
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "namespace",
+				"source":  "GOMIND_NAMESPACE",
+				"set":     true,
+			})
+		}
 	}
 
 	// HTTP settings
@@ -468,9 +509,27 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_REDIS_URL"); v != "" {
 		c.Discovery.RedisURL = v
 		c.Memory.RedisURL = v // Also use for memory if not separately configured
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "redis_url",
+				"source":  "GOMIND_REDIS_URL",
+				"set":     true,
+			})
+		}
 	} else if v := os.Getenv("REDIS_URL"); v != "" {
 		c.Discovery.RedisURL = v
 		c.Memory.RedisURL = v
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "redis_url",
+				"source":  "REDIS_URL",
+				"set":     true,
+			})
+		}
 	}
 	if v := os.Getenv("GOMIND_DISCOVERY_CACHE"); v != "" {
 		c.Discovery.CacheEnabled = parseBool(v)
@@ -483,9 +542,27 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_AI_API_KEY"); v != "" {
 		c.AI.APIKey = v
 		c.AI.Enabled = true // Auto-enable if API key is provided
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized - no key value)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "ai_api_key",
+				"source":  "GOMIND_AI_API_KEY",
+				"set":     true,
+			})
+		}
 	} else if v := os.Getenv("OPENAI_API_KEY"); v != "" {
 		c.AI.APIKey = v
 		c.AI.Enabled = true // Auto-enable if OpenAI key is present
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized - no key value)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "ai_api_key",
+				"source":  "OPENAI_API_KEY",
+				"set":     true,
+			})
+		}
 	}
 	if v := os.Getenv("GOMIND_AI_MODEL"); v != "" {
 		c.AI.Model = v
@@ -501,9 +578,27 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_TELEMETRY_ENDPOINT"); v != "" {
 		c.Telemetry.Endpoint = v
 		c.Telemetry.Enabled = true // Auto-enable if endpoint is provided
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "telemetry_endpoint",
+				"source":  "GOMIND_TELEMETRY_ENDPOINT",
+				"set":     true,
+			})
+		}
 	} else if v := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); v != "" {
 		c.Telemetry.Endpoint = v
 		c.Telemetry.Enabled = true // Auto-enable if OTEL endpoint is present
+		envVarsLoaded++
+		// 🔥 ADD: Config value logging (sanitized)
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "telemetry_endpoint",
+				"source":  "OTEL_EXPORTER_OTLP_ENDPOINT",
+				"set":     true,
+			})
+		}
 	}
 	if v := os.Getenv("GOMIND_TELEMETRY_SERVICE_NAME"); v != "" {
 		c.Telemetry.ServiceName = v
@@ -582,12 +677,26 @@ func (c *Config) LoadFromEnv() error {
 		}
 	}
 
+	// 🔥 ADD: Configuration validation results
+	if err := c.Validate(); err != nil {
+		if c.logger != nil {
+			c.logger.Error("Configuration validation failed", map[string]interface{}{
+				"error":         err.Error(),
+				"error_type":    fmt.Sprintf("%T", err),
+				"config_source": "environment_variables",
+			})
+		}
+		return err
+	}
+
+	// 🔥 ADD: Configuration loading completion
+	// Note: LOGGING_SOLUTION_ANALYSIS.md:1434 references "EnableDevelopmentMode" but actual field is "Enabled"
 	if c.logger != nil {
-		c.logger.Info("Environment configuration loaded", map[string]interface{}{
-			"env_vars_loaded": envVarsLoaded,
-			"agent_name":      c.Name,
-			"port":            c.Port,
-			"namespace":       c.Namespace,
+		c.logger.Info("Configuration loading completed", map[string]interface{}{
+			"discovery_enabled": c.Discovery.Enabled,
+			"logging_level":     c.Logging.Level,
+			"namespace":         c.Namespace,
+			"development_mode":  c.Development.Enabled,
 		})
 	}
 
@@ -1022,7 +1131,7 @@ func WithAI(enabled bool, provider, apiKey string) Option {
 // WithAIModel sets the AI model to use.
 // Common values:
 //   - OpenAI: "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"
-//   - Anthropic: "claude-3-opus", "claude-3-sonnet"
+//   - Anthropic: "claude-3-5-sonnet-20241022", "claude-3-opus-20240229"
 //
 // Check your provider's documentation for available models.
 func WithAIModel(model string) Option {
@@ -1291,7 +1400,7 @@ func NewConfig(opts ...Option) (*Config, error) {
 	// Start with defaults
 	cfg := DefaultConfig()
 
-	// Load from environment first
+	// Load from environment first (includes validation per spec)
 	if err := cfg.LoadFromEnv(); err != nil {
 		return nil, fmt.Errorf("failed to load env config: %w", err)
 	}
@@ -1303,10 +1412,190 @@ func NewConfig(opts ...Option) (*Config, error) {
 		}
 	}
 
-	// Validate final configuration
+	// 🔥 CRITICAL FIX: Auto-create logger from configuration when none provided
+	if cfg.logger == nil {
+		logger := NewProductionLogger(cfg.Logging, cfg.Development, cfg.Name)
+
+		// Track for metrics enabling when telemetry available
+		if prodLogger, ok := logger.(*ProductionLogger); ok {
+			trackLogger(prodLogger)
+		}
+
+		cfg.logger = logger
+	}
+
+	// Validate final configuration after options applied
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	return cfg, nil
+}
+
+// ============================================================================
+// ProductionLogger Implementation - Layered Observability Architecture
+// ============================================================================
+
+// ProductionLogger provides layered observability for framework operations
+type ProductionLogger struct {
+	level       string
+	debug       bool
+	serviceName string
+	format      string
+	output      io.Writer
+
+	// Metrics layer (enabled when telemetry available)
+	metricsEnabled bool
+}
+
+// NewProductionLogger creates a logger from LoggingConfig
+func NewProductionLogger(logging LoggingConfig, dev DevelopmentConfig, serviceName string) Logger {
+	var output io.Writer = os.Stdout
+	if logging.Output == "stderr" {
+		output = os.Stderr
+	}
+
+	return &ProductionLogger{
+		level:          strings.ToLower(logging.Level),
+		debug:          dev.DebugLogging || logging.Level == "debug",
+		serviceName:    serviceName,
+		format:         logging.Format,
+		output:         output,
+		metricsEnabled: false, // Enabled by telemetry module when available
+	}
+}
+
+// EnableMetrics is called by telemetry module to enable metrics layer
+func (p *ProductionLogger) EnableMetrics() {
+	p.metricsEnabled = true
+}
+
+func (p *ProductionLogger) Info(msg string, fields map[string]interface{}) {
+	p.logEvent("INFO", msg, fields, nil)
+}
+
+func (p *ProductionLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	p.logEvent("INFO", msg, fields, ctx)
+}
+
+func (p *ProductionLogger) Error(msg string, fields map[string]interface{}) {
+	p.logEvent("ERROR", msg, fields, nil)
+}
+
+func (p *ProductionLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	p.logEvent("ERROR", msg, fields, ctx)
+}
+
+func (p *ProductionLogger) Warn(msg string, fields map[string]interface{}) {
+	p.logEvent("WARN", msg, fields, nil)
+}
+
+func (p *ProductionLogger) Debug(msg string, fields map[string]interface{}) {
+	if p.debug {
+		p.logEvent("DEBUG", msg, fields, nil)
+	}
+}
+
+// Core logging implementation with all three layers
+func (p *ProductionLogger) logEvent(level, msg string, fields map[string]interface{}, ctx context.Context) {
+	timestamp := time.Now().Format(time.RFC3339)
+
+	// 🔥 LAYER 1: Console output (always works, immediate visibility)
+	if p.format == "json" {
+		// Structured logging for production log aggregation
+		logEntry := map[string]interface{}{
+			"timestamp": timestamp,
+			"level":     level,
+			"service":   p.serviceName,
+			"component": "framework",
+			"message":   msg,
+		}
+
+		// LAYER 3: Add trace context when available
+		if ctx != nil && p.metricsEnabled {
+			if baggage := getContextBaggage(ctx); len(baggage) > 0 {
+				for k, v := range baggage {
+					logEntry["trace."+k] = v
+				}
+			}
+		}
+
+		// Add all fields
+		for k, v := range fields {
+			logEntry[k] = v
+		}
+
+		if data, err := json.Marshal(logEntry); err == nil {
+			fmt.Fprintln(p.output, string(data))
+		}
+	} else {
+		// Human-readable for local development
+		traceInfo := ""
+		if ctx != nil && p.metricsEnabled {
+			if baggage := getContextBaggage(ctx); baggage["request_id"] != "" {
+				traceInfo = fmt.Sprintf("[req=%s] ", baggage["request_id"])
+			}
+		}
+
+		var fieldStr strings.Builder
+		if len(fields) > 0 {
+			fieldStr.WriteString(" ")
+			for k, v := range fields {
+				fieldStr.WriteString(fmt.Sprintf("%s=%v ", k, v))
+			}
+		}
+
+		fmt.Fprintf(p.output, "%s [%s] [%s] %s%s%s\n",
+			timestamp, level, p.serviceName, traceInfo, msg, fieldStr.String())
+	}
+
+	// 🔥 LAYER 2: Metrics emission (when telemetry available)
+	if p.metricsEnabled {
+		p.emitFrameworkMetric(level, msg, fields, ctx)
+	}
+}
+
+// Metrics emission with cardinality protection
+func (p *ProductionLogger) emitFrameworkMetric(level, msg string, fields map[string]interface{}, ctx context.Context) {
+	// Build labels with cardinality awareness
+	labels := []string{
+		"level", level,
+		"service", p.serviceName,
+		"component", "framework",
+	}
+
+	// Add only low-cardinality fields as labels
+	for k, v := range fields {
+		switch k {
+		case "operation", "status", "error_type", "service_type", "provider":
+			labels = append(labels, k, fmt.Sprintf("%v", v))
+		}
+	}
+
+	// Emit with context when available (enables correlation)
+	if ctx != nil {
+		emitMetricWithContext(ctx, "gomind.framework.operations", 1.0, labels...)
+	} else {
+		emitMetric("gomind.framework.operations", 1.0, labels...)
+	}
+}
+
+// Helper functions for weak coupling to telemetry
+func emitMetric(name string, value float64, labels ...string) {
+	if globalMetricsRegistry != nil {
+		globalMetricsRegistry.Counter(name, labels...)
+	}
+}
+
+func emitMetricWithContext(ctx context.Context, name string, value float64, labels ...string) {
+	if globalMetricsRegistry != nil {
+		globalMetricsRegistry.EmitWithContext(ctx, name, value, labels...)
+	}
+}
+
+func getContextBaggage(ctx context.Context) map[string]string {
+	if globalMetricsRegistry != nil {
+		return globalMetricsRegistry.GetBaggage(ctx)
+	}
+	return make(map[string]string)
 }
