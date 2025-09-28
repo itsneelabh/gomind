@@ -292,6 +292,7 @@ type TransportRegistry interface {
 	Get(name string) (Transport, bool)
 	List() []Transport
 	ListAvailable() []Transport
+	SetLogger(logger core.Logger)
 }
 
 // TransportLifecycleEvent represents transport state changes

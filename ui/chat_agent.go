@@ -59,6 +59,25 @@ func NewChatAgent(config ChatAgentConfig, aiClient core.AIClient, sessions Sessi
 		stopChan:   make(chan struct{}),
 	}
 
+	// 🔥 CRITICAL FIX: Auto-configure logger for UI agent
+	// This follows the Intelligent Configuration principle from FRAMEWORK_DESIGN_PRINCIPLES.md
+	if agent.BaseAgent.Logger == nil || isNoOpLogger(agent.BaseAgent.Logger) {
+		agent.BaseAgent.Logger = NewChatAgentLogger(config)
+		// Note: Logger tracking is handled automatically by core.NewProductionLogger
+	}
+
+	// 🔥 CRITICAL FIX: Transfer logger to session manager
+	// This ensures consistent logging across all UI components
+	if sessionManager, ok := sessions.(*RedisSessionManager); ok {
+		sessionManager.SetLogger(agent.BaseAgent.Logger)
+	}
+
+	// 🔥 CRITICAL FIX: Transfer logger to transport registry (P0-3)
+	// This ensures operational visibility for transport registration/unregistration
+	if registry, ok := DefaultRegistry.(*transportRegistry); ok {
+		registry.SetLogger(agent.BaseAgent.Logger)
+	}
+
 	// Auto-configure available transports
 	agent.AutoConfigureTransports()
 
@@ -79,6 +98,13 @@ func NewChatAgent(config ChatAgentConfig, aiClient core.AIClient, sessions Sessi
 	})
 
 	return agent
+}
+
+// isNoOpLogger detects if the provided logger is a NoOpLogger that should be replaced
+// with auto-configured logging. This follows the Intelligent Configuration principle.
+func isNoOpLogger(logger core.Logger) bool {
+	_, isNoOp := logger.(*core.NoOpLogger)
+	return isNoOp
 }
 
 // NewChatAgentWithDependencies creates a new chat agent with injected dependencies.
@@ -105,6 +131,20 @@ func NewChatAgentWithDependencies(
 	}
 	if deps.Telemetry != nil {
 		agent.BaseAgent.Telemetry = deps.Telemetry
+	}
+
+	// 🔥 CRITICAL FIX: Auto-configure logger if none provided via dependencies
+	// This follows the Intelligent Configuration principle - smart defaults when user intent is clear
+	if agent.BaseAgent.Logger == nil || isNoOpLogger(agent.BaseAgent.Logger) {
+		agent.BaseAgent.Logger = NewChatAgentLogger(config)
+		// Note: Logger tracking is handled automatically by core.NewProductionLogger
+	}
+
+	// 🔥 CRITICAL FIX: Transfer logger to session manager
+	// This ensures consistent logging across all UI components
+	// SetLogger method will be implemented in P0-2
+	if sessionManager, ok := sessions.(*RedisSessionManager); ok {
+		sessionManager.SetLogger(agent.BaseAgent.Logger)
 	}
 
 	// Auto-configure available transports
@@ -149,6 +189,20 @@ func NewChatAgentWithOptions(
 		opt(agent)
 	}
 
+	// 🔥 CRITICAL FIX: Auto-configure logger if none provided via options
+	// This follows the Intelligent Configuration principle - smart defaults when user intent is clear
+	if agent.BaseAgent.Logger == nil || isNoOpLogger(agent.BaseAgent.Logger) {
+		agent.BaseAgent.Logger = NewChatAgentLogger(config)
+		// Note: Logger tracking is handled automatically by core.NewProductionLogger
+	}
+
+	// 🔥 CRITICAL FIX: Transfer logger to session manager
+	// This ensures consistent logging across all UI components
+	// SetLogger method will be implemented in P0-2
+	if sessionManager, ok := sessions.(*RedisSessionManager); ok {
+		sessionManager.SetLogger(agent.BaseAgent.Logger)
+	}
+
 	// Auto-configure available transports
 	agent.AutoConfigureTransports()
 
@@ -171,37 +225,137 @@ func NewChatAgentWithOptions(
 	return agent
 }
 
+// getTransportNames returns a list of transport names for logging purposes
+func getTransportNames(transports []Transport) []string {
+	names := make([]string, len(transports))
+	for i, t := range transports {
+		names[i] = t.Name()
+	}
+	return names
+}
+
+// getOptionKeys returns the keys from a map[string]interface{} for logging purposes
+func getOptionKeys(options map[string]interface{}) []string {
+	if options == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(options))
+	for k := range options {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // AutoConfigureTransports automatically configures available transports
 func (c *DefaultChatAgent) AutoConfigureTransports() {
+	startTime := time.Now()
 	available := ListAvailableTransports()
 
+	// INFO: Start transport auto-configuration with comprehensive summary
+	c.Logger.Info("Starting transport auto-configuration", map[string]interface{}{
+		"operation":                 "auto_configure_transports",
+		"available_transports":      len(available),
+		"transport_names":           getTransportNames(available),
+		"circuit_breaker_enabled":   c.config.CircuitBreakerEnabled,
+		"agent_name":                c.BaseAgent.Name,
+	})
+
+	configuredCount := 0
+	failedCount := 0
+
 	for _, transport := range available {
+		transportName := transport.Name()
+
+		// DEBUG: Log detailed configuration attempt for each transport
+		c.Logger.Debug("Configuring transport", map[string]interface{}{
+			"operation":     "configure_transport",
+			"transport":     transportName,
+			"description":   transport.Description(),
+			"priority":      transport.Priority(),
+			"capabilities":  transport.Capabilities(),
+			"available":     transport.Available(),
+		})
+
 		// Initialize transport with config
 		config := c.config.TransportConfigs[transport.Name()]
+		configSource := "explicit"
 		if config.Options == nil {
 			config = TransportConfig{
 				MaxConnections: 1000,
 				Timeout:        30 * time.Second,
 			}
+			configSource = "default"
+
+			c.Logger.Debug("Using default transport config", map[string]interface{}{
+				"operation":              "configure_transport",
+				"transport":              transportName,
+				"config_source":          configSource,
+				"max_connections":        config.MaxConnections,
+				"timeout":                config.Timeout.String(),
+				"cors_enabled":           config.CORS.Enabled,
+				"cors_allowed_origins":   config.CORS.AllowedOrigins,
+				"cors_allowed_methods":   config.CORS.AllowedMethods,
+				"cors_allowed_headers":   config.CORS.AllowedHeaders,
+				"cors_max_age":           config.CORS.MaxAge,
+				"rate_limit_enabled":     config.RateLimit.Enabled,
+				"rate_limit_rpm":         config.RateLimit.RequestsPerMinute,
+				"rate_limit_burst":       config.RateLimit.BurstSize,
+				"custom_options_count":   len(config.Options),
+				"custom_options_keys":    getOptionKeys(config.Options),
+			})
+		} else {
+			c.Logger.Debug("Using explicit transport config", map[string]interface{}{
+				"operation":              "configure_transport",
+				"transport":              transportName,
+				"config_source":          configSource,
+				"max_connections":        config.MaxConnections,
+				"timeout":                config.Timeout.String(),
+				"cors_enabled":           config.CORS.Enabled,
+				"cors_allowed_origins":   config.CORS.AllowedOrigins,
+				"cors_allowed_methods":   config.CORS.AllowedMethods,
+				"cors_allowed_headers":   config.CORS.AllowedHeaders,
+				"cors_max_age":           config.CORS.MaxAge,
+				"rate_limit_enabled":     config.RateLimit.Enabled,
+				"rate_limit_rpm":         config.RateLimit.RequestsPerMinute,
+				"rate_limit_burst":       config.RateLimit.BurstSize,
+				"custom_options_count":   len(config.Options),
+				"custom_options_keys":    getOptionKeys(config.Options),
+			})
 		}
 
+		// Initialize transport with enhanced error logging
+		initStartTime := time.Now()
 		if err := transport.Initialize(config); err != nil {
-			c.Logger.Error("Failed to initialize transport", map[string]interface{}{
-				"transport": transport.Name(),
-				"error":     err.Error(),
+			failedCount++
+			c.Logger.Error("Transport initialization failed", map[string]interface{}{
+				"operation":       "configure_transport",
+				"transport":       transportName,
+				"error":           err.Error(),
+				"error_type":      fmt.Sprintf("%T", err),
+				"config_source":   configSource,
+				"init_duration":   time.Since(initStartTime).String(),
 			})
 			continue
 		}
 
-		// Wrap with circuit breaker if enabled
+		c.Logger.Debug("Transport initialized successfully", map[string]interface{}{
+			"operation":      "configure_transport",
+			"transport":      transportName,
+			"init_duration":  time.Since(initStartTime).String(),
+			"config_source":  configSource,
+		})
+
+		// Wrap with circuit breaker if enabled with enhanced logging
 		if c.config.CircuitBreakerEnabled {
 			// Use injected circuit breaker if available (preferred)
 			if c.circuitBreaker != nil {
 				transport = NewInterfaceBasedCircuitBreakerTransport(transport, c.circuitBreaker)
 
-				c.Logger.Info("Wrapped transport with injected circuit breaker", map[string]interface{}{
-					"transport": transport.Name(),
-					"state":     c.circuitBreaker.GetState(),
+				c.Logger.Info("Transport wrapped with injected circuit breaker", map[string]interface{}{
+					"operation":  "configure_transport",
+					"transport":  transportName,
+					"cb_type":    "injected",
+					"cb_state":   c.circuitBreaker.GetState(),
 				})
 			} else {
 				// Fall back to legacy built-in circuit breaker (deprecated)
@@ -212,21 +366,28 @@ func (c *DefaultChatAgent) AutoConfigureTransports() {
 
 				transport = NewCircuitBreakerTransport(transport, cbConfig)
 
-				c.Logger.Info("Wrapped transport with legacy circuit breaker (deprecated)", map[string]interface{}{
-					"transport":         transport.Name(),
-					"failure_threshold": cbConfig.FailureThreshold,
-					"timeout":           cbConfig.Timeout,
-					"warning":           "Please use dependency injection for circuit breaker",
+				c.Logger.Info("Transport wrapped with legacy circuit breaker", map[string]interface{}{
+					"operation":           "configure_transport",
+					"transport":           transportName,
+					"cb_type":             "legacy",
+					"failure_threshold":   cbConfig.FailureThreshold,
+					"timeout":             cbConfig.Timeout.String(),
+					"deprecation_warning": "Please use dependency injection for circuit breaker",
 				})
 			}
 		}
 
-		// Start transport
+		// Start transport with enhanced logging and timing
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		startTime := time.Now()
 		if err := transport.Start(ctx); err != nil {
-			c.Logger.Error("Failed to start transport", map[string]interface{}{
-				"transport": transport.Name(),
-				"error":     err.Error(),
+			failedCount++
+			c.Logger.Error("Transport startup failed", map[string]interface{}{
+				"operation":        "configure_transport",
+				"transport":        transportName,
+				"error":            err.Error(),
+				"error_type":       fmt.Sprintf("%T", err),
+				"startup_duration": time.Since(startTime).String(),
 			})
 			cancel()
 			continue
@@ -249,13 +410,35 @@ func (c *DefaultChatAgent) AutoConfigureTransports() {
 
 		// Store transport
 		c.transports[transport.Name()] = transport
+		configuredCount++
 
-		c.Logger.Info("Registered transport", map[string]interface{}{
-			"transport": transport.Name(),
-			"endpoint":  endpoint,
-			"priority":  transport.Priority(),
+		// INFO: Log successful transport configuration with comprehensive details
+		c.Logger.Info("Transport configured successfully", map[string]interface{}{
+			"operation":        "configure_transport",
+			"transport":        transportName,
+			"endpoint":         endpoint,
+			"priority":         transport.Priority(),
+			"startup_duration": time.Since(startTime).String(),
+			"config_source":    configSource,
 		})
 	}
+
+	// INFO: Final summary with operational metrics
+	totalDuration := time.Since(startTime)
+	var successRate float64
+	if len(available) > 0 {
+		successRate = float64(configuredCount) / float64(len(available)) * 100
+	}
+
+	c.Logger.Info("Transport auto-configuration completed", map[string]interface{}{
+		"operation":          "auto_configure_transports",
+		"configured_count":   configuredCount,
+		"failed_count":       failedCount,
+		"total_available":    len(available),
+		"active_transports":  len(c.transports),
+		"success_rate":       fmt.Sprintf("%.1f%%", successRate),
+		"total_duration":     totalDuration.String(),
+	})
 }
 
 // HandleTransportDiscovery allows clients to discover available transports
@@ -334,16 +517,49 @@ func (c *DefaultChatAgent) CreateSession(ctx context.Context) (*Session, error) 
 		defer span.End()
 	}
 
+	// Emit framework-level operation metrics
+	if globalMetricsRegistry := core.GetGlobalMetricsRegistry(); globalMetricsRegistry != nil {
+		globalMetricsRegistry.EmitWithContext(ctx, "gomind.ui.operations", 1.0,
+			"level", "INFO",
+			"service", c.BaseAgent.Name,
+			"component", "ui",
+			"operation", "session_create",
+		)
+	}
+
+	// Measure operation performance
+	startTime := time.Now()
+
 	// Create session with empty metadata
 	session, err := c.sessions.Create(ctx, nil)
 
-	// Record metrics
+	duration := time.Since(startTime)
+
+	// Record application-level metrics
 	if c.BaseAgent.Telemetry != nil {
 		if err != nil {
 			c.BaseAgent.Telemetry.RecordMetric("chat.session.create.error", 1.0, nil)
 		} else {
 			c.BaseAgent.Telemetry.RecordMetric("chat.session.create.success", 1.0, nil)
+			c.BaseAgent.Telemetry.RecordMetric("chat.session.create.duration", float64(duration.Milliseconds()), nil)
 		}
+	}
+
+	// Emit framework-level outcome metrics
+	if globalMetricsRegistry := core.GetGlobalMetricsRegistry(); globalMetricsRegistry != nil {
+		status := "success"
+		if err != nil {
+			status = "error"
+		}
+		globalMetricsRegistry.EmitWithContext(ctx, "gomind.ui.session.operations", 1.0,
+			"operation", "create",
+			"status", status,
+			"service", c.BaseAgent.Name,
+		)
+		globalMetricsRegistry.EmitWithContext(ctx, "gomind.ui.session.duration", float64(duration.Milliseconds()),
+			"operation", "create",
+			"service", c.BaseAgent.Name,
+		)
 	}
 
 	return session, err
@@ -383,6 +599,19 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 		span.SetAttribute("session_id", sessionID)
 		span.SetAttribute("message_length", len(message))
 	}
+
+	// Emit framework-level operation metrics
+	if globalMetricsRegistry := core.GetGlobalMetricsRegistry(); globalMetricsRegistry != nil {
+		globalMetricsRegistry.EmitWithContext(ctx, "gomind.ui.operations", 1.0,
+			"level", "INFO",
+			"service", c.BaseAgent.Name,
+			"component", "ui",
+			"operation", "stream_response",
+		)
+	}
+
+	// Measure operation performance
+	startTime := time.Now()
 
 	// Validate message size
 	if len(message) > c.config.SecurityConfig.MaxMessageSize {
@@ -513,6 +742,22 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 			})
 		}
 	}()
+
+	// Measure stream initiation duration
+	duration := time.Since(startTime)
+
+	// Emit framework-level stream initiation metrics
+	if globalMetricsRegistry := core.GetGlobalMetricsRegistry(); globalMetricsRegistry != nil {
+		globalMetricsRegistry.EmitWithContext(ctx, "gomind.ui.stream.operations", 1.0,
+			"operation", "initiate",
+			"status", "success",
+			"service", c.BaseAgent.Name,
+		)
+		globalMetricsRegistry.EmitWithContext(ctx, "gomind.ui.stream.initiation_duration", float64(duration.Milliseconds()),
+			"operation", "stream_response",
+			"service", c.BaseAgent.Name,
+		)
+	}
 
 	return events, nil
 }
