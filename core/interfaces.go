@@ -181,6 +181,18 @@ func SetMetricsRegistry(registry MetricsRegistry) {
 	enableMetricsOnExistingLoggers()
 }
 
+// GetGlobalMetricsRegistry returns the global metrics registry if available.
+// Returns nil if telemetry module has not registered a metrics registry yet.
+// This enables framework modules to emit metrics without creating circular dependencies.
+//
+// Usage pattern:
+//   if registry := core.GetGlobalMetricsRegistry(); registry != nil {
+//       registry.EmitWithContext(ctx, "metric.name", value, labels...)
+//   }
+func GetGlobalMetricsRegistry() MetricsRegistry {
+	return globalMetricsRegistry
+}
+
 // Track created loggers to enable metrics when telemetry becomes available
 var createdLoggers []*ProductionLogger
 var loggersMutex sync.RWMutex
