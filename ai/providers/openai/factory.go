@@ -31,8 +31,22 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		}
 	}
 
-	// Create logger (nil will use NoOpLogger)
-	var logger core.Logger
+	// 🔥 CRITICAL FIX: Use framework-provided logger or fallback
+	logger := config.Logger
+	if logger == nil {
+		logger = &core.NoOpLogger{}
+	}
+
+	// 🔥 ADD: Provider creation logging
+	logger.Info("OpenAI provider initialized", map[string]interface{}{
+		"operation":    "ai_provider_init",
+		"provider":     "openai",
+		"base_url":     baseURL,
+		"has_api_key":  apiKey != "",
+		"timeout":      config.Timeout.String(),
+		"max_retries":  config.MaxRetries,
+		"model":        config.Model,
+	})
 
 	// Create the client with full configuration
 	client := NewClient(apiKey, baseURL, logger)

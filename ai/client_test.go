@@ -361,7 +361,7 @@ func TestAutoDetectProvider(t *testing.T) {
 				registry.providers[f.Name()] = f
 			}
 
-			providerName, err := detectBestProvider()
+			providerName, err := detectBestProvider(nil)
 
 			if tt.expectedError != "" {
 				if err == nil {

@@ -114,7 +114,7 @@ func TestRegistryThreadSafety(t *testing.T) {
 			}
 
 			// Test detectBestProvider
-			if _, err := detectBestProvider(); err != nil {
+			if _, err := detectBestProvider(nil); err != nil {
 				errors <- fmt.Errorf("detectBestProvider failed: %v", err)
 				return
 			}
@@ -204,7 +204,7 @@ func TestDetectBestProviderEdgeCases(t *testing.T) {
 			}
 			registry.mu.Unlock()
 
-			providerName, err := detectBestProvider()
+			providerName, err := detectBestProvider(nil)
 
 			if tt.wantError {
 				if err == nil {

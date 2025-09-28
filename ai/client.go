@@ -16,6 +16,7 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 		Timeout:     30 * time.Second,
 		Temperature: 0.7,
 		MaxTokens:   1000,
+		Logger:      nil, // Will be set by framework or options
 	}
 
 	// Apply options
@@ -23,24 +24,70 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 		opt(config)
 	}
 
-	// Auto-detection logic
+	// 🔥 ADD: Client creation start logging
+	if config.Logger != nil {
+		config.Logger.Info("Starting AI client creation", map[string]interface{}{
+			"operation":        "ai_client_creation",
+			"provider_setting": config.Provider,
+			"auto_detect":      config.Provider == string(ProviderAuto),
+		})
+	}
+
+	// Auto-detection logic with enhanced logging
 	if config.Provider == string(ProviderAuto) {
-		provider, err := detectBestProvider()
+		provider, err := detectBestProvider(config.Logger)
 		if err != nil {
+			// 🔥 ADD: Auto-detection failure logging
+			if config.Logger != nil {
+				config.Logger.Error("AI provider auto-detection failed", map[string]interface{}{
+					"operation":           "ai_provider_detection",
+					"error":               err.Error(),
+					"available_providers": ListProviders(),
+					"suggestion":          "Set explicit provider or configure API keys",
+				})
+			}
 			return nil, fmt.Errorf("no AI provider available: %w", err)
 		}
 		config.Provider = provider
+
+		// 🔥 ADD: Auto-detection success logging
+		if config.Logger != nil {
+			config.Logger.Info("AI provider auto-detected", map[string]interface{}{
+				"operation":         "ai_provider_detection",
+				"selected_provider": provider,
+				"detection_method":  "environment_scan",
+				"status":            "success",
+			})
+		}
 	}
 
-	// Get provider from registry
+	// 🔥 ADD: Provider factory retrieval logging
 	factory, exists := GetProvider(config.Provider)
 	if !exists {
+		if config.Logger != nil {
+			config.Logger.Error("AI provider not registered", map[string]interface{}{
+				"operation":            "ai_provider_lookup",
+				"requested_provider":   config.Provider,
+				"available_providers":  ListProviders(),
+				"import_hint":         fmt.Sprintf("Import _ \"github.com/itsneelabh/gomind/ai/providers/%s\"", config.Provider),
+			})
+		}
 		return nil, fmt.Errorf("provider '%s' not registered. Import _ \"github.com/itsneelabh/gomind/ai/providers/%s\"",
 			config.Provider, config.Provider)
 	}
 
-	// Create client using provider factory
-	return factory.Create(config), nil
+	// 🔥 ADD: Client creation completion logging
+	client := factory.Create(config)
+	if config.Logger != nil {
+		config.Logger.Info("AI client created successfully", map[string]interface{}{
+			"operation":    "ai_client_creation",
+			"provider":     config.Provider,
+			"client_type":  fmt.Sprintf("%T", client),
+			"status":       "success",
+		})
+	}
+
+	return client, nil
 }
 
 // MustNewClient creates a new AI client and panics on error

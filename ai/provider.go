@@ -2,6 +2,8 @@ package ai
 
 import (
 	"time"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 // Provider represents an AI provider type
@@ -34,6 +36,9 @@ type AIConfig struct {
 	Model       string
 	Temperature float32
 	MaxTokens   int
+
+	// 🔥 ADD: Logger integration for framework observability
+	Logger core.Logger
 
 	// Advanced options
 	Headers map[string]string
@@ -142,5 +147,13 @@ func WithExtra(key string, value interface{}) AIOption {
 			c.Extra = make(map[string]interface{})
 		}
 		c.Extra[key] = value
+	}
+}
+
+// WithLogger sets the logger for AI operations
+// This is typically called by the framework to provide observability
+func WithLogger(logger core.Logger) AIOption {
+	return func(c *AIConfig) {
+		c.Logger = logger
 	}
 }

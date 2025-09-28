@@ -52,6 +52,16 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 	var lastErr error
 
 	for attempt := 0; attempt <= b.MaxRetries; attempt++ {
+		// 🔥 FIXED: Log retry attempt BEFORE executing request
+		if attempt > 0 && b.Logger != nil && lastErr != nil {
+			b.Logger.Warn("AI request retry attempt", map[string]interface{}{
+				"operation":   "ai_request_retry",
+				"attempt":     attempt,
+				"max_retries": b.MaxRetries,
+				"last_error":  lastErr.Error(),
+			})
+		}
+
 		// Clone request for retry
 		reqClone := req.Clone(ctx)
 
@@ -63,11 +73,28 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 
 		// Success - return if no error and status is not retryable
 		if err == nil && resp.StatusCode < 400 {
+			// 🔥 ADD: Success after retry logging
+			if attempt > 0 && b.Logger != nil {
+				b.Logger.Info("AI request succeeded after retry", map[string]interface{}{
+					"operation":          "ai_request_recovery",
+					"successful_attempt": attempt + 1,
+					"total_attempts":     attempt + 1,
+				})
+			}
 			return resp, nil
 		}
 
 		// Return non-retryable client errors immediately
 		if err == nil && resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
+			// 🔥 ADD: Non-retryable error logging
+			if b.Logger != nil {
+				b.Logger.Error("AI request failed with non-retryable error", map[string]interface{}{
+					"operation":   "ai_request_error",
+					"status_code": resp.StatusCode,
+					"error_type":  "client_error",
+					"retryable":   false,
+				})
+			}
 			return resp, nil
 		}
 
@@ -91,11 +118,14 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 			}
 			delay := b.RetryDelay * time.Duration(1<<shiftAmount)
 
-			b.Logger.Debug("Retrying request", map[string]interface{}{
-				"attempt":     attempt + 1,
-				"max_retries": b.MaxRetries,
-				"delay":       delay,
-				"error":       lastErr,
+			b.Logger.Warn("AI request failed, retrying", map[string]interface{}{
+				"operation":        "ai_request_retry_wait",
+				"attempt":          attempt + 1,
+				"max_retries":      b.MaxRetries,
+				"retry_delay_ms":   delay.Milliseconds(),
+				"error":            lastErr.Error(),
+				"error_type":       fmt.Sprintf("%T", lastErr),
+				"backoff_strategy": "exponential",
 			})
 
 			// Wait before retry
@@ -103,10 +133,24 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 			case <-time.After(delay):
 				// Continue to next attempt
 			case <-ctx.Done():
+				// 🔥 ADD: Context cancellation logging
+				b.Logger.Error("AI request cancelled during retry", map[string]interface{}{
+					"operation":      "ai_request_cancelled",
+					"cancelled_at":   attempt + 1,
+					"context_error":  ctx.Err().Error(),
+				})
 				return nil, ctx.Err()
 			}
 		}
 	}
+
+	// 🔥 ADD: Final failure logging
+	b.Logger.Error("AI request failed after all retries", map[string]interface{}{
+		"operation":       "ai_request_final_failure",
+		"total_attempts":  b.MaxRetries + 1,
+		"final_error":     lastErr.Error(),
+		"error_type":      fmt.Sprintf("%T", lastErr),
+	})
 
 	return nil, fmt.Errorf("request failed after %d retries: %w", b.MaxRetries, lastErr)
 }
@@ -188,22 +232,28 @@ func (b *BaseClient) HandleError(statusCode int, body []byte, provider string) e
 
 // LogRequest logs outgoing API requests
 func (b *BaseClient) LogRequest(provider, model, prompt string) {
-	b.Logger.Debug("AI request", map[string]interface{}{
+	b.Logger.Info("AI request initiated", map[string]interface{}{
+		"operation":     "ai_request",
 		"provider":      provider,
 		"model":         model,
 		"prompt_length": len(prompt),
+		"max_tokens":    b.DefaultMaxTokens,
+		"temperature":   b.DefaultTemperature,
 	})
 }
 
 // LogResponse logs API responses
 func (b *BaseClient) LogResponse(provider, model string, tokens core.TokenUsage, duration time.Duration) {
-	b.Logger.Debug("AI response", map[string]interface{}{
+	b.Logger.Info("AI response received", map[string]interface{}{
+		"operation":         "ai_response",
 		"provider":          provider,
 		"model":             model,
 		"prompt_tokens":     tokens.PromptTokens,
 		"completion_tokens": tokens.CompletionTokens,
 		"total_tokens":      tokens.TotalTokens,
-		"duration":          duration,
+		"duration_ms":       duration.Milliseconds(),
+		"tokens_per_second": float64(tokens.TotalTokens) / duration.Seconds(),
+		"status":            "success",
 	})
 }
 

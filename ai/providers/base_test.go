@@ -324,11 +324,11 @@ func TestBaseClient_Logging(t *testing.T) {
 	// Test LogRequest
 	client.LogRequest("test-provider", "test-model", "test prompt")
 
-	if len(logger.debugCalls) != 1 {
-		t.Errorf("expected 1 debug call, got %d", len(logger.debugCalls))
+	if len(logger.infoCalls) != 1 {
+		t.Errorf("expected 1 info call, got %d", len(logger.infoCalls))
 	}
 
-	fields := logger.debugCalls[0]
+	fields := logger.infoCalls[0]
 	if fields["provider"] != "test-provider" {
 		t.Errorf("expected provider test-provider, got %v", fields["provider"])
 	}
@@ -344,11 +344,11 @@ func TestBaseClient_Logging(t *testing.T) {
 	}
 	client.LogResponse("test-provider", "test-model", usage, 100*time.Millisecond)
 
-	if len(logger.debugCalls) != 2 {
-		t.Errorf("expected 2 debug calls, got %d", len(logger.debugCalls))
+	if len(logger.infoCalls) != 2 {
+		t.Errorf("expected 2 info calls, got %d", len(logger.infoCalls))
 	}
 
-	fields = logger.debugCalls[1] // Second debug call is LogResponse
+	fields = logger.infoCalls[1] // Second info call is LogResponse
 	if fields["provider"] != "test-provider" {
 		t.Errorf("expected provider test-provider, got %v", fields["provider"])
 	}

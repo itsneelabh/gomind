@@ -124,28 +124,61 @@ type ProviderInfo struct {
 }
 
 // detectBestProvider finds the best available provider from registry
-func detectBestProvider() (string, error) {
-	type candidate struct {
-		name     string
-		priority int
-	}
-
+func detectBestProvider(logger core.Logger) (string, error) {
 	var candidates []candidate
+
+	// 🔥 ADD: Detection process start logging
+	if logger != nil {
+		logger.Info("Starting AI provider environment detection", map[string]interface{}{
+			"operation":             "ai_provider_detection",
+			"registered_providers":  len(registry.providers),
+		})
+	}
 
 	// Check all registered providers
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
 
 	for name, factory := range registry.providers {
-		if priority, available := factory.DetectEnvironment(); available {
+		// 🔥 ADD: Per-provider detection logging
+		priority, available := factory.DetectEnvironment()
+
+		if logger != nil {
+			logger.Debug("Provider environment check", map[string]interface{}{
+				"operation": "ai_provider_check",
+				"provider":  name,
+				"priority":  priority,
+				"available": available,
+			})
+		}
+
+		if available {
 			candidates = append(candidates, candidate{
 				name:     name,
 				priority: priority,
 			})
+
+			// 🔥 ADD: Available provider logging
+			if logger != nil {
+				logger.Info("AI provider available", map[string]interface{}{
+					"operation": "ai_provider_available",
+					"provider":  name,
+					"priority":  priority,
+				})
+			}
 		}
 	}
 
 	if len(candidates) == 0 {
+		// 🔥 ADD: No providers found logging
+		if logger != nil {
+			logger.Error("No AI providers detected in environment", map[string]interface{}{
+				"operation":         "ai_provider_detection",
+				"checked_providers": len(registry.providers),
+				"environment_check": "failed",
+				"suggestion":        "Set API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)",
+			})
+		}
 		return "", fmt.Errorf("no provider detected in environment")
 	}
 
@@ -154,5 +187,33 @@ func detectBestProvider() (string, error) {
 		return candidates[i].priority > candidates[j].priority
 	})
 
-	return candidates[0].name, nil
+	selected := candidates[0].name
+
+	// 🔥 ADD: Provider selection logging
+	if logger != nil {
+		logger.Info("AI provider selected", map[string]interface{}{
+			"operation":             "ai_provider_selection",
+			"selected_provider":     selected,
+			"selection_priority":    candidates[0].priority,
+			"total_candidates":      len(candidates),
+			"alternative_providers": extractNames(candidates[1:]),
+		})
+	}
+
+	return selected, nil
+}
+
+// 🔥 ADD: Helper function for logging
+func extractNames(candidates []candidate) []string {
+	names := make([]string, len(candidates))
+	for i, c := range candidates {
+		names[i] = c.name
+	}
+	return names
+}
+
+// candidate represents a provider candidate for selection
+type candidate struct {
+	name     string
+	priority int
 }

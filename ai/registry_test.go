@@ -188,7 +188,7 @@ func TestDetectBestProvider(t *testing.T) {
 	}
 	registry.mu.Unlock()
 
-	provider, err := detectBestProvider()
+	provider, err := detectBestProvider(nil)
 	if err != nil {
 		t.Fatalf("detectBestProvider() error = %v", err)
 	}
@@ -214,7 +214,7 @@ func TestDetectBestProviderNoAvailable(t *testing.T) {
 	}
 	registry.mu.Unlock()
 
-	_, err := detectBestProvider()
+	_, err := detectBestProvider(nil)
 	if err == nil {
 		t.Error("detectBestProvider() should return error when no providers available")
 	}
