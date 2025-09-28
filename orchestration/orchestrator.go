@@ -21,9 +21,10 @@ type AIOrchestrator struct {
 
 	// Capability provider for flexible capability discovery
 	capabilityProvider CapabilityProvider
-	
-	// Telemetry for observability (uses framework telemetry module)
-	telemetry core.Telemetry
+
+	// Observability (follows framework design principles)
+	telemetry core.Telemetry // For metrics and tracing
+	logger    core.Logger    // For structured logging
 
 	// Metrics and history
 	metrics      *OrchestratorMetrics
@@ -119,6 +120,27 @@ func (o *AIOrchestrator) SetTelemetry(telemetry core.Telemetry) {
 	}
 }
 
+// SetLogger sets the logger provider (follows framework design principles)
+func (o *AIOrchestrator) SetLogger(logger core.Logger) {
+	if logger == nil {
+		o.logger = &core.NoOpLogger{}
+	} else {
+		o.logger = logger
+	}
+
+	// Propagate logger to sub-components (follows dependency injection pattern)
+	if o.executor != nil {
+		o.executor.SetLogger(logger)
+	}
+	if o.catalog != nil {
+		o.catalog.SetLogger(logger)
+	}
+	if o.synthesizer != nil {
+		// If synthesizer supports logging, set it here
+		// o.synthesizer.SetLogger(logger)
+	}
+}
+
 // catalogRefreshLoop periodically refreshes the agent catalog
 func (o *AIOrchestrator) catalogRefreshLoop() {
 	ticker := time.NewTicker(10 * time.Second)
@@ -150,8 +172,18 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	}
 	
 	startTime := time.Now()
-	requestID := generateID()
-	
+	requestID := generateRequestID()
+
+	// ✅ ADD: Request start logging (INFO level)
+	if o.logger != nil {
+		o.logger.Info("Starting request processing", map[string]interface{}{
+			"operation":     "process_request",
+			"request_id":    requestID,
+			"request_length": len(request),
+			"metadata_keys": getMapKeys(metadata),
+		})
+	}
+
 	if span != nil {
 		span.SetAttribute("request_id", requestID)
 		span.SetAttribute("request_length", len(request))
@@ -165,8 +197,17 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	}
 
 	// Step 1: Get execution plan from LLM
-	plan, err := o.generateExecutionPlan(ctx, request)
+	plan, err := o.generateExecutionPlan(ctx, request, requestID)
 	if err != nil {
+		// ✅ ADD: Plan generation error logging (ERROR level)
+		if o.logger != nil {
+			o.logger.Error("Plan generation failed", map[string]interface{}{
+				"operation":  "plan_generation",
+				"request_id": requestID,
+				"error":      err.Error(),
+				"duration_ms": time.Since(startTime).Milliseconds(),
+			})
+		}
 		if span != nil {
 			span.RecordError(err)
 		}
@@ -178,7 +219,18 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		o.updateMetrics(time.Since(startTime), false)
 		return nil, fmt.Errorf("failed to generate execution plan: %w", err)
 	}
-	
+
+	// ✅ ADD: Plan generation success (INFO level)
+	if o.logger != nil {
+		o.logger.Info("Plan generated successfully", map[string]interface{}{
+			"operation":  "plan_generation",
+			"request_id": requestID,
+			"plan_id":    plan.PlanID,
+			"step_count": len(plan.Steps),
+			"generation_time_ms": time.Since(startTime).Milliseconds(),
+		})
+	}
+
 	if span != nil {
 		span.SetAttribute("plan_steps", len(plan.Steps))
 	}
@@ -186,7 +238,7 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	// Step 2: Validate the plan
 	if err := o.validatePlan(plan); err != nil {
 		// Try to regenerate with error feedback
-		plan, err = o.regeneratePlan(ctx, request, err)
+		plan, err = o.regeneratePlan(ctx, request, requestID, err)
 		if err != nil {
 			o.updateMetrics(time.Since(startTime), false)
 			return nil, fmt.Errorf("failed to generate valid plan: %w", err)
@@ -196,8 +248,39 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	// Step 3: Execute the plan
 	result, err := o.executor.Execute(ctx, plan)
 	if err != nil {
+		// ✅ ADD: Plan execution error logging (ERROR level)
+		if o.logger != nil {
+			o.logger.Error("Plan execution failed", map[string]interface{}{
+				"operation":  "plan_execution",
+				"request_id": requestID,
+				"plan_id":    plan.PlanID,
+				"error":      err.Error(),
+				"duration_ms": time.Since(startTime).Milliseconds(),
+			})
+		}
 		o.updateMetrics(time.Since(startTime), false)
 		return nil, fmt.Errorf("execution failed: %w", err)
+	}
+
+	// ✅ ADD: Execution completion (INFO level)
+	if o.logger != nil {
+		failedSteps := 0
+		if result != nil && !result.Success {
+			// Count failed steps from result
+			for _, step := range result.Steps {
+				if !step.Success {
+					failedSteps++
+				}
+			}
+		}
+		o.logger.Info("Plan execution completed", map[string]interface{}{
+			"operation":     "plan_execution",
+			"request_id":    requestID,
+			"plan_id":       plan.PlanID,
+			"success":       result != nil && result.Success,
+			"failed_steps":  failedSteps,
+			"duration_ms":   time.Since(startTime).Milliseconds(),
+		})
 	}
 
 	// Step 4: Synthesize results using AI
@@ -223,6 +306,16 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	o.updateMetrics(response.ExecutionTime, true)
 	o.addToHistory(response)
 	
+	// ✅ ADD: Request completion (INFO level)
+	if o.logger != nil {
+		o.logger.Info("Request processing completed successfully", map[string]interface{}{
+			"operation":         "process_request_complete",
+			"request_id":        requestID,
+			"success":           true,
+			"total_duration_ms": time.Since(startTime).Milliseconds(),
+		})
+	}
+
 	// Record success metrics if telemetry is available
 	if o.telemetry != nil {
 		o.telemetry.RecordMetric("orchestrator.requests.success", 1, map[string]string{
@@ -237,7 +330,16 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 }
 
 // generateExecutionPlan uses LLM to create an execution plan
-func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request string) (*RoutingPlan, error) {
+func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request string, requestID string) (*RoutingPlan, error) {
+	planGenStart := time.Now()
+
+	// ✅ ADD: DEBUG: Plan generation start
+	if o.logger != nil {
+		o.logger.Debug("Starting plan generation", map[string]interface{}{
+			"operation":  "plan_generation_start",
+			"request_id": requestID,
+		})
+	}
 	// Check if AI client is available
 	if o.aiClient == nil {
 		return nil, fmt.Errorf("AI client not configured")
@@ -247,6 +349,26 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 	prompt, err := o.buildPlanningPrompt(ctx, request)
 	if err != nil {
 		return nil, err
+	}
+
+	// ✅ ADD: DEBUG: LLM prompt constructed
+	if o.logger != nil {
+		o.logger.Debug("LLM prompt constructed", map[string]interface{}{
+			"operation":       "prompt_construction",
+			"request_id":      requestID,
+			"prompt_length":   len(prompt),
+			"estimated_tokens": len(prompt) / 4, // Rough estimate: 4 chars per token
+		})
+	}
+
+	// ✅ ADD: DEBUG: Calling LLM
+	if o.logger != nil {
+		o.logger.Debug("Calling LLM for plan generation", map[string]interface{}{
+			"operation":   "llm_call",
+			"request_id":  requestID,
+			"temperature": 0.3,
+			"max_tokens":  2000,
+		})
 	}
 
 	// Call LLM
@@ -259,8 +381,35 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 		return nil, err
 	}
 
+	// ✅ ADD: DEBUG: LLM response received
+	if o.logger != nil {
+		o.logger.Debug("LLM response received", map[string]interface{}{
+			"operation":       "llm_response",
+			"request_id":      requestID,
+			"tokens_used":     aiResponse.Usage.TotalTokens,
+			"response_length": len(aiResponse.Content),
+		})
+	}
+
 	// Parse the LLM response into a plan
-	return o.parsePlan(aiResponse.Content)
+	plan, err := o.parsePlan(aiResponse.Content)
+	if err != nil {
+		return nil, err
+	}
+
+	// ✅ ADD: DEBUG: Plan generation completed
+	if o.logger != nil {
+		o.logger.Debug("Plan generation completed successfully", map[string]interface{}{
+			"operation":      "plan_generation_complete",
+			"request_id":     requestID,
+			"plan_id":        plan.PlanID,
+			"step_count":     len(plan.Steps),
+			"total_time_ms":  time.Since(planGenStart).Milliseconds(),
+			"tokens_used":    aiResponse.Usage.TotalTokens,
+		})
+	}
+
+	return plan, nil
 }
 
 // buildPlanningPrompt constructs the prompt for the LLM using capability provider
@@ -287,7 +436,16 @@ func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string
 		}
 		return "", fmt.Errorf("failed to get capabilities: %w", err)
 	}
-	
+
+	// ✅ ADD: DEBUG: Capability information retrieved
+	if o.logger != nil {
+		o.logger.Debug("Capability information retrieved", map[string]interface{}{
+			"operation":       "capability_query",
+			"capability_size": len(capabilityInfo),
+			"provider_type":   o.config.CapabilityProviderType,
+		})
+	}
+
 	if span != nil {
 		span.SetAttribute("capability_info_size", len(capabilityInfo))
 	}
@@ -408,7 +566,7 @@ func (o *AIOrchestrator) validatePlan(plan *RoutingPlan) error {
 }
 
 // regeneratePlan attempts to fix a plan based on validation errors
-func (o *AIOrchestrator) regeneratePlan(ctx context.Context, request string, validationErr error) (*RoutingPlan, error) {
+func (o *AIOrchestrator) regeneratePlan(ctx context.Context, request string, requestID string, validationErr error) (*RoutingPlan, error) {
 	// Check if AI client is available
 	if o.aiClient == nil {
 		return nil, fmt.Errorf("AI client not configured for plan regeneration")
@@ -553,5 +711,22 @@ func findJSONEnd(s string, start int) int {
 // generateID generates a unique ID
 func generateID() string {
 	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().Nanosecond())
+}
+
+// generateRequestID generates a unique request ID (alias for generateID for specification compatibility)
+func generateRequestID() string {
+	return generateID()
+}
+
+// getMapKeys extracts keys from a map for logging
+func getMapKeys(m map[string]interface{}) []string {
+	if m == nil {
+		return []string{}
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 

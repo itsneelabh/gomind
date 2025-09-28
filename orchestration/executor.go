@@ -9,6 +9,8 @@ import (
 	"runtime/debug"
 	"sync"
 	"time"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 // SmartExecutor handles intelligent execution of routing plans
@@ -17,6 +19,9 @@ type SmartExecutor struct {
 	httpClient     *http.Client
 	maxConcurrency int
 	semaphore      chan struct{}
+
+	// Observability (follows framework design principles)
+	logger core.Logger // For structured logging
 }
 
 // NewSmartExecutor creates a new smart executor
@@ -32,12 +37,31 @@ func NewSmartExecutor(catalog *AgentCatalog) *SmartExecutor {
 	}
 }
 
+// SetLogger sets the logger provider (follows framework design principles)
+func (e *SmartExecutor) SetLogger(logger core.Logger) {
+	if logger == nil {
+		e.logger = &core.NoOpLogger{}
+	} else {
+		e.logger = logger
+	}
+}
+
 // Execute runs a routing plan and collects agent responses.
 // This method orchestrates the execution of all steps in the plan,
 // respecting dependencies and running steps in parallel where possible.
 // It includes panic recovery for each step to ensure resilience.
 func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
 	startTime := time.Now()
+
+	// ✅ ADD: Execution start (DEBUG level)
+	if e.logger != nil {
+		e.logger.Debug("Starting plan execution", map[string]interface{}{
+			"operation":       "execute_plan",
+			"plan_id":         plan.PlanID,
+			"step_count":      len(plan.Steps),
+			"max_concurrency": e.maxConcurrency,
+		})
+	}
 
 	result := &ExecutionResult{
 		PlanID:        plan.PlanID,
@@ -100,6 +124,20 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 
 			// No steps were skipped, this is likely a circular dependency
 			return nil, fmt.Errorf("no executable steps found - check for circular dependencies")
+		}
+
+		// ✅ ADD: Parallel execution start (DEBUG level)
+		if e.logger != nil {
+			stepIDs := make([]string, len(readySteps))
+			for i, step := range readySteps {
+				stepIDs[i] = step.StepID
+			}
+			e.logger.Debug("Executing steps in parallel", map[string]interface{}{
+				"operation":      "parallel_execution",
+				"plan_id":        plan.PlanID,
+				"ready_steps":    stepIDs,
+				"parallel_count": len(readySteps),
+			})
 		}
 
 		// Execute ready steps in parallel
@@ -180,6 +218,19 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 		// Wait for this batch to complete
 		wg.Wait()
 
+		// ✅ ADD: Progress logging (DEBUG level)
+		completedSteps := len(executed)
+		totalSteps := len(plan.Steps)
+		if e.logger != nil {
+			e.logger.Debug("Execution batch completed", map[string]interface{}{
+				"operation":        "batch_complete",
+				"plan_id":          plan.PlanID,
+				"completed_steps":  completedSteps,
+				"total_steps":      totalSteps,
+				"progress_percent": float64(completedSteps) / float64(totalSteps) * 100,
+			})
+		}
+
 		// Check for context cancellation
 		select {
 		case <-ctx.Done():
@@ -189,6 +240,25 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 	}
 
 	result.TotalDuration = time.Since(startTime)
+
+	// ✅ ADD: Execution completion (INFO level)
+	failedSteps := 0
+	for _, step := range result.Steps {
+		if !step.Success {
+			failedSteps++
+		}
+	}
+	if e.logger != nil {
+		e.logger.Info("Plan execution finished", map[string]interface{}{
+			"operation":      "execute_plan_complete",
+			"plan_id":        plan.PlanID,
+			"success":        result.Success,
+			"failed_steps":   failedSteps,
+			"total_steps":    len(plan.Steps),
+			"duration_ms":    result.TotalDuration.Milliseconds(),
+		})
+	}
+
 	return result, nil
 }
 
@@ -246,6 +316,15 @@ func (e *SmartExecutor) buildStepContext(ctx context.Context, step RoutingStep, 
 func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepResult {
 	startTime := time.Now()
 
+	// ✅ ADD: Step start (DEBUG level)
+	if e.logger != nil {
+		e.logger.Debug("Starting step execution", map[string]interface{}{
+			"operation":  "step_execution_start",
+			"step_id":    step.StepID,
+			"agent_name": step.AgentName,
+		})
+	}
+
 	result := StepResult{
 		StepID:      step.StepID,
 		AgentName:   step.AgentName,
@@ -258,11 +337,30 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	// Get agent info from catalog
 	agentInfo := e.findAgentByName(step.AgentName)
 	if agentInfo == nil {
+		// ✅ ADD: Agent not found (ERROR level)
+		if e.logger != nil {
+			e.logger.Error("Agent not found in catalog", map[string]interface{}{
+				"operation":  "agent_discovery",
+				"step_id":    step.StepID,
+				"agent_name": step.AgentName,
+			})
+		}
 		result.Success = false
 		result.Error = fmt.Sprintf("agent %s not found in catalog", step.AgentName)
 		result.EndTime = time.Now()
 		result.Duration = time.Since(startTime)
 		return result
+	}
+
+	// ✅ ADD: Agent found (DEBUG level)
+	if e.logger != nil {
+		e.logger.Debug("Agent discovered successfully", map[string]interface{}{
+			"operation":     "agent_discovery",
+			"step_id":       step.StepID,
+			"agent_name":    step.AgentName,
+			"agent_id":      agentInfo.Registration.ID,
+			"agent_address": agentInfo.Registration.Address,
+		})
 	}
 
 	// Extract capability and parameters from metadata
@@ -279,6 +377,22 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	// Find the capability endpoint
 	endpoint := e.findCapabilityEndpoint(agentInfo, capability)
 	if endpoint == "" {
+		// ✅ ADD: Capability endpoint error (ERROR level)
+		if e.logger != nil {
+			e.logger.Error("Capability endpoint not found", map[string]interface{}{
+				"operation":   "capability_resolution",
+				"step_id":     step.StepID,
+				"agent_name":  step.AgentName,
+				"capability":  capability,
+				"available_capabilities": func() []string {
+					caps := make([]string, len(agentInfo.Capabilities))
+					for i, cap := range agentInfo.Capabilities {
+						caps[i] = cap.Name
+					}
+					return caps
+				}(),
+			})
+		}
 		result.Success = false
 		result.Error = fmt.Sprintf("capability %s not found for agent %s", capability, step.AgentName)
 		result.EndTime = time.Now()
@@ -297,12 +411,57 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
 
+		// ✅ ADD: HTTP call attempt (DEBUG level)
+		if e.logger != nil {
+			e.logger.Debug("Making HTTP call to agent", map[string]interface{}{
+				"operation":    "agent_http_call",
+				"step_id":      step.StepID,
+				"agent_name":   step.AgentName,
+				"attempt":      attempt,
+				"max_attempts": maxAttempts,
+				"url":          url,
+				"capability":   capability,
+			})
+		}
+
 		// Make the HTTP request
 		response, err := e.callAgent(ctx, url, parameters)
 		if err == nil {
+			// ✅ ADD: HTTP call success (DEBUG level)
+			if e.logger != nil {
+				e.logger.Debug("Agent HTTP call successful", map[string]interface{}{
+					"operation":      "agent_http_response",
+					"step_id":        step.StepID,
+					"agent_name":     step.AgentName,
+					"attempt":        attempt,
+					"response_length": len(response),
+				})
+			}
 			result.Success = true
 			result.Response = response
 			break
+		}
+
+		// ✅ ADD: HTTP call failure (ERROR/DEBUG level)
+		logLevel := "Debug" // Use DEBUG for retry attempts
+		if attempt == maxAttempts {
+			logLevel = "Error" // Use ERROR for final failure
+		}
+		if e.logger != nil {
+			logData := map[string]interface{}{
+				"operation":    "agent_http_call_failed",
+				"step_id":      step.StepID,
+				"agent_name":   step.AgentName,
+				"attempt":      attempt,
+				"max_attempts": maxAttempts,
+				"error":        err.Error(),
+				"will_retry":   attempt < maxAttempts,
+			}
+			if logLevel == "Error" {
+				e.logger.Error("Agent HTTP call failed after all retries", logData)
+			} else {
+				e.logger.Debug("Agent HTTP call failed, retrying", logData)
+			}
 		}
 
 		result.Error = err.Error()
@@ -316,12 +475,35 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 		// Wait before retry
 		if attempt < maxAttempts {
-			time.Sleep(time.Duration(attempt) * time.Second)
+			retryDelay := time.Duration(attempt) * time.Second
+			// ✅ ADD: Retry delay logging (DEBUG level)
+			if e.logger != nil {
+				e.logger.Debug("Waiting before retry", map[string]interface{}{
+					"operation":    "retry_delay",
+					"step_id":      step.StepID,
+					"agent_name":   step.AgentName,
+					"attempt":      attempt,
+					"delay_seconds": retryDelay.Seconds(),
+				})
+			}
+			time.Sleep(retryDelay)
 		}
 	}
 
 	result.EndTime = time.Now()
 	result.Duration = time.Since(startTime)
+
+	// ✅ ADD: Step completion (DEBUG level)
+	if e.logger != nil {
+		e.logger.Debug("Step execution completed", map[string]interface{}{
+			"operation":     "step_execution_complete",
+			"step_id":       step.StepID,
+			"agent_name":    step.AgentName,
+			"success":       result.Success,
+			"duration_ms":   result.Duration.Milliseconds(),
+			"error":         result.Error,
+		})
+	}
 
 	return result
 }

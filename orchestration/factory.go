@@ -26,7 +26,32 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 	if config == nil {
 		config = DefaultConfig()
 	}
-	
+
+	// ✅ ADD: Ensure logger is available (follows framework design principles)
+	var factoryLogger core.Logger
+	if deps.Logger != nil {
+		factoryLogger = deps.Logger
+	} else {
+		// Create default production logger with intelligent defaults
+		factoryLogger = core.NewProductionLogger(
+			core.LoggingConfig{
+				Level:  "info",
+				Format: "json",
+				Output: "stdout",
+			},
+			core.DevelopmentConfig{},
+			"orchestrator",
+		)
+		deps.Logger = factoryLogger
+	}
+
+	factoryLogger.Info("Creating orchestrator instance", map[string]interface{}{
+		"operation":               "orchestrator_creation",
+		"routing_mode":            string(config.RoutingMode),
+		"capability_provider_type": config.CapabilityProviderType,
+		"telemetry_enabled":       config.EnableTelemetry,
+	})
+
 	// Pass optional dependencies to service capability provider if configured
 	if config.CapabilityProviderType == "service" {
 		// Inject optional dependencies into service config
@@ -34,10 +59,10 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		config.CapabilityService.Logger = deps.Logger
 		config.CapabilityService.Telemetry = deps.Telemetry
 	}
-	
-	// NewAIOrchestrator now handles capability provider setup based on config
+
+	// Create orchestrator
 	orchestrator := NewAIOrchestrator(config, deps.Discovery, deps.AIClient)
-	
+
 	// Validate service configuration if using service provider
 	if config.CapabilityProviderType == "service" && config.CapabilityService.Endpoint == "" {
 		// Check if auto-configuration found it
@@ -65,6 +90,14 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 			orchestrator.SetTelemetry(otelProvider)
 		}
 	}
+
+	// ✅ ADD: Inject logger into all components
+	orchestrator.SetLogger(deps.Logger)
+
+	factoryLogger.Info("Orchestrator created successfully", map[string]interface{}{
+		"operation": "orchestrator_creation_complete",
+		"success":   true,
+	})
 
 	return orchestrator, nil
 }
@@ -116,10 +149,22 @@ func CreateOrchestratorWithOptions(deps OrchestratorDependencies, opts ...Orches
 // - Use the default capability provider (sends all capabilities to LLM)
 // - Work with small to medium deployments (up to ~100 agents/tools)
 // - Not require any external services
-// - Use intelligent defaults for all settings
+// - Use intelligent defaults for all settings (including production logging)
 func CreateSimpleOrchestrator(discovery core.Discovery, aiClient core.AIClient) *AIOrchestrator {
-	// Pass nil config to use all defaults
-	return NewAIOrchestrator(nil, discovery, aiClient)
+	// Use proper dependency injection to ensure all framework features work
+	deps := OrchestratorDependencies{
+		Discovery: discovery,
+		AIClient:  aiClient,
+		// Logger, Telemetry, CircuitBreaker will be auto-created with smart defaults
+	}
+
+	orchestrator, err := CreateOrchestrator(nil, deps)
+	if err != nil {
+		// This should never happen with default config, but follow fail-safe principles
+		return NewAIOrchestrator(nil, discovery, aiClient)
+	}
+
+	return orchestrator
 }
 
 // WithCircuitBreaker creates an option for injecting a circuit breaker
