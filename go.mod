@@ -5,7 +5,6 @@ go 1.25
 require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/itsneelabh/gomind/core v0.0.0-20250901181604-d65c5d9c568c
-	github.com/itsneelabh/gomind/resilience v0.0.0-20250901181604-d65c5d9c568c
 	github.com/itsneelabh/gomind/telemetry v0.0.0-20250901181604-d65c5d9c568c
 	github.com/stretchr/testify v1.11.1
 )
