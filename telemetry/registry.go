@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 var (
@@ -56,6 +58,7 @@ type Registry struct {
 	limiter  *CardinalityLimiter      // Prevents metric explosion
 	circuit  *TelemetryCircuitBreaker // Protects backend from overload
 	metrics  *MetricInstruments       // Pre-registered metric instruments
+	logger   *TelemetryLogger         // Self-contained logger for telemetry operations
 
 	// Internal metrics for observability of the telemetry system itself
 	emitted   atomic.Int64 // Total metrics successfully emitted
@@ -103,29 +106,76 @@ func DeclareMetrics(module string, config ModuleConfig) {
 func Initialize(config Config) error {
 	var initErr error
 	initOnce.Do(func() {
+		// Create logger immediately for initialization visibility
+		logger := NewTelemetryLogger(config.ServiceName)
+
+		// Log initialization start
+		logger.Info("Telemetry initialization starting", map[string]interface{}{
+			"service_name":      config.ServiceName,
+			"endpoint":          config.Endpoint,
+			"cardinality_limit": config.CardinalityLimit,
+			"provider":          config.Provider,
+			"circuit_enabled":   config.CircuitBreaker.Enabled,
+		})
+
 		registry, err := newRegistry(config)
 		if err != nil {
 			initErr = err
+			logger.Error("Telemetry initialization failed", map[string]interface{}{
+				"error":    err.Error(),
+				"endpoint": config.Endpoint,
+				"action":   "Check OTEL collector is running at endpoint",
+				"impact":   "No metrics will be sent",
+			})
 			return
 		}
 
+		// Store logger in registry for future use
+		registry.logger = logger
+
 		// Process all metrics declared via DeclareMetrics()
 		// This allows packages to declare their metrics in init()
+		declaredCount := 0
 		declaredMetrics.Range(func(key, value interface{}) bool {
 			module := key.(string)
 			moduleConfig := value.(ModuleConfig)
 			registry.registerModule(module, moduleConfig)
+			declaredCount++
+			logger.Debug("Registered module metrics", map[string]interface{}{
+				"module":       module,
+				"metric_count": len(moduleConfig.Metrics),
+			})
 			return true
 		})
 
 		// Store globally for access by Emit functions
 		globalRegistry.Store(registry)
+
+		// Enable metrics emission in the logger now that registry is available
+		logger.EnableMetrics()
+
+		// Enable framework integration - register telemetry with core
+		// This allows all framework components to emit metrics through telemetry
+		EnableFrameworkIntegration(logger)
+
+		// Log successful initialization
+		logger.Info("Telemetry system initialized successfully", map[string]interface{}{
+			"declared_modules":    declaredCount,
+			"circuit_enabled":     registry.circuit != nil,
+			"limiter_enabled":     registry.limiter != nil,
+			"provider_type":       "OpenTelemetry",
+			"initialization_ms":   time.Since(registry.startTime).Milliseconds(),
+			"framework_integrated": true,
+		})
 	})
 	return initErr
 }
 
 // newRegistry creates a new telemetry registry
 func newRegistry(config Config) (*Registry, error) {
+	// Record start time for initialization metrics
+	startTime := time.Now()
+
 	// Set defaults if not provided
 	if config.Endpoint == "" {
 		config.Endpoint = "localhost:4318"
@@ -160,7 +210,7 @@ func newRegistry(config Config) (*Registry, error) {
 		limiter:      NewCardinalityLimiter(limits),
 		circuit:      NewTelemetryCircuitBreaker(config.CircuitBreaker),
 		metrics:      provider.metrics,
-		startTime:    time.Now(),
+		startTime:    startTime,
 		errorLimiter: NewRateLimiter(1 * time.Second), // Log errors at most once per second
 	}
 
@@ -236,10 +286,14 @@ func Emit(name string, value float64, labels ...string) {
 		telemetryErrors.Add(1)
 		r.lastError.Store(err.Error())
 
-		// Rate-limited logging
-		// In production, this would log the error if rate limit allows
-		// For now, we just track errors in telemetryErrors counter
-		_ = r.errorLimiter.Allow()
+		// Rate-limited error logging for visibility
+		if r.logger != nil && r.errorLimiter != nil && r.errorLimiter.Allow() {
+			r.logger.Error("Failed to emit metric", map[string]interface{}{
+				"metric": name,
+				"value":  value,
+				"error":  err.Error(),
+			})
+		}
 
 		// Record failure with circuit breaker
 		if r.circuit != nil {
@@ -289,14 +343,52 @@ func Shutdown(ctx context.Context) error {
 
 	r := registry.(*Registry)
 
+	// Log shutdown start
+	if r.logger != nil {
+		r.logger.Info("Shutting down telemetry system", map[string]interface{}{
+			"total_emitted": r.emitted.Load(),
+			"uptime_ms":     time.Since(r.startTime).Milliseconds(),
+		})
+	}
+
 	// Stop cardinality limiter cleanup
 	if r.limiter != nil {
 		r.limiter.Stop()
+		if r.logger != nil {
+			r.logger.Debug("Cardinality limiter stopped", nil)
+		}
 	}
 
 	// Shutdown provider
 	if r.provider != nil {
-		return r.provider.Shutdown(ctx)
+		err := r.provider.Shutdown(ctx)
+		if err != nil {
+			if r.logger != nil {
+				r.logger.Error("Error during provider shutdown", map[string]interface{}{
+					"error": err.Error(),
+				})
+			}
+			return err
+		}
+		if r.logger != nil {
+			r.logger.Info("Telemetry provider shut down successfully", nil)
+		}
+	}
+
+	// Clear framework integration - unregister from core
+	// This prevents core from calling our registry after shutdown
+	core.SetMetricsRegistry(nil)
+
+	// Clear global registry to prevent use after shutdown
+	// This ensures Emit functions become no-ops after shutdown
+	globalRegistry.Store(nil)
+
+	// Final log
+	if r.logger != nil {
+		r.logger.Info("Telemetry system shut down complete", map[string]interface{}{
+			"framework_unregistered": true,
+			"registry_cleared":       true,
+		})
 	}
 
 	return nil
