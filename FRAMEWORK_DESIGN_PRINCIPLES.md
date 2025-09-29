@@ -69,6 +69,12 @@ GoMind enables **autonomous agent networks** in production environments through 
 - `ui` → `core`
 - `telemetry` → `core` (implements `core.Telemetry` interface)
 
+**Critical Architectural Rule**: The `core` module **NEVER** imports optional modules. This ensures:
+1. **Unidirectional dependency flow** - Core is the foundation
+2. **True optional modules** - Telemetry remains genuinely optional
+3. **Compile-time enforcement** - Architectural violations are caught by the compiler
+4. **No circular dependencies** - Impossible by design
+
 ---
 
 ## Implementation Guidelines
@@ -297,15 +303,87 @@ return fmt.Errorf("connection failed: %w", err)
 
 ## Monitoring and Observability
 
-### Built-in Telemetry
-- All framework operations must emit metrics
-- Support both development and production telemetry profiles
+### Telemetry Architecture Pattern
+
+**Design Decision**: Telemetry uses **explicit initialization** at the application level, not framework-level auto-wiring.
+
+**Why This Pattern?**
+
+```go
+// ❌ Framework CANNOT do this (violates architectural principles)
+import "github.com/itsneelabh/gomind/telemetry"  // Core cannot import modules
+
+// ✅ Applications MUST do this (explicit initialization)
+func main() {
+    telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
+    // Now all components can use telemetry
+}
+```
+
+**Rationale**:
+1. **Architectural Purity**: Core module cannot import telemetry module (dependency direction)
+2. **True Optionality**: Telemetry remains genuinely optional at compile time
+3. **Explicit Control**: Applications have full control over telemetry lifecycle
+4. **No Magic**: Clear, predictable initialization order
+
+**Integration Pattern**:
+
+```go
+// Step 1: Core defines interface (no implementation knowledge)
+type Telemetry interface {
+    RecordMetric(name string, value float64, labels map[string]string)
+}
+
+// Step 2: Components have Telemetry field (defaults to NoOp)
+type BaseTool struct {
+    Telemetry Telemetry  // Safe default: &NoOpTelemetry{}
+}
+
+// Step 3: Telemetry module provides global singleton
+var globalRegistry atomic.Value  // Stores *OTelProvider
+
+// Step 4: Application initializes telemetry
+telemetry.Initialize(config)  // Sets up global registry
+
+// Step 5: Application code emits metrics
+telemetry.Counter("requests.total")  // Uses global registry
+```
+
+**Key Characteristics**:
+- **Global Singleton**: `telemetry.Initialize()` sets up a global registry
+- **Thread-Safe**: Atomic operations for concurrent metric emission
+- **Zero-Cost if Unused**: NoOp implementation when not initialized
+- **Standard Environment Variables**: Respects `OTEL_EXPORTER_OTLP_ENDPOINT`
+
+### Built-in Telemetry Requirements
+
+**For Framework Code**:
+- Never assume telemetry is initialized
+- Always check for nil before using Telemetry interface
+- Use NoOp default in constructors
 - Never fail operations due to telemetry failures
+
+```go
+// ✅ Good: Safe telemetry usage
+func (t *BaseTool) processRequest() {
+    if t.Telemetry != nil {
+        t.Telemetry.RecordMetric("requests.total", 1.0, nil)
+    }
+    // Continue processing even if telemetry fails
+}
+```
+
+**For Application Code**:
+- Initialize telemetry in `main()` before creating components
+- Use `defer telemetry.Shutdown()` for clean shutdown
+- Configure via environment variables or explicit config
+- Support both development and production profiles
 
 ### Health Checks
 - All components must provide `/health` endpoints
 - Health checks must be fast (<100ms) and reliable
 - Support both liveness and readiness probes
+- Health status should include telemetry initialization state (optional)
 
 ---
 
@@ -326,12 +404,15 @@ return fmt.Errorf("connection failed: %w", err)
 
 ### Code Review Checklist
 - [ ] Follows interface-first design
-- [ ] Maintains Tool/Agent architectural separation  
+- [ ] Maintains Tool/Agent architectural separation
 - [ ] Includes intelligent configuration defaults
 - [ ] Has comprehensive test coverage
 - [ ] Provides clear error messages
 - [ ] Updates relevant documentation
 - [ ] No backwards compatibility breaks without major version
+- [ ] Core module doesn't import optional modules (telemetry, ai, etc.)
+- [ ] Telemetry usage is nil-safe (checks before use)
+- [ ] Application examples show proper telemetry initialization
 
 ---
 

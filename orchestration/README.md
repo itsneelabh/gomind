@@ -440,6 +440,153 @@ steps:
 - Predictable performance is important
 - Avoiding LLM costs for routine tasks
 
+## 🏗️ Architecture & Design Decisions
+
+### Why Orchestration Doesn't Import the AI Module
+
+**Critical Design Decision**: The orchestration module uses `core.AIClient` interface instead of importing the `ai` module directly. This is intentional and follows the framework's "Zero Framework Dependencies" principle.
+
+#### The Dependency Injection Pattern
+
+```go
+// ❌ NEVER DO THIS - Violates architectural principles
+// orchestration/orchestrator.go
+import "github.com/itsneelabh/gomind/ai"  // FORBIDDEN: Module importing module
+
+// ✅ THIS IS CORRECT - Interface-based dependency injection
+import "github.com/itsneelabh/gomind/core"  // Only import core
+
+type AIOrchestrator struct {
+    aiClient core.AIClient  // Uses interface from core, NOT ai module
+}
+
+func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiClient core.AIClient) *AIOrchestrator {
+    // AIClient is INJECTED as parameter, not created internally
+    return &AIOrchestrator{
+        aiClient: aiClient,  // Dependency injection
+    }
+}
+```
+
+#### How Applications Wire Everything Together
+
+The application layer is responsible for creating both the AI client and orchestrator:
+
+```go
+// main.go - Application wires components together
+import (
+    "github.com/itsneelabh/gomind/core"
+    "github.com/itsneelabh/gomind/ai"            // App imports ai
+    "github.com/itsneelabh/gomind/orchestration" // App imports orchestration
+)
+
+func main() {
+    // Step 1: Create AI client (from ai module)
+    aiClient, _ := ai.NewClient(
+        ai.WithProvider("openai"),
+        ai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
+    )
+
+    // Step 2: Pass AI client to orchestrator (dependency injection)
+    orchestrator := orchestration.CreateSimpleOrchestrator(discovery, aiClient)
+
+    // The orchestrator now has AI capabilities WITHOUT importing ai module!
+}
+```
+
+#### Benefits of This Design
+
+1. **True Modularity**: Orchestration can work with ANY implementation of `core.AIClient`:
+   ```go
+   // Use ai module's implementation
+   aiClient := ai.NewClient(...)
+
+   // OR use a custom implementation
+   aiClient := mycompany.NewCustomAIClient(...)
+
+   // OR use a mock for testing
+   aiClient := &MockAIClient{}
+
+   // Orchestration doesn't care - just uses the interface
+   orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient)
+   ```
+
+2. **No Circular Dependencies**: Modules only import core, never each other:
+   ```
+   orchestration → core ← ai
+   telemetry    → core ← resilience
+   ui           → core
+
+   (No direct connections between optional modules)
+   ```
+
+3. **Testing Isolation**: Test orchestration without the ai module:
+   ```go
+   // orchestration/factory_test.go
+   func TestOrchestrator(t *testing.T) {
+       aiClient := NewMockAIClient()  // Mock implementation
+       orchestrator := CreateSimpleOrchestrator(discovery, aiClient)
+       // Test orchestration logic without real AI calls
+   }
+   ```
+
+4. **Provider Flexibility**: Switch AI providers without touching orchestration code:
+   ```go
+   // Today: Using OpenAI
+   aiClient := ai.NewClient(ai.WithProvider("openai"))
+
+   // Tomorrow: Switch to Anthropic
+   aiClient := ai.NewClient(ai.WithProvider("anthropic"))
+
+   // Next week: Use your private LLM
+   aiClient := mycompany.PrivateLLMClient()
+
+   // Orchestration code remains unchanged!
+   ```
+
+#### The Dependency Flow
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│     core     │     │     core     │     │     core     │
+│              │     │              │     │              │
+│ Defines:     │     │ Defines:     │     │ Defines:     │
+│ - AIClient   │     │ - Discovery  │     │ - Telemetry  │
+│   interface  │     │   interface  │     │   interface  │
+└──────▲───────┘     └──────▲───────┘     └──────▲───────┘
+       │                    │                    │
+       ├────────────────────┼────────────────────┤
+       │                    │                    │
+┌──────┴───────┐     ┌──────┴───────┐     ┌──────┴───────┐
+│      ai      │     │orchestration │     │  telemetry   │
+│              │     │              │     │              │
+│ Implements:  │     │    Uses:     │     │ Implements:  │
+│ - AIClient   │     │ - AIClient   │     │ - Telemetry  │
+└──────────────┘     │ - Discovery  │     └──────────────┘
+                     └──────────────┘
+
+Note: orchestration NEVER imports ai or telemetry directly!
+```
+
+#### Comparison with Telemetry Pattern
+
+This follows the exact same pattern as telemetry integration:
+
+| Aspect | Telemetry Pattern | AI Pattern |
+|--------|------------------|------------|
+| **Interface** | `core.Telemetry` | `core.AIClient` |
+| **Implementation** | `telemetry` module | `ai` module |
+| **Usage** | Components have `Telemetry` field | Orchestrator has `AIClient` field |
+| **Initialization** | App calls `telemetry.Initialize()` | App creates `ai.NewClient()` |
+| **Injection** | Set via `SetTelemetry()` | Pass via constructor |
+
+#### Summary
+
+This design is a textbook example of the **Dependency Inversion Principle**:
+- High-level modules (orchestration) depend on abstractions (`core.AIClient`)
+- Not on concrete implementations (`ai` module)
+- This maintains architectural purity and enables true modularity
+
 ## 🏗️ How Everything Fits Together
 
 ### The Orchestra Metaphor - Complete Picture
