@@ -53,7 +53,6 @@ func (e *SmartExecutor) SetLogger(logger core.Logger) {
 func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
 	startTime := time.Now()
 
-	// ✅ ADD: Execution start (DEBUG level)
 	if e.logger != nil {
 		e.logger.Debug("Starting plan execution", map[string]interface{}{
 			"operation":       "execute_plan",
@@ -126,7 +125,6 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 			return nil, fmt.Errorf("no executable steps found - check for circular dependencies")
 		}
 
-		// ✅ ADD: Parallel execution start (DEBUG level)
 		if e.logger != nil {
 			stepIDs := make([]string, len(readySteps))
 			for i, step := range readySteps {
@@ -218,7 +216,6 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 		// Wait for this batch to complete
 		wg.Wait()
 
-		// ✅ ADD: Progress logging (DEBUG level)
 		completedSteps := len(executed)
 		totalSteps := len(plan.Steps)
 		if e.logger != nil {
@@ -241,7 +238,6 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 
 	result.TotalDuration = time.Since(startTime)
 
-	// ✅ ADD: Execution completion (INFO level)
 	failedSteps := 0
 	for _, step := range result.Steps {
 		if !step.Success {
@@ -316,7 +312,6 @@ func (e *SmartExecutor) buildStepContext(ctx context.Context, step RoutingStep, 
 func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepResult {
 	startTime := time.Now()
 
-	// ✅ ADD: Step start (DEBUG level)
 	if e.logger != nil {
 		e.logger.Debug("Starting step execution", map[string]interface{}{
 			"operation":  "step_execution_start",
@@ -337,7 +332,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	// Get agent info from catalog
 	agentInfo := e.findAgentByName(step.AgentName)
 	if agentInfo == nil {
-		// ✅ ADD: Agent not found (ERROR level)
 		if e.logger != nil {
 			e.logger.Error("Agent not found in catalog", map[string]interface{}{
 				"operation":  "agent_discovery",
@@ -352,7 +346,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		return result
 	}
 
-	// ✅ ADD: Agent found (DEBUG level)
 	if e.logger != nil {
 		e.logger.Debug("Agent discovered successfully", map[string]interface{}{
 			"operation":     "agent_discovery",
@@ -377,7 +370,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	// Find the capability endpoint
 	endpoint := e.findCapabilityEndpoint(agentInfo, capability)
 	if endpoint == "" {
-		// ✅ ADD: Capability endpoint error (ERROR level)
 		if e.logger != nil {
 			e.logger.Error("Capability endpoint not found", map[string]interface{}{
 				"operation":   "capability_resolution",
@@ -411,7 +403,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
 
-		// ✅ ADD: HTTP call attempt (DEBUG level)
 		if e.logger != nil {
 			e.logger.Debug("Making HTTP call to agent", map[string]interface{}{
 				"operation":    "agent_http_call",
@@ -427,7 +418,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		// Make the HTTP request
 		response, err := e.callAgent(ctx, url, parameters)
 		if err == nil {
-			// ✅ ADD: HTTP call success (DEBUG level)
 			if e.logger != nil {
 				e.logger.Debug("Agent HTTP call successful", map[string]interface{}{
 					"operation":      "agent_http_response",
@@ -442,7 +432,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			break
 		}
 
-		// ✅ ADD: HTTP call failure (ERROR/DEBUG level)
 		logLevel := "Debug" // Use DEBUG for retry attempts
 		if attempt == maxAttempts {
 			logLevel = "Error" // Use ERROR for final failure
@@ -476,7 +465,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		// Wait before retry
 		if attempt < maxAttempts {
 			retryDelay := time.Duration(attempt) * time.Second
-			// ✅ ADD: Retry delay logging (DEBUG level)
 			if e.logger != nil {
 				e.logger.Debug("Waiting before retry", map[string]interface{}{
 					"operation":    "retry_delay",
@@ -493,7 +481,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	result.EndTime = time.Now()
 	result.Duration = time.Since(startTime)
 
-	// ✅ ADD: Step completion (DEBUG level)
 	if e.logger != nil {
 		e.logger.Debug("Step execution completed", map[string]interface{}{
 			"operation":     "step_execution_complete",

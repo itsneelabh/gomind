@@ -237,7 +237,7 @@ func TestHeartbeatPersistence(t *testing.T) {
 		t.Fatal("Tool registration expired despite heartbeat - heartbeat not working")
 	}
 
-	t.Log("✅ Heartbeat successfully kept registration alive beyond TTL")
+	t.Log("Heartbeat successfully kept registration alive beyond TTL")
 
 	// Clean up
 	client.Del(ctx, key)

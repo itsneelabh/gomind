@@ -31,13 +31,11 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		}
 	}
 
-	// 🔥 CRITICAL FIX: Use framework-provided logger or fallback
 	logger := config.Logger
 	if logger == nil {
 		logger = &core.NoOpLogger{}
 	}
 
-	// 🔥 ADD: Provider creation logging
 	logger.Info("OpenAI provider initialized", map[string]interface{}{
 		"operation":    "ai_provider_init",
 		"provider":     "openai",

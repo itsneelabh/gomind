@@ -47,14 +47,14 @@ func TestRedisRateLimitingVerification(t *testing.T) {
 		if limiter.client.GetDB() != 1 {
 			t.Errorf("❌ FAILED: Expected DB 1, got DB %d", limiter.client.GetDB())
 		} else {
-			t.Logf("✅ VERIFIED: Using Redis DB 1 for rate limiting (isolated from DB 0)")
+			t.Logf("VERIFIED: Using Redis DB 1 for rate limiting (isolated from DB 0)")
 		}
 
 		// Verify namespace
 		if limiter.client.GetNamespace() != "gomind:ratelimit" {
 			t.Errorf("❌ FAILED: Wrong namespace: %s", limiter.client.GetNamespace())
 		} else {
-			t.Logf("✅ VERIFIED: Using namespace 'gomind:ratelimit'")
+			t.Logf("VERIFIED: Using namespace 'gomind:ratelimit'")
 		}
 	})
 
@@ -82,7 +82,7 @@ func TestRedisRateLimitingVerification(t *testing.T) {
 			if !allowed {
 				t.Errorf("Request %d should be allowed", i)
 			} else {
-				t.Logf("✅ Request %d: ALLOWED (within limit)", i)
+				t.Logf("Request %d: ALLOWED (within limit)", i)
 			}
 		}
 
@@ -91,12 +91,12 @@ func TestRedisRateLimitingVerification(t *testing.T) {
 		if allowed {
 			t.Error("❌ FAILED: 4th request should be rejected")
 		} else {
-			t.Logf("✅ Request 4: REJECTED (limit exceeded), retry after %d seconds", retryAfter)
+			t.Logf("Request 4: REJECTED (limit exceeded), retry after %d seconds", retryAfter)
 		}
 
 		// Test 3: Check remaining
 		remaining := limiter.Remaining(ctx, testKey)
-		t.Logf("✅ Remaining requests: %d", remaining)
+		t.Logf("Remaining requests: %d", remaining)
 
 		// Test 4: Verify metrics were recorded
 		telemetry.mu.Lock()
@@ -104,7 +104,7 @@ func TestRedisRateLimitingVerification(t *testing.T) {
 		rejectedCount := telemetry.metrics["security.rate_limit.rejected"]
 		telemetry.mu.Unlock()
 
-		t.Logf("✅ Metrics: Allowed=%v, Rejected=%v", allowedCount, rejectedCount)
+		t.Logf("Metrics: Allowed=%v, Rejected=%v", allowedCount, rejectedCount)
 	})
 
 	t.Run("PROOF: Redis Persists Across Connections", func(t *testing.T) {
@@ -138,7 +138,7 @@ func TestRedisRateLimitingVerification(t *testing.T) {
 		if allowed2 {
 			t.Error("❌ FAILED: New connection should still see rate limit")
 		} else {
-			t.Log("✅ VERIFIED: Rate limit state persists across connections (Redis working)")
+			t.Log("VERIFIED: Rate limit state persists across connections (Redis working)")
 		}
 	})
 
@@ -173,7 +173,7 @@ func TestRedisRateLimitingVerification(t *testing.T) {
 		for _, log := range logs {
 			if containsString(log, "Using Redis rate limiter") {
 				redisUsed = true
-				t.Logf("✅ VERIFIED: %s", log)
+				t.Logf("VERIFIED: %s", log)
 			}
 		}
 
@@ -200,7 +200,7 @@ func TestRedisRateLimitingVerification(t *testing.T) {
 				if rec.Code != http.StatusTooManyRequests {
 					t.Errorf("Request %d should be rate limited, got %d", i, rec.Code)
 				} else {
-					t.Logf("✅ Request %d: Rate limited (429)", i)
+					t.Logf("Request %d: Rate limited (429)", i)
 				}
 			}
 		}
@@ -208,11 +208,11 @@ func TestRedisRateLimitingVerification(t *testing.T) {
 
 	// Print summary
 	t.Log("\n========== VERIFICATION SUMMARY ==========")
-	t.Log("✅ Redis DB 1 isolation confirmed")
-	t.Log("✅ Sliding window algorithm working")
-	t.Log("✅ State persists across connections")
-	t.Log("✅ Auto-detection from REDIS_URL works")
-	t.Log("✅ Rate limiting enforced correctly")
+	t.Log("Redis DB 1 isolation confirmed")
+	t.Log("Sliding window algorithm working")
+	t.Log("State persists across connections")
+	t.Log("Auto-detection from REDIS_URL works")
+	t.Log("Rate limiting enforced correctly")
 	t.Log("==========================================")
 }
 
@@ -285,7 +285,7 @@ func TestRedisVsInMemoryComparison(t *testing.T) {
 		if allowed2 {
 			t.Error("New Redis instance should see shared state")
 		} else {
-			t.Log("✅ CONFIRMED: Redis shares state across instances (production ready)")
+			t.Log("CONFIRMED: Redis shares state across instances (production ready)")
 		}
 	})
 }

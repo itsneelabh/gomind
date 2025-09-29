@@ -88,7 +88,6 @@ func NewToolWithConfig(config *Config) *BaseTool {
 
 // Initialize initializes the tool
 func (t *BaseTool) Initialize(ctx context.Context) error {
-	// 🔥 ADD: Enhanced initialization context
 	t.Logger.Info("Starting tool initialization", map[string]interface{}{
 		"id":                t.ID,
 		"name":              t.Name,
@@ -102,7 +101,6 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 	if t.Config != nil {
 		// Initialize registry if configured
 		if t.Config.Discovery.Enabled && t.Registry == nil {
-			// 🔥 ADD: Registry initialization visibility
 			t.Logger.Info("Initializing service registry", map[string]interface{}{
 				"provider":      t.Config.Discovery.Provider,
 				"mock_mode":     t.Config.Development.MockDiscovery,
@@ -112,7 +110,6 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 			if t.Config.Development.MockDiscovery {
 				// Use mock registry for development
 				t.Registry = NewMockDiscovery()
-				// 🔥 ADD: Mock registry confirmation
 				t.Logger.Info("Using mock registry for development", map[string]interface{}{
 					"provider": "mock",
 					"reason":   "development_mode",
@@ -123,7 +120,6 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 					// Set logger for better observability
 					registry.SetLogger(t.Logger)
 					t.Registry = registry
-					// 🔥 ADD: Redis registry success
 					t.Logger.Info("Redis registry initialized successfully", map[string]interface{}{
 						"provider":  "redis",
 						"redis_url": t.Config.Discovery.RedisURL,
@@ -134,7 +130,6 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 						"error":      err,
 						"error_type": fmt.Sprintf("%T", err),
 						"redis_url":  t.Config.Discovery.RedisURL,
-						// 🔥 ADD: Dependency impact context
 						"impact":     "tool_will_run_without_registry",
 						"fallback":   "manual_configuration_required",
 					})
@@ -143,7 +138,6 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 		}
 	}
 
-	// 🔥 ADD: Service registration attempt context
 	if t.Registry != nil {
 		address, port := ResolveServiceAddress(t.Config, t.Logger)
 
@@ -179,7 +173,6 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 			})
 		}
 	} else {
-		// 🔥 ADD: No registry context
 		t.Logger.Warn("Tool running without service registry", map[string]interface{}{
 			"reason":          "registry_not_configured",
 			"impact":          "tool_not_discoverable",
@@ -187,7 +180,6 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 		})
 	}
 
-	// 🔥 ADD: Initialization completion
 	t.Logger.Info("Tool initialization completed", map[string]interface{}{
 		"id":                t.ID,
 		"name":              t.Name,
@@ -322,7 +314,6 @@ func (t *BaseTool) setupStandardEndpoints() {
 					"error":             err,
 					"error_type":        fmt.Sprintf("%T", err),
 					"tool_id":           t.ID,
-					// 🔥 ADD: Request context for troubleshooting
 					"request_method":    r.Method,
 					"request_path":      r.URL.Path,
 					"request_remote":    r.RemoteAddr,
@@ -355,8 +346,7 @@ func (t *BaseTool) setupStandardEndpoints() {
 						"error":             err,
 						"error_type":        fmt.Sprintf("%T", err),
 						"tool_id":           t.ID,
-						// 🔥 ADD: Request context for troubleshooting
-						"request_method":    r.Method,
+							"request_method":    r.Method,
 						"request_path":      r.URL.Path,
 						"request_remote":    r.RemoteAddr,
 						"capabilities_count": len(t.Capabilities),
@@ -380,8 +370,7 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 	
 	// Validate port range (0 is allowed for automatic assignment)
 	if port < 0 || port > 65535 {
-		// 🔥 ADD: Port validation with context
-		t.Logger.Error("Invalid port specified", map[string]interface{}{
+			t.Logger.Error("Invalid port specified", map[string]interface{}{
 			"requested_port": port,
 			"valid_range":    "0-65535",
 			"port_zero_note": "0_enables_automatic_assignment",
@@ -399,7 +388,6 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 	// Setup standard endpoints (/api/capabilities, /health)
 	t.setupStandardEndpoints()
 
-	// 🔥 ADD: Server configuration logging
 	t.Logger.Info("Configuring HTTP server", map[string]interface{}{
 		"port":                   port,
 		"cors_enabled":           t.Config.HTTP.CORS.Enabled,
@@ -409,7 +397,6 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 		"registered_endpoints":   len(t.registeredPatterns),
 	})
 
-	// 🔥 ADD: Endpoint registration summary
 	if len(t.registeredPatterns) > 0 {
 		endpoints := make([]string, 0, len(t.registeredPatterns))
 		for pattern := range t.registeredPatterns {
@@ -432,7 +419,6 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 		MaxHeaderBytes:    t.Config.HTTP.MaxHeaderBytes,
 	}
 
-	// 🔥 ADD: Service update registration context
 	if t.Registry != nil {
 		// Use the shared resolver for proper K8s support
 		address, registrationPort := ResolveServiceAddress(t.Config, t.Logger)
@@ -467,7 +453,6 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 		"registry_enabled":  t.Registry != nil,
 	})
 
-	// 🔥 ADD: Server startup failure context
 	if err := t.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		t.Logger.Error("HTTP server failed to start", map[string]interface{}{
 			"error":      err.Error(),

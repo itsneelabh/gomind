@@ -52,7 +52,6 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 	var lastErr error
 
 	for attempt := 0; attempt <= b.MaxRetries; attempt++ {
-		// 🔥 FIXED: Log retry attempt BEFORE executing request
 		if attempt > 0 && b.Logger != nil && lastErr != nil {
 			b.Logger.Warn("AI request retry attempt", map[string]interface{}{
 				"operation":   "ai_request_retry",
@@ -73,7 +72,6 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 
 		// Success - return if no error and status is not retryable
 		if err == nil && resp.StatusCode < 400 {
-			// 🔥 ADD: Success after retry logging
 			if attempt > 0 && b.Logger != nil {
 				b.Logger.Info("AI request succeeded after retry", map[string]interface{}{
 					"operation":          "ai_request_recovery",
@@ -86,7 +84,6 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 
 		// Return non-retryable client errors immediately
 		if err == nil && resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 {
-			// 🔥 ADD: Non-retryable error logging
 			if b.Logger != nil {
 				b.Logger.Error("AI request failed with non-retryable error", map[string]interface{}{
 					"operation":   "ai_request_error",
@@ -133,7 +130,6 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 			case <-time.After(delay):
 				// Continue to next attempt
 			case <-ctx.Done():
-				// 🔥 ADD: Context cancellation logging
 				b.Logger.Error("AI request cancelled during retry", map[string]interface{}{
 					"operation":      "ai_request_cancelled",
 					"cancelled_at":   attempt + 1,
@@ -144,7 +140,6 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 		}
 	}
 
-	// 🔥 ADD: Final failure logging
 	b.Logger.Error("AI request failed after all retries", map[string]interface{}{
 		"operation":       "ai_request_final_failure",
 		"total_attempts":  b.MaxRetries + 1,

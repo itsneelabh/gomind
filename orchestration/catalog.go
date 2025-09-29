@@ -102,7 +102,6 @@ func (c *AgentCatalog) SetLogger(logger core.Logger) {
 func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	refreshStart := time.Now()
 
-	// ✅ ADD: Refresh start (INFO level) - Read agent count atomically for consistent logging
 	c.mu.RLock()
 	currentAgentCount := len(c.agents)
 	c.mu.RUnlock()
@@ -118,7 +117,6 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	// Note: We'll need to enhance discovery to support getting all services
 	services, err := c.getAllServices(ctx)
 	if err != nil {
-		// ✅ ADD: Discovery failure (ERROR level)
 		if c.logger != nil {
 			c.logger.Error("Failed to get services from discovery", map[string]interface{}{
 				"operation":   "discovery_query",
@@ -129,7 +127,6 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 		return fmt.Errorf("failed to get services: %w", err)
 	}
 
-	// ✅ ADD: Discovery success (DEBUG level)
 	if c.logger != nil {
 		c.logger.Debug("Services discovered successfully", map[string]interface{}{
 			"operation":      "discovery_query",
@@ -147,7 +144,6 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	for _, service := range services {
 		agentFetchStart := time.Now()
 
-		// ✅ ADD: Agent capability fetch start (DEBUG level)
 		if c.logger != nil {
 			c.logger.Debug("Fetching agent capabilities", map[string]interface{}{
 				"operation":    "fetch_agent_info",
@@ -160,7 +156,6 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 		agentInfo, err := c.fetchAgentInfo(ctx, service)
 		if err != nil {
 			failedFetches++
-			// ✅ ADD: Agent capability fetch failure (WARN level)
 			if c.logger != nil {
 				c.logger.Warn("Failed to fetch agent capabilities", map[string]interface{}{
 					"operation":     "fetch_agent_info",
@@ -177,7 +172,6 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 		successfulFetches++
 		newAgents[service.ID] = agentInfo
 
-		// ✅ ADD: Agent capability fetch success (DEBUG level)
 		if c.logger != nil {
 			c.logger.Debug("Agent capabilities fetched successfully", map[string]interface{}{
 				"operation":          "fetch_agent_info",
@@ -194,7 +188,6 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 		}
 	}
 
-	// ✅ ADD: Index building (DEBUG level)
 	if c.logger != nil {
 		c.logger.Debug("Capability index built", map[string]interface{}{
 			"operation":           "build_capability_index",
@@ -209,7 +202,6 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	c.capabilityIndex = newIndex
 	c.mu.Unlock()
 
-	// ✅ ADD: Refresh completion (INFO level) - Use consistent agent count for accurate change calculation
 	if c.logger != nil {
 		c.logger.Info("Catalog refresh completed", map[string]interface{}{
 			"operation":           "catalog_refresh_complete",
@@ -218,7 +210,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 			"successful_fetches":  successfulFetches,
 			"failed_fetches":      failedFetches,
 			"final_agent_count":   len(newAgents),
-			"agent_count_change":  len(newAgents) - currentAgentCount,  // ✅ FIXED: Use consistent count
+			"agent_count_change":  len(newAgents) - currentAgentCount,
 		})
 	}
 
@@ -234,7 +226,6 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 	// Call the agent's /api/capabilities endpoint
 	url := fmt.Sprintf("http://%s:%d/api/capabilities", service.Address, service.Port)
 
-	// ✅ ADD: HTTP request start (DEBUG level)
 	if c.logger != nil {
 		c.logger.Debug("Making HTTP request for capabilities", map[string]interface{}{
 			"operation":    "http_request_start",
@@ -253,7 +244,6 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// ✅ ADD: HTTP failure with fallback (WARN level)
 		if c.logger != nil {
 			c.logger.Warn("HTTP request failed, using fallback capabilities", map[string]interface{}{
 				"operation":       "http_request_fallback",
@@ -272,7 +262,6 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 			}
 		}()
 
-		// ✅ ADD: HTTP response received (DEBUG level)
 		if c.logger != nil {
 			c.logger.Debug("HTTP response received", map[string]interface{}{
 				"operation":       "http_response",
@@ -284,7 +273,6 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 		}
 
 		if err := json.NewDecoder(resp.Body).Decode(&capabilities); err != nil {
-			// ✅ ADD: JSON decode failure with fallback (WARN level)
 			if c.logger != nil {
 				c.logger.Warn("JSON decode failed, using fallback capabilities", map[string]interface{}{
 					"operation":  "json_decode_fallback",

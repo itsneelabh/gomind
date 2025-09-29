@@ -391,7 +391,6 @@ func (c *Config) DetectEnvironment() {
 //
 // Returns an error if environment variables contain invalid values or if validation fails.
 func (c *Config) LoadFromEnv() error {
-	// 🔥 ADD: Configuration loading start
 	if c.logger != nil {
 		c.logger.Info("Loading configuration from environment", map[string]interface{}{
 			"config_source": "environment_variables",
@@ -404,7 +403,6 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_AGENT_NAME"); v != "" {
 		c.Name = v
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "agent_name",
@@ -416,7 +414,6 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_AGENT_ID"); v != "" {
 		c.ID = v
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "agent_id",
@@ -429,7 +426,6 @@ func (c *Config) LoadFromEnv() error {
 		if port, err := strconv.Atoi(v); err == nil {
 			c.Port = port
 			envVarsLoaded++
-			// 🔥 ADD: Config value logging (sanitized)
 			if c.logger != nil {
 				c.logger.Debug("Configuration loaded", map[string]interface{}{
 					"setting": "port",
@@ -448,7 +444,6 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_ADDRESS"); v != "" {
 		c.Address = v
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "address",
@@ -460,7 +455,6 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_NAMESPACE"); v != "" {
 		c.Namespace = v
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "namespace",
@@ -510,7 +504,6 @@ func (c *Config) LoadFromEnv() error {
 		c.Discovery.RedisURL = v
 		c.Memory.RedisURL = v // Also use for memory if not separately configured
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "redis_url",
@@ -522,7 +515,6 @@ func (c *Config) LoadFromEnv() error {
 		c.Discovery.RedisURL = v
 		c.Memory.RedisURL = v
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "redis_url",
@@ -543,7 +535,6 @@ func (c *Config) LoadFromEnv() error {
 		c.AI.APIKey = v
 		c.AI.Enabled = true // Auto-enable if API key is provided
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized - no key value)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "ai_api_key",
@@ -555,7 +546,6 @@ func (c *Config) LoadFromEnv() error {
 		c.AI.APIKey = v
 		c.AI.Enabled = true // Auto-enable if OpenAI key is present
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized - no key value)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "ai_api_key",
@@ -579,7 +569,6 @@ func (c *Config) LoadFromEnv() error {
 		c.Telemetry.Endpoint = v
 		c.Telemetry.Enabled = true // Auto-enable if endpoint is provided
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "telemetry_endpoint",
@@ -591,7 +580,6 @@ func (c *Config) LoadFromEnv() error {
 		c.Telemetry.Endpoint = v
 		c.Telemetry.Enabled = true // Auto-enable if OTEL endpoint is present
 		envVarsLoaded++
-		// 🔥 ADD: Config value logging (sanitized)
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "telemetry_endpoint",
@@ -677,7 +665,6 @@ func (c *Config) LoadFromEnv() error {
 		}
 	}
 
-	// 🔥 ADD: Configuration validation results
 	if err := c.Validate(); err != nil {
 		if c.logger != nil {
 			c.logger.Error("Configuration validation failed", map[string]interface{}{
@@ -689,7 +676,6 @@ func (c *Config) LoadFromEnv() error {
 		return err
 	}
 
-	// 🔥 ADD: Configuration loading completion
 	// Note: LOGGING_SOLUTION_ANALYSIS.md:1434 references "EnableDevelopmentMode" but actual field is "Enabled"
 	if c.logger != nil {
 		c.logger.Info("Configuration loading completed", map[string]interface{}{
@@ -1412,7 +1398,6 @@ func NewConfig(opts ...Option) (*Config, error) {
 		}
 	}
 
-	// 🔥 CRITICAL FIX: Auto-create logger from configuration when none provided
 	if cfg.logger == nil {
 		logger := NewProductionLogger(cfg.Logging, cfg.Development, cfg.Name)
 
@@ -1500,7 +1485,6 @@ func (p *ProductionLogger) Debug(msg string, fields map[string]interface{}) {
 func (p *ProductionLogger) logEvent(level, msg string, fields map[string]interface{}, ctx context.Context) {
 	timestamp := time.Now().Format(time.RFC3339)
 
-	// 🔥 LAYER 1: Console output (always works, immediate visibility)
 	if p.format == "json" {
 		// Structured logging for production log aggregation
 		logEntry := map[string]interface{}{
@@ -1549,7 +1533,6 @@ func (p *ProductionLogger) logEvent(level, msg string, fields map[string]interfa
 			timestamp, level, p.serviceName, traceInfo, msg, fieldStr.String())
 	}
 
-	// 🔥 LAYER 2: Metrics emission (when telemetry available)
 	if p.metricsEnabled {
 		p.emitFrameworkMetric(level, msg, fields, ctx)
 	}

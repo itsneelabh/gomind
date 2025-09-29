@@ -174,7 +174,6 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	startTime := time.Now()
 	requestID := generateRequestID()
 
-	// ✅ ADD: Request start logging (INFO level)
 	if o.logger != nil {
 		o.logger.Info("Starting request processing", map[string]interface{}{
 			"operation":     "process_request",
@@ -199,7 +198,6 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	// Step 1: Get execution plan from LLM
 	plan, err := o.generateExecutionPlan(ctx, request, requestID)
 	if err != nil {
-		// ✅ ADD: Plan generation error logging (ERROR level)
 		if o.logger != nil {
 			o.logger.Error("Plan generation failed", map[string]interface{}{
 				"operation":  "plan_generation",
@@ -220,7 +218,6 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		return nil, fmt.Errorf("failed to generate execution plan: %w", err)
 	}
 
-	// ✅ ADD: Plan generation success (INFO level)
 	if o.logger != nil {
 		o.logger.Info("Plan generated successfully", map[string]interface{}{
 			"operation":  "plan_generation",
@@ -248,7 +245,6 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	// Step 3: Execute the plan
 	result, err := o.executor.Execute(ctx, plan)
 	if err != nil {
-		// ✅ ADD: Plan execution error logging (ERROR level)
 		if o.logger != nil {
 			o.logger.Error("Plan execution failed", map[string]interface{}{
 				"operation":  "plan_execution",
@@ -262,7 +258,6 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		return nil, fmt.Errorf("execution failed: %w", err)
 	}
 
-	// ✅ ADD: Execution completion (INFO level)
 	if o.logger != nil {
 		failedSteps := 0
 		if result != nil && !result.Success {
@@ -306,7 +301,6 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	o.updateMetrics(response.ExecutionTime, true)
 	o.addToHistory(response)
 	
-	// ✅ ADD: Request completion (INFO level)
 	if o.logger != nil {
 		o.logger.Info("Request processing completed successfully", map[string]interface{}{
 			"operation":         "process_request_complete",
@@ -333,7 +327,6 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request string, requestID string) (*RoutingPlan, error) {
 	planGenStart := time.Now()
 
-	// ✅ ADD: DEBUG: Plan generation start
 	if o.logger != nil {
 		o.logger.Debug("Starting plan generation", map[string]interface{}{
 			"operation":  "plan_generation_start",
@@ -351,7 +344,6 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 		return nil, err
 	}
 
-	// ✅ ADD: DEBUG: LLM prompt constructed
 	if o.logger != nil {
 		o.logger.Debug("LLM prompt constructed", map[string]interface{}{
 			"operation":       "prompt_construction",
@@ -361,7 +353,6 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 		})
 	}
 
-	// ✅ ADD: DEBUG: Calling LLM
 	if o.logger != nil {
 		o.logger.Debug("Calling LLM for plan generation", map[string]interface{}{
 			"operation":   "llm_call",
@@ -381,7 +372,6 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 		return nil, err
 	}
 
-	// ✅ ADD: DEBUG: LLM response received
 	if o.logger != nil {
 		o.logger.Debug("LLM response received", map[string]interface{}{
 			"operation":       "llm_response",
@@ -397,7 +387,6 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 		return nil, err
 	}
 
-	// ✅ ADD: DEBUG: Plan generation completed
 	if o.logger != nil {
 		o.logger.Debug("Plan generation completed successfully", map[string]interface{}{
 			"operation":      "plan_generation_complete",
@@ -437,7 +426,6 @@ func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string
 		return "", fmt.Errorf("failed to get capabilities: %w", err)
 	}
 
-	// ✅ ADD: DEBUG: Capability information retrieved
 	if o.logger != nil {
 		o.logger.Debug("Capability information retrieved", map[string]interface{}{
 			"operation":       "capability_query",

@@ -149,7 +149,7 @@ func TestIndexSetTTLRefresh(t *testing.T) {
 		require.NoError(t, err, "Name discovery after second heartbeat failed")
 		assert.Len(t, services, 1, "Should still find 1 service by name after second heartbeat")
 
-		t.Log("✅ SUCCESS: Service remains discoverable through multiple heartbeat cycles")
+		t.Log("SUCCESS: Service remains discoverable through multiple heartbeat cycles")
 	})
 
 	t.Run("Service disappears when heartbeat stops", func(t *testing.T) {
@@ -166,7 +166,7 @@ func TestIndexSetTTLRefresh(t *testing.T) {
 		require.NoError(t, err, "Discovery should not error even when no services found")
 		assert.Len(t, services, 0, "Should find no services by name after TTL expiration")
 
-		t.Log("✅ SUCCESS: Service correctly disappears when heartbeat stops")
+		t.Log("SUCCESS: Service correctly disappears when heartbeat stops")
 	})
 
 	// Clean up test data
@@ -229,7 +229,7 @@ func TestIndexSetTTLRefreshWithFailures(t *testing.T) {
 		exists, _ := client.Exists(ctx, serviceKey).Result()
 		assert.Equal(t, int64(1), exists, "Service key should still exist after UpdateHealth")
 
-		t.Log("✅ SUCCESS: UpdateHealth is robust against index refresh failures")
+		t.Log("SUCCESS: UpdateHealth is robust against index refresh failures")
 	})
 
 	// Clean up

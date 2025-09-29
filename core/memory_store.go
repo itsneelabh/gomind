@@ -38,7 +38,6 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// 🔥 ADD: Cache lookup logging
 	if m.logger != nil {
 		m.logger.Debug("Cache lookup", map[string]interface{}{
 			"operation": "cache_get",
@@ -48,7 +47,6 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 
 	entry, exists := m.store[key]
 	if !exists {
-		// 🔥 ADD: Cache miss logging
 		if m.logger != nil {
 			m.logger.Debug("Cache miss", map[string]interface{}{
 				"operation": "cache_get",
@@ -61,7 +59,6 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 
 	// Check if expired
 	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
-		// 🔥 ADD: Expiration logging
 		if m.logger != nil {
 			m.logger.Debug("Cache entry expired", map[string]interface{}{
 				"operation":  "cache_get",
@@ -73,7 +70,6 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 		return "", nil
 	}
 
-	// 🔥 ADD: Cache hit logging
 	if m.logger != nil {
 		m.logger.Debug("Cache hit", map[string]interface{}{
 			"operation": "cache_get",
@@ -90,7 +86,6 @@ func (m *MemoryStore) Set(ctx context.Context, key string, value string, ttl tim
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 🔥 ADD: Cache set logging with context
 	if m.logger != nil {
 		logFields := map[string]interface{}{
 			"operation":   "cache_set",

@@ -59,20 +59,17 @@ func NewChatAgent(config ChatAgentConfig, aiClient core.AIClient, sessions Sessi
 		stopChan:   make(chan struct{}),
 	}
 
-	// 🔥 CRITICAL FIX: Auto-configure logger for UI agent
 	// This follows the Intelligent Configuration principle from FRAMEWORK_DESIGN_PRINCIPLES.md
 	if agent.BaseAgent.Logger == nil || isNoOpLogger(agent.BaseAgent.Logger) {
 		agent.BaseAgent.Logger = NewChatAgentLogger(config)
 		// Note: Logger tracking is handled automatically by core.NewProductionLogger
 	}
 
-	// 🔥 CRITICAL FIX: Transfer logger to session manager
 	// This ensures consistent logging across all UI components
 	if sessionManager, ok := sessions.(*RedisSessionManager); ok {
 		sessionManager.SetLogger(agent.BaseAgent.Logger)
 	}
 
-	// 🔥 CRITICAL FIX: Transfer logger to transport registry (P0-3)
 	// This ensures operational visibility for transport registration/unregistration
 	if registry, ok := DefaultRegistry.(*transportRegistry); ok {
 		registry.SetLogger(agent.BaseAgent.Logger)
@@ -133,14 +130,12 @@ func NewChatAgentWithDependencies(
 		agent.BaseAgent.Telemetry = deps.Telemetry
 	}
 
-	// 🔥 CRITICAL FIX: Auto-configure logger if none provided via dependencies
 	// This follows the Intelligent Configuration principle - smart defaults when user intent is clear
 	if agent.BaseAgent.Logger == nil || isNoOpLogger(agent.BaseAgent.Logger) {
 		agent.BaseAgent.Logger = NewChatAgentLogger(config)
 		// Note: Logger tracking is handled automatically by core.NewProductionLogger
 	}
 
-	// 🔥 CRITICAL FIX: Transfer logger to session manager
 	// This ensures consistent logging across all UI components
 	// SetLogger method will be implemented in P0-2
 	if sessionManager, ok := sessions.(*RedisSessionManager); ok {
@@ -189,14 +184,12 @@ func NewChatAgentWithOptions(
 		opt(agent)
 	}
 
-	// 🔥 CRITICAL FIX: Auto-configure logger if none provided via options
 	// This follows the Intelligent Configuration principle - smart defaults when user intent is clear
 	if agent.BaseAgent.Logger == nil || isNoOpLogger(agent.BaseAgent.Logger) {
 		agent.BaseAgent.Logger = NewChatAgentLogger(config)
 		// Note: Logger tracking is handled automatically by core.NewProductionLogger
 	}
 
-	// 🔥 CRITICAL FIX: Transfer logger to session manager
 	// This ensures consistent logging across all UI components
 	// SetLogger method will be implemented in P0-2
 	if sessionManager, ok := sessions.(*RedisSessionManager); ok {

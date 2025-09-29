@@ -37,7 +37,6 @@ type AIConfig struct {
 	Temperature float32
 	MaxTokens   int
 
-	// 🔥 ADD: Logger integration for framework observability
 	Logger core.Logger
 
 	// Advanced options

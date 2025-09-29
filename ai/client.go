@@ -24,7 +24,6 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 		opt(config)
 	}
 
-	// 🔥 ADD: Client creation start logging
 	if config.Logger != nil {
 		config.Logger.Info("Starting AI client creation", map[string]interface{}{
 			"operation":        "ai_client_creation",
@@ -37,7 +36,6 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 	if config.Provider == string(ProviderAuto) {
 		provider, err := detectBestProvider(config.Logger)
 		if err != nil {
-			// 🔥 ADD: Auto-detection failure logging
 			if config.Logger != nil {
 				config.Logger.Error("AI provider auto-detection failed", map[string]interface{}{
 					"operation":           "ai_provider_detection",
@@ -50,7 +48,6 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 		}
 		config.Provider = provider
 
-		// 🔥 ADD: Auto-detection success logging
 		if config.Logger != nil {
 			config.Logger.Info("AI provider auto-detected", map[string]interface{}{
 				"operation":         "ai_provider_detection",
@@ -61,7 +58,6 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 		}
 	}
 
-	// 🔥 ADD: Provider factory retrieval logging
 	factory, exists := GetProvider(config.Provider)
 	if !exists {
 		if config.Logger != nil {
@@ -76,7 +72,6 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 			config.Provider, config.Provider)
 	}
 
-	// 🔥 ADD: Client creation completion logging
 	client := factory.Create(config)
 	if config.Logger != nil {
 		config.Logger.Info("AI client created successfully", map[string]interface{}{

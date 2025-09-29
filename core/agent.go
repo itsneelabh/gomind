@@ -108,7 +108,6 @@ func NewBaseAgentWithConfig(config *Config) *BaseAgent {
 
 // Initialize initializes the agent
 func (b *BaseAgent) Initialize(ctx context.Context) error {
-	// 🔥 ADD: Enhanced initialization context
 	b.Logger.Info("Starting agent initialization", map[string]interface{}{
 		"id":                 b.ID,
 		"name":               b.Name,
@@ -122,7 +121,6 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 	if b.Config != nil {
 		// Initialize discovery if configured
 		if b.Config.Discovery.Enabled && b.Discovery == nil {
-			// 🔥 ADD: Discovery initialization visibility
 			b.Logger.Info("Initializing service discovery", map[string]interface{}{
 				"provider":      b.Config.Discovery.Provider,
 				"mock_mode":     b.Config.Development.MockDiscovery,
@@ -132,7 +130,6 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 			if b.Config.Development.MockDiscovery {
 				// Use mock discovery for development
 				b.Discovery = NewMockDiscovery()
-				// 🔥 ADD: Mock discovery confirmation
 				b.Logger.Info("Using mock discovery for development", map[string]interface{}{
 					"provider": "mock",
 					"reason":   "development_mode",
@@ -143,7 +140,6 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 					// Set logger for better observability
 					discovery.SetLogger(b.Logger)
 					b.Discovery = discovery
-					// 🔥 ADD: Redis discovery success
 					b.Logger.Info("Redis discovery initialized successfully", map[string]interface{}{
 						"provider":  "redis",
 						"redis_url": b.Config.Discovery.RedisURL,
@@ -154,7 +150,6 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 						"error":      err,
 						"error_type": fmt.Sprintf("%T", err),
 						"redis_url":  b.Config.Discovery.RedisURL,
-						// 🔥 ADD: Dependency impact context
 						"impact":     "agent_will_run_without_discovery",
 						"fallback":   "manual_configuration_required",
 					})
@@ -171,7 +166,6 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 		}
 	}
 
-	// 🔥 ADD: Service registration attempt context
 	if b.Discovery != nil {
 		address, port := ResolveServiceAddress(b.Config, b.Logger)
 
@@ -220,7 +214,6 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 			}
 		}
 	} else {
-		// 🔥 ADD: No discovery context
 		b.Logger.Warn("Agent running without service discovery", map[string]interface{}{
 			"reason":          "discovery_not_configured",
 			"impact":          "agent_not_discoverable",
@@ -228,7 +221,6 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 		})
 	}
 
-	// 🔥 ADD: Initialization completion
 	b.Logger.Info("Agent initialization completed", map[string]interface{}{
 		"id":                 b.ID,
 		"name":               b.Name,
@@ -410,7 +402,6 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 					"error":             err,
 					"error_type":        fmt.Sprintf("%T", err),
 					"agent_id":          b.ID,
-					// 🔥 ADD: Request context for troubleshooting
 					"request_method":    r.Method,
 					"request_path":      r.URL.Path,
 					"request_remote":    r.RemoteAddr,
@@ -442,7 +433,6 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 	// Validate port range (0 is allowed for automatic assignment)
 	if port < 0 || port > 65535 {
 		b.mu.Unlock()
-		// 🔥 ADD: Port validation with context
 		b.Logger.Error("Invalid port specified", map[string]interface{}{
 			"requested_port": port,
 			"valid_range":    "0-65535",
@@ -456,7 +446,6 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 		addr = fmt.Sprintf(":%d", port)
 	}
 
-	// 🔥 ADD: Server configuration logging
 	b.Logger.Info("Configuring HTTP server", map[string]interface{}{
 		"port":                   port,
 		"cors_enabled":           b.Config.HTTP.CORS.Enabled,
@@ -484,8 +473,7 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 							"error":             err,
 							"error_type":        fmt.Sprintf("%T", err),
 							"agent_id":          b.ID,
-							// 🔥 ADD: Request context for troubleshooting
-							"request_method":    r.Method,
+									"request_method":    r.Method,
 							"request_path":      r.URL.Path,
 							"request_remote":    r.RemoteAddr,
 							"capabilities_count": len(b.Capabilities),
@@ -512,8 +500,7 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 						"error":             err,
 						"error_type":        fmt.Sprintf("%T", err),
 						"agent_id":          b.ID,
-						// 🔥 ADD: Request context for troubleshooting
-						"request_method":    r.Method,
+							"request_method":    r.Method,
 						"request_path":      r.URL.Path,
 						"request_remote":    r.RemoteAddr,
 						"capabilities_count": len(b.Capabilities),
@@ -526,7 +513,6 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 		b.registeredPatterns[capabilitiesPath] = true
 	}
 
-	// 🔥 ADD: Endpoint registration summary
 	if len(b.registeredPatterns) > 0 {
 		endpoints := make([]string, 0, len(b.registeredPatterns))
 		for pattern := range b.registeredPatterns {
@@ -558,7 +544,6 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 		MaxHeaderBytes:    b.Config.HTTP.MaxHeaderBytes,
 	}
 
-	// 🔥 ADD: Service update registration context
 	if b.Discovery != nil {
 		address, registrationPort := ResolveServiceAddress(b.Config, b.Logger)
 		b.Logger.Info("Updating service registration with server details", map[string]interface{}{
@@ -580,7 +565,6 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 		"discovery_enabled": b.Discovery != nil,
 	})
 
-	// 🔥 ADD: Server startup failure context
 	if err := b.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		b.Logger.Error("HTTP server failed to start", map[string]interface{}{
 			"error":      err.Error(),
@@ -682,7 +666,6 @@ func NewFramework(component HTTPComponent, opts ...Option) (*Framework, error) {
 		if config.ID != "" {
 			base.ID = config.ID
 		}
-		// 🔥 THE CRITICAL FIX: Transfer logger from config to component
 		base.Logger = config.logger
 
 	case *BaseTool:
@@ -691,7 +674,6 @@ func NewFramework(component HTTPComponent, opts ...Option) (*Framework, error) {
 		if config.ID != "" {
 			base.ID = config.ID
 		}
-		// 🔥 THE CRITICAL FIX: Transfer logger from config to component
 		base.Logger = config.logger
 	}
 

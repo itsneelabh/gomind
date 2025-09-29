@@ -62,7 +62,7 @@ func TestTTLAndHeartbeatIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, tools, 0, "Tool should disappear after TTL expiration")
 		
-		t.Log("✅ CONFIRMED: Tool disappears after 30s without heartbeat")
+		t.Log("CONFIRMED: Tool disappears after 30s without heartbeat")
 	})
 
 	t.Run("tool_persists_with_heartbeat_via_initialize", func(t *testing.T) {
@@ -92,7 +92,7 @@ func TestTTLAndHeartbeatIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, tools, 1, "Tool should persist with heartbeat")
 		
-		t.Log("✅ CONFIRMED: Tool persists beyond 30s TTL with heartbeat")
+		t.Log("CONFIRMED: Tool persists beyond 30s TTL with heartbeat")
 	})
 
 	t.Run("framework_managed_tool_has_automatic_heartbeat", func(t *testing.T) {
@@ -150,7 +150,7 @@ func TestTTLAndHeartbeatIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, tools, 1, "Framework-managed tool should be discoverable")
 
-		t.Log("✅ CONFIRMED: Framework dependency injection working with heartbeat")
+		t.Log("CONFIRMED: Framework dependency injection working with heartbeat")
 		cancel() // Clean shutdown
 	})
 }

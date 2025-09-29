@@ -17,7 +17,7 @@ import (
 type RedisSessionManager struct {
 	client *redis.Client
 	config SessionConfig
-	logger core.Logger      // 🔥 ADD: Logger field for observability
+	logger core.Logger
 
 	// Graceful shutdown support
 	stopChan chan struct{}

@@ -127,7 +127,6 @@ type ProviderInfo struct {
 func detectBestProvider(logger core.Logger) (string, error) {
 	var candidates []candidate
 
-	// 🔥 ADD: Detection process start logging
 	if logger != nil {
 		logger.Info("Starting AI provider environment detection", map[string]interface{}{
 			"operation":             "ai_provider_detection",
@@ -140,7 +139,6 @@ func detectBestProvider(logger core.Logger) (string, error) {
 	defer registry.mu.RUnlock()
 
 	for name, factory := range registry.providers {
-		// 🔥 ADD: Per-provider detection logging
 		priority, available := factory.DetectEnvironment()
 
 		if logger != nil {
@@ -158,7 +156,6 @@ func detectBestProvider(logger core.Logger) (string, error) {
 				priority: priority,
 			})
 
-			// 🔥 ADD: Available provider logging
 			if logger != nil {
 				logger.Info("AI provider available", map[string]interface{}{
 					"operation": "ai_provider_available",
@@ -170,7 +167,6 @@ func detectBestProvider(logger core.Logger) (string, error) {
 	}
 
 	if len(candidates) == 0 {
-		// 🔥 ADD: No providers found logging
 		if logger != nil {
 			logger.Error("No AI providers detected in environment", map[string]interface{}{
 				"operation":         "ai_provider_detection",
@@ -189,7 +185,6 @@ func detectBestProvider(logger core.Logger) (string, error) {
 
 	selected := candidates[0].name
 
-	// 🔥 ADD: Provider selection logging
 	if logger != nil {
 		logger.Info("AI provider selected", map[string]interface{}{
 			"operation":             "ai_provider_selection",
@@ -203,7 +198,6 @@ func detectBestProvider(logger core.Logger) (string, error) {
 	return selected, nil
 }
 
-// 🔥 ADD: Helper function for logging
 func extractNames(candidates []candidate) []string {
 	names := make([]string, len(candidates))
 	for i, c := range candidates {

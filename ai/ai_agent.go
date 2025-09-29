@@ -23,14 +23,12 @@ type IntelligentAgent = AIAgent
 func NewAIAgent(name string, apiKey string) (*AIAgent, error) {
 	agent := core.NewBaseAgent(name)
 
-	// 🔥 CRITICAL: Create AI client with framework logger
 	aiClient, err := NewClient(
 		WithProvider("openai"),
 		WithAPIKey(apiKey),
 		WithLogger(agent.Logger), // Transfer framework logger
 	)
 	if err != nil {
-		// 🔥 ADD: AI client creation error logging
 		if agent.Logger != nil {
 			agent.Logger.Error("Failed to create AI client for agent", map[string]interface{}{
 				"operation":  "ai_agent_creation",
@@ -43,7 +41,6 @@ func NewAIAgent(name string, apiKey string) (*AIAgent, error) {
 		return nil, fmt.Errorf("failed to create AI client: %w", err)
 	}
 
-	// 🔥 ADD: AI agent creation success logging
 	if agent.Logger != nil {
 		agent.Logger.Info("AI agent created successfully", map[string]interface{}{
 			"operation":        "ai_agent_creation",
@@ -131,7 +128,6 @@ func (a *AIAgent) ProcessWithMemory(ctx context.Context, input string) (string, 
 func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string, error) {
 	startTime := time.Now()
 
-	// 🔥 ADD: ThinkAndAct start logging
 	if a.Logger != nil {
 		a.Logger.Info("Starting ThinkAndAct process", map[string]interface{}{
 			"operation":    "ai_think_and_act_start",
@@ -146,7 +142,6 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 		client = a.aiClient
 	}
 	if client == nil {
-		// 🔥 ADD: AI client error logging
 		if a.Logger != nil {
 			a.Logger.Error("ThinkAndAct failed - no AI client configured", map[string]interface{}{
 				"operation": "ai_think_and_act_error",
@@ -161,7 +156,6 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 	// First, think about the task (planning phase)
 	thinkPrompt := fmt.Sprintf("Analyze this task and break it down: %s", task)
 
-	// 🔥 ADD: Think phase start logging
 	if a.Logger != nil {
 		a.Logger.Info("Starting think phase", map[string]interface{}{
 			"operation":     "ai_think_phase_start",
@@ -172,7 +166,6 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 
 	thinkResp, err := client.GenerateResponse(ctx, thinkPrompt, nil)
 	if err != nil {
-		// 🔥 ADD: Think phase error logging
 		if a.Logger != nil {
 			a.Logger.Error("Think phase failed", map[string]interface{}{
 				"operation":  "ai_think_phase_error",
@@ -185,7 +178,6 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 		return "", "", fmt.Errorf("thinking failed: %w", err)
 	}
 
-	// 🔥 ADD: Think phase completion logging
 	if a.Logger != nil {
 		a.Logger.Info("Think phase completed", map[string]interface{}{
 			"operation":           "ai_think_phase_complete",
@@ -200,7 +192,6 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 	// Then act on the analysis
 	actPrompt := fmt.Sprintf("Based on this analysis: %s\nExecute: %s", thinkResp.Content, task)
 
-	// 🔥 ADD: Act phase start logging
 	if a.Logger != nil {
 		a.Logger.Info("Starting act phase", map[string]interface{}{
 			"operation":     "ai_act_phase_start",
@@ -211,7 +202,6 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 
 	actResp, err := client.GenerateResponse(ctx, actPrompt, nil)
 	if err != nil {
-		// 🔥 ADD: Act phase error logging with recovery context
 		if a.Logger != nil {
 			a.Logger.Error("Act phase failed with thinking preserved", map[string]interface{}{
 				"operation":        "ai_act_phase_error",
@@ -226,7 +216,6 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 		return thinkResp.Content, "", fmt.Errorf("action failed: %w", err)
 	}
 
-	// 🔥 ADD: ThinkAndAct completion logging with performance metrics
 	totalDuration := time.Since(startTime)
 	totalTokens := calculateTokensUsage(thinkResp, actResp)
 
@@ -252,7 +241,6 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIResponse, error) {
 	startTime := time.Now()
 
-	// 🔥 ADD: ProcessWithAI start logging
 	if a.Logger != nil {
 		a.Logger.Info("Starting AI-assisted component processing", map[string]interface{}{
 			"operation":        "ai_process_with_ai_start",
@@ -263,7 +251,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	}
 
 	// Discover available tools
-	// 🔥 ADD: Tool discovery start logging
 	if a.Logger != nil {
 		a.Logger.Info("Discovering tools for AI processing", map[string]interface{}{
 			"operation": "ai_tool_discovery_start",
@@ -276,7 +263,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 		Type: core.ComponentTypeTool,
 	})
 	if err != nil {
-		// 🔥 ENHANCED: Tool discovery error logging
 		if a.Logger != nil {
 			a.Logger.Error("Failed to discover tools for AI processing", map[string]interface{}{
 				"operation":  "ai_tool_discovery_error",
@@ -287,7 +273,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 			})
 		}
 	} else if a.Logger != nil {
-		// 🔥 ADD: Tool discovery success logging
 		a.Logger.Info("Tools discovered for AI processing", map[string]interface{}{
 			"operation":   "ai_tool_discovery_complete",
 			"agent_id":    a.ID,
@@ -303,7 +288,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	}
 
 	// Discover other agents if needed
-	// 🔥 ADD: Agent discovery start logging
 	if a.Logger != nil {
 		a.Logger.Info("Discovering agents for AI processing", map[string]interface{}{
 			"operation": "ai_agent_discovery_start",
@@ -316,7 +300,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 		Type: core.ComponentTypeAgent,
 	})
 	if err != nil {
-		// 🔥 ENHANCED: Agent discovery error logging
 		if a.Logger != nil {
 			a.Logger.Error("Failed to discover agents for AI processing", map[string]interface{}{
 				"operation":  "ai_agent_discovery_error",
@@ -327,7 +310,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 			})
 		}
 	} else if a.Logger != nil {
-		// 🔥 ADD: Agent discovery success logging
 		a.Logger.Info("Agents discovered for AI processing", map[string]interface{}{
 			"operation":    "ai_agent_discovery_complete",
 			"agent_id":     a.ID,
@@ -345,7 +327,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	// Build context for AI
 	contextPrompt := a.buildContextPrompt(tools, agents, request)
 
-	// 🔥 ADD: AI processing start logging
 	if a.Logger != nil {
 		a.Logger.Info("Processing request with AI", map[string]interface{}{
 			"operation":       "ai_processing_start",
@@ -365,7 +346,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 		client = a.aiClient
 	}
 	if client == nil {
-		// 🔥 ADD: AI client error logging
 		if a.Logger != nil {
 			a.Logger.Error("ProcessWithAI failed - no AI client configured", map[string]interface{}{
 				"operation": "ai_processing_error",
@@ -383,7 +363,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 		MaxTokens:   1000,
 	})
 	if err != nil {
-		// 🔥 ADD: AI processing error logging
 		if a.Logger != nil {
 			a.Logger.Error("AI processing failed", map[string]interface{}{
 				"operation":  "ai_processing_error",
@@ -396,7 +375,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 		return nil, fmt.Errorf("AI processing failed: %w", err)
 	}
 
-	// 🔥 ADD: ProcessWithAI completion logging with performance metrics
 	totalDuration := time.Since(startTime)
 
 	if a.Logger != nil {
@@ -422,7 +400,6 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 func (a *AIAgent) DiscoverAndOrchestrate(ctx context.Context, userQuery string) (string, error) {
 	startTime := time.Now()
 
-	// 🔥 ADD: Orchestration start logging
 	if a.Logger != nil {
 		a.Logger.Info("Starting AI agent orchestration", map[string]interface{}{
 			"operation":          "ai_orchestration_start",
@@ -445,7 +422,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		client = a.aiClient
 	}
 	if client == nil {
-		// 🔥 ADD: AI client error logging
 		if a.Logger != nil {
 			a.Logger.Error("AI orchestration failed - no client configured", map[string]interface{}{
 				"operation": "ai_orchestration_error",
@@ -457,7 +433,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		return "", fmt.Errorf("no AI client configured")
 	}
 
-	// 🔥 ADD: Intent analysis phase start logging
 	if a.Logger != nil {
 		a.Logger.Info("Analyzing user intent with AI", map[string]interface{}{
 			"operation":       "ai_intent_analysis_start",
@@ -475,7 +450,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		MaxTokens:   200,
 	})
 	if err != nil {
-		// 🔥 ADD: Intent analysis error logging
 		if a.Logger != nil {
 			a.Logger.Error("Intent analysis failed", map[string]interface{}{
 				"operation": "ai_intent_analysis_error",
@@ -487,7 +461,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		return "", fmt.Errorf("failed to analyze intent: %w", err)
 	}
 
-	// 🔥 ADD: Intent analysis completion logging
 	if a.Logger != nil {
 		a.Logger.Info("User intent analyzed successfully", map[string]interface{}{
 			"operation":           "ai_intent_analysis_complete",
@@ -501,7 +474,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 	}
 
 	// 2. Discover available components
-	// 🔥 ADD: Component discovery start logging
 	if a.Logger != nil {
 		a.Logger.Info("Starting component discovery", map[string]interface{}{
 			"operation": "ai_component_discovery_start",
@@ -512,7 +484,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 
 	allComponents, err := a.Discover(ctx, core.DiscoveryFilter{})
 	if err != nil {
-		// 🔥 ADD: Component discovery error logging
 		if a.Logger != nil {
 			a.Logger.Error("Component discovery failed", map[string]interface{}{
 				"operation": "ai_component_discovery_error",
@@ -524,7 +495,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		return "", fmt.Errorf("failed to discover components: %w", err)
 	}
 
-	// 🔥 ADD: Component discovery completion logging
 	if a.Logger != nil {
 		componentTypes := extractComponentTypes(allComponents)
 		a.Logger.Info("Component discovery completed", map[string]interface{}{
@@ -543,7 +513,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 	}
 
 	if len(allComponents) == 0 {
-		// 🔥 ADD: No components found logging
 		if a.Logger != nil {
 			a.Logger.Warn("No components available for orchestration", map[string]interface{}{
 				"operation": "ai_orchestration_warning",
@@ -558,7 +527,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 	// 3. Use AI to plan component usage
 	planPrompt := a.buildPlanPrompt(allComponents, userQuery, intentResp.Content)
 
-	// 🔥 ADD: Plan creation start logging
 	if a.Logger != nil {
 		a.Logger.Info("Creating execution plan with AI", map[string]interface{}{
 			"operation":       "ai_plan_creation_start",
@@ -577,7 +545,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		MaxTokens:   500,
 	})
 	if err != nil {
-		// 🔥 ADD: Plan creation error logging
 		if a.Logger != nil {
 			a.Logger.Error("Execution plan creation failed", map[string]interface{}{
 				"operation": "ai_plan_creation_error",
@@ -609,7 +576,6 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 
 Generate a response to the original user query: "%s"`, planResp.Content, userQuery)
 
-	// 🔥 ADD: Response synthesis start logging
 	if a.Logger != nil {
 		a.Logger.Info("Synthesizing final response", map[string]interface{}{
 			"operation":       "ai_synthesis_start",
@@ -627,7 +593,6 @@ Generate a response to the original user query: "%s"`, planResp.Content, userQue
 		MaxTokens:   1000,
 	})
 	if err != nil {
-		// 🔥 ADD: Response synthesis error logging
 		if a.Logger != nil {
 			a.Logger.Error("Response synthesis failed", map[string]interface{}{
 				"operation": "ai_synthesis_error",
@@ -639,11 +604,9 @@ Generate a response to the original user query: "%s"`, planResp.Content, userQue
 		return "", fmt.Errorf("failed to synthesize response: %w", err)
 	}
 
-	// 🔥 ADD: Calculate total performance metrics
 	totalDuration := time.Since(startTime)
 	totalTokens := calculateTokensUsage(intentResp, planResp, finalResp)
 
-	// 🔥 ADD: Orchestration completion logging with performance metrics
 	if a.Logger != nil {
 		a.Logger.Info("AI orchestration completed successfully", map[string]interface{}{
 			"operation":                "ai_orchestration_complete",
@@ -725,7 +688,6 @@ Be specific about which capabilities to invoke and what data to pass between the
 		componentList, intent, userQuery)
 }
 
-// 🔥 ADD: Helper functions for logging support
 
 // truncateString truncates a string to maxLength with ellipsis if needed
 func truncateString(s string, maxLength int) string {

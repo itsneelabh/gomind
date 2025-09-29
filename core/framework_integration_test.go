@@ -96,9 +96,9 @@ func TestFrameworkToolRegistrationFix(t *testing.T) {
 		assert.Len(t, ourTool.Capabilities, 1)
 		assert.Equal(t, "test_service", ourTool.Capabilities[0].Name)
 
-		t.Log("✅ SUCCESS: Framework dependency injection is working!")
-		t.Log("✅ Tool auto-initialized Registry and registered successfully")
-		t.Log("✅ Agent discovered tool through framework-managed discovery")
+		t.Log("SUCCESS: Framework dependency injection is working!")
+		t.Log("Tool auto-initialized Registry and registered successfully")
+		t.Log("Agent discovered tool through framework-managed discovery")
 
 		// Clean shutdown
 		cancel()

@@ -27,7 +27,6 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		config = DefaultConfig()
 	}
 
-	// ✅ ADD: Ensure logger is available (follows framework design principles)
 	var factoryLogger core.Logger
 	if deps.Logger != nil {
 		factoryLogger = deps.Logger
@@ -91,7 +90,6 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		}
 	}
 
-	// ✅ ADD: Inject logger into all components
 	orchestrator.SetLogger(deps.Logger)
 
 	factoryLogger.Info("Orchestrator created successfully", map[string]interface{}{
