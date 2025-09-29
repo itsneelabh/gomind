@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
 )
 
 // RetryConfig configures retry behavior
@@ -29,61 +30,12 @@ func DefaultRetryConfig() *RetryConfig {
 	}
 }
 
-// Retry executes a function with retry logic
+// Retry executes a function with retry logic (updated to use logging when possible)
 func Retry(ctx context.Context, config *RetryConfig, fn func() error) error {
-	if config == nil {
-		config = DefaultRetryConfig()
-	}
-
-	var lastErr error
-	delay := config.InitialDelay
-
-	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
-		// Check context
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		// Try the function
-		if err := fn(); err == nil {
-			return nil
-		} else {
-			lastErr = err
-		}
-
-		// Don't sleep after the last attempt
-		if attempt == config.MaxAttempts {
-			break
-		}
-
-		// Calculate next delay with exponential backoff
-		if attempt > 1 {
-			delay = time.Duration(float64(delay) * config.BackoffFactor)
-			if delay > config.MaxDelay {
-				delay = config.MaxDelay
-			}
-		}
-
-		// Add jitter if enabled to prevent synchronized retries
-		// across multiple clients (thundering herd mitigation)
-		if config.JitterEnabled {
-			jitter := time.Duration(float64(delay) * 0.1 * math.Sin(float64(attempt)))
-			delay += jitter
-		}
-
-		// Sleep with context cancellation
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-
-	return fmt.Errorf("max retry attempts (%d) exceeded for %v: %w", config.MaxAttempts, lastErr, core.ErrMaxRetriesExceeded)
+	// Create executor with default logger for backward compatibility
+	executor := NewRetryExecutor(config)
+	// Use operation name "unknown" for backward compatibility
+	return executor.Execute(ctx, "unknown", fn)
 }
 
 // RetryWithCircuitBreaker combines retry logic with circuit breaker
@@ -102,4 +54,255 @@ func RetryWithCircuitBreaker(ctx context.Context, config *RetryConfig, cb *Circu
 		cb.RecordSuccess()
 		return nil
 	})
+}
+
+// RetryExecutor struct for dependency injection (follows framework pattern)
+type RetryExecutor struct {
+	config           *RetryConfig
+	logger           core.Logger
+	telemetryEnabled bool
+}
+
+// NewRetryExecutor creates a new retry executor following framework pattern
+func NewRetryExecutor(config *RetryConfig) *RetryExecutor {
+	if config == nil {
+		config = DefaultRetryConfig()
+	}
+	return &RetryExecutor{
+		config: config,
+		logger: &core.NoOpLogger{}, // Default to no-op
+	}
+}
+
+// SetLogger sets the logger for dependency injection (follows framework design principles)
+func (r *RetryExecutor) SetLogger(logger core.Logger) {
+	if logger == nil {
+		r.logger = &core.NoOpLogger{}
+	} else {
+		r.logger = logger
+	}
+}
+
+// Execute runs a function with comprehensive retry logic and logging
+func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func() error) error {
+	startTime := time.Now()
+
+	// Log retry operation start
+	if r.logger != nil {
+		r.logger.Info("Starting retry operation", map[string]interface{}{
+			"operation":      "retry_start",
+			"retry_operation": operation,
+			"max_attempts":   r.config.MaxAttempts,
+			"initial_delay":  r.config.InitialDelay.String(),
+			"max_delay":      r.config.MaxDelay.String(),
+			"backoff_factor": r.config.BackoffFactor,
+			"jitter_enabled": r.config.JitterEnabled,
+		})
+	}
+
+	var lastErr error
+	delay := r.config.InitialDelay
+
+	for attempt := 1; attempt <= r.config.MaxAttempts; attempt++ {
+		attemptStart := time.Now()
+
+		// Emit attempt metric
+		if r.telemetryEnabled {
+			telemetry.Counter("retry.attempts",
+				"operation", operation,
+				"attempt_number", fmt.Sprintf("%d", attempt))
+		}
+
+		// Log attempt start
+		if r.logger != nil {
+			r.logger.Debug("Starting retry attempt", map[string]interface{}{
+				"operation":      "retry_attempt_start",
+				"retry_operation": operation,
+				"attempt":        attempt,
+				"max_attempts":   r.config.MaxAttempts,
+				"current_delay":  delay.String(),
+			})
+		}
+
+		// Check context
+		select {
+		case <-ctx.Done():
+			// Log context cancellation
+			if r.logger != nil {
+				r.logger.Info("Retry operation cancelled by context", map[string]interface{}{
+					"operation":       "retry_cancelled",
+					"retry_operation": operation,
+					"attempt":         attempt,
+					"reason":          ctx.Err().Error(),
+					"duration_ms":     time.Since(startTime).Milliseconds(),
+				})
+			}
+			return ctx.Err()
+		default:
+		}
+
+		// Try the function
+		if err := fn(); err == nil {
+			// Emit success metric
+			if r.telemetryEnabled {
+				telemetry.Counter("retry.success",
+					"operation", operation,
+					"final_attempt", fmt.Sprintf("%d", attempt))
+
+				telemetry.Histogram("retry.duration_ms",
+					float64(time.Since(startTime).Milliseconds()),
+					"operation", operation,
+					"status", "success")
+			}
+
+			// Log success
+			if r.logger != nil {
+				r.logger.Info("Retry operation succeeded", map[string]interface{}{
+					"operation":        "retry_success",
+					"retry_operation":  operation,
+					"successful_attempt": attempt,
+					"total_attempts":   attempt,
+					"total_duration_ms": time.Since(startTime).Milliseconds(),
+					"attempt_duration_ms": time.Since(attemptStart).Milliseconds(),
+				})
+			}
+			return nil
+		} else {
+			lastErr = err
+
+			// Log attempt failure
+			logLevel := "Debug" // Use DEBUG for retry attempts
+			if attempt == r.config.MaxAttempts {
+				logLevel = "Warn" // Use WARN for final failure
+			}
+
+			logData := map[string]interface{}{
+				"operation":        "retry_attempt_failed",
+				"retry_operation":  operation,
+				"attempt":          attempt,
+				"max_attempts":     r.config.MaxAttempts,
+				"error":            err.Error(),
+				"error_type":       fmt.Sprintf("%T", err),
+				"will_retry":       attempt < r.config.MaxAttempts,
+				"attempt_duration_ms": time.Since(attemptStart).Milliseconds(),
+			}
+
+			if r.logger != nil {
+				if logLevel == "Warn" {
+					r.logger.Warn("Retry attempt failed (final)", logData)
+				} else {
+					r.logger.Debug("Retry attempt failed, will retry", logData)
+				}
+			}
+		}
+
+		// Don't sleep after the last attempt
+		if attempt == r.config.MaxAttempts {
+			break
+		}
+
+		// Calculate next delay with exponential backoff
+		if attempt > 1 {
+			delay = time.Duration(float64(delay) * r.config.BackoffFactor)
+			if delay > r.config.MaxDelay {
+				delay = r.config.MaxDelay
+			}
+		}
+
+		// Add jitter if enabled
+		originalDelay := delay
+		if r.config.JitterEnabled {
+			jitter := time.Duration(float64(delay) * 0.1 * math.Sin(float64(attempt)))
+			delay += jitter
+		}
+
+		// Emit backoff metric
+		if r.telemetryEnabled {
+			telemetry.Histogram("retry.backoff_ms",
+				float64(delay.Milliseconds()),
+				"operation", operation,
+				"strategy", "exponential")
+		}
+
+		// Log backoff
+		if r.logger != nil {
+			r.logger.Debug("Applying retry backoff", map[string]interface{}{
+				"operation":         "retry_backoff",
+				"retry_operation":   operation,
+				"attempt":           attempt,
+				"next_attempt":      attempt + 1,
+				"original_delay_ms": originalDelay.Milliseconds(),
+				"jitter_applied":    r.config.JitterEnabled,
+				"final_delay_ms":    delay.Milliseconds(),
+				"backoff_factor":    r.config.BackoffFactor,
+			})
+		}
+
+		// Sleep with context cancellation
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			// Log context cancellation during backoff
+			if r.logger != nil {
+				r.logger.Info("Retry operation cancelled during backoff", map[string]interface{}{
+					"operation":       "retry_cancelled_backoff",
+					"retry_operation": operation,
+					"attempt":         attempt,
+					"reason":          ctx.Err().Error(),
+				})
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	// Emit final failure metric
+	if r.telemetryEnabled {
+		errorType := "no_error"
+		if lastErr != nil {
+			errorType = fmt.Sprintf("%T", lastErr)
+		}
+
+		telemetry.Counter("retry.failures",
+			"operation", operation,
+			"error_type", errorType)
+
+		telemetry.Histogram("retry.duration_ms",
+			float64(time.Since(startTime).Milliseconds()),
+			"operation", operation,
+			"status", "failure")
+	}
+
+	// Log final failure
+	if r.logger != nil {
+		logData := map[string]interface{}{
+			"operation":         "retry_exhausted",
+			"retry_operation":   operation,
+			"total_attempts":    r.config.MaxAttempts,
+			"total_duration_ms": time.Since(startTime).Milliseconds(),
+		}
+
+		// Handle case where lastErr might be nil (e.g., MaxAttempts = 0)
+		if lastErr != nil {
+			logData["final_error"] = lastErr.Error()
+			logData["final_error_type"] = fmt.Sprintf("%T", lastErr)
+		} else {
+			logData["final_error"] = "no attempts made"
+			logData["final_error_type"] = "no_error"
+		}
+
+		r.logger.Error("Retry operation failed after all attempts", logData)
+	}
+
+	return fmt.Errorf("max retry attempts (%d) exceeded for %v: %w", r.config.MaxAttempts, lastErr, core.ErrMaxRetriesExceeded)
+}
+
+// RetryWithLogging provides backward compatibility function with logging
+func RetryWithLogging(ctx context.Context, operation string, config *RetryConfig, logger core.Logger, fn func() error) error {
+	executor := NewRetryExecutor(config)
+	if logger != nil {
+		executor.SetLogger(logger)
+	}
+	return executor.Execute(ctx, operation, fn)
 }

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 // BenchmarkCircuitBreakerExecute measures overhead of circuit breaker execution
@@ -20,7 +22,7 @@ func BenchmarkCircuitBreakerExecute(b *testing.B) {
 		WindowSize:       60 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -49,7 +51,7 @@ func BenchmarkCircuitBreakerExecuteWithErrors(b *testing.B) {
 		WindowSize:       60 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -83,7 +85,7 @@ func BenchmarkCircuitBreakerConcurrentExecute(b *testing.B) {
 		WindowSize:       60 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -148,7 +150,7 @@ func BenchmarkCircuitBreakerCanExecute(b *testing.B) {
 		RecoveryTimeout:  100 * time.Millisecond,
 		SleepWindow:      100 * time.Millisecond,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 	cb := NewCircuitBreakerWithConfig(config)
@@ -173,7 +175,7 @@ func BenchmarkCircuitBreakerStateTransition(b *testing.B) {
 		WindowSize:       1 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -245,7 +247,7 @@ func BenchmarkCircuitBreakerMemoryUsage(b *testing.B) {
 			WindowSize:       60 * time.Second,
 			BucketCount:      10,
 			ErrorClassifier:  DefaultErrorClassifier,
-			Logger:           &noopLogger{},
+			Logger:           &core.NoOpLogger{},
 			Metrics:          &noopMetrics{},
 		}
 
@@ -265,7 +267,7 @@ func BenchmarkCircuitBreakerHighContention(b *testing.B) {
 		WindowSize:       60 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 

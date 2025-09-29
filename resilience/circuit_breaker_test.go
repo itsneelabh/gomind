@@ -24,7 +24,7 @@ func TestCircuitBreakerStateTransitions(t *testing.T) {
 		WindowSize:       1 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -93,7 +93,7 @@ func TestCircuitBreakerErrorClassification(t *testing.T) {
 		WindowSize:       1 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -177,7 +177,7 @@ func TestCircuitBreakerHalfOpenState(t *testing.T) {
 		WindowSize:       1 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -284,7 +284,7 @@ func TestCircuitBreakerConcurrentAccess(t *testing.T) {
 		WindowSize:       1 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -344,7 +344,7 @@ func TestCircuitBreakerExponentialBackoff(t *testing.T) {
 		WindowSize:       1 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -498,7 +498,7 @@ func TestCircuitBreakerVolumeThreshold(t *testing.T) {
 		WindowSize:       1 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -580,7 +580,7 @@ func TestErrorClassifierCustom(t *testing.T) {
 		WindowSize:       1 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  customClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -624,7 +624,7 @@ func ExampleCircuitBreaker_database() {
 		WindowSize:       30 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
@@ -661,7 +661,7 @@ func ExampleCircuitBreaker_api() {
 		WindowSize:       60 * time.Second,
 		BucketCount:      10,
 		ErrorClassifier:  DefaultErrorClassifier,
-		Logger:           &noopLogger{},
+		Logger:           &core.NoOpLogger{},
 		Metrics:          &noopMetrics{},
 	}
 
