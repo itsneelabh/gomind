@@ -2,9 +2,10 @@ package core
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -510,7 +511,8 @@ func (r *RedisRegistry) maintainRegistration(ctx context.Context, serviceID stri
 		// Service expired from Redis - attempt re-registration
 		if serviceInfo := r.getStoredRegistrationState(serviceID); serviceInfo != nil {
 			// Use jittered backoff to prevent thundering herd during recovery
-			jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
+			jitterMs, _ := rand.Int(rand.Reader, big.NewInt(1000))
+			jitter := time.Duration(jitterMs.Int64()) * time.Millisecond
 			time.Sleep(jitter)
 
 			if regErr := r.Register(ctx, serviceInfo); regErr != nil {
@@ -541,7 +543,9 @@ func (r *RedisRegistry) maintainRegistration(ctx context.Context, serviceID stri
 func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
 	// Base interval with jitter to distribute load
 	baseInterval := r.ttl / 2
-	jitter := time.Duration(rand.Intn(int(baseInterval.Milliseconds()/4))) * time.Millisecond
+	maxJitter := int64(baseInterval.Milliseconds() / 4)
+	jitterMs, _ := rand.Int(rand.Reader, big.NewInt(maxJitter))
+	jitter := time.Duration(jitterMs.Int64()) * time.Millisecond
 	interval := baseInterval + jitter
 
 	ticker := time.NewTicker(interval)
