@@ -979,18 +979,29 @@ http.ListenAndServe(":8080", handler)
 
 ### 📊 Logging Interface: Know What's Happening
 
+> **💡 Configuration Tip:** To configure logging levels and formats via environment variables, see [Logging Configuration in API Reference](../docs/API_REFERENCE.md#logging-configuration).
+
 Every component gets a structured logger automatically. It's like having a flight recorder for your code!
 
 #### The Logger Interface
 
 ```go
 type Logger interface {
+    // Basic logging methods
     Info(msg string, fields map[string]interface{})
     Error(msg string, fields map[string]interface{})
     Warn(msg string, fields map[string]interface{})
     Debug(msg string, fields map[string]interface{})
+
+    // Context-aware methods for distributed tracing and request correlation
+    InfoWithContext(ctx context.Context, msg string, fields map[string]interface{})
+    ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{})
+    WarnWithContext(ctx context.Context, msg string, fields map[string]interface{})
+    DebugWithContext(ctx context.Context, msg string, fields map[string]interface{})
 }
 ```
+
+**Why Context-Aware Logging?** The `WithContext` methods enable distributed tracing by automatically including trace IDs, span IDs, and request correlation identifiers in your logs. This is essential for debugging distributed systems where a single request may traverse multiple services.
 
 #### Using the Logger
 
@@ -1035,6 +1046,42 @@ func main() {
     })
 }
 ```
+
+#### Using Context-Aware Logging
+
+When handling HTTP requests, use the `WithContext` methods to enable request correlation:
+
+```go
+tool.RegisterCapability(core.Capability{
+    Name:     "process",
+    Endpoint: "/process",
+    Handler: func(w http.ResponseWriter, r *http.Request) {
+        ctx := r.Context()
+
+        // Use WithContext methods - automatically includes trace/request IDs
+        tool.Logger.InfoWithContext(ctx, "Processing request", map[string]interface{}{
+            "method": r.Method,
+            "path":   r.URL.Path,
+        })
+
+        if err := processData(ctx); err != nil {
+            tool.Logger.ErrorWithContext(ctx, "Processing failed", map[string]interface{}{
+                "error": err.Error(),
+            })
+            http.Error(w, "Processing failed", 500)
+            return
+        }
+
+        tool.Logger.InfoWithContext(ctx, "Processing complete", nil)
+        w.WriteHeader(http.StatusOK)
+    },
+})
+```
+
+**Benefits:**
+- Logs from the same request are correlated via trace/request IDs
+- Works seamlessly with OpenTelemetry distributed tracing
+- Essential for debugging in production environments
 
 ### 🔍 Telemetry Interface: Measure Everything
 

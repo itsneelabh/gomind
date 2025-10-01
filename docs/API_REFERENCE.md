@@ -289,6 +289,197 @@ config := core.NewConfig(
 )
 ```
 
+### Logging Configuration
+
+Control framework logging behavior through configuration options or environment variables.
+
+#### Configuration Options
+
+```go
+// Via code configuration
+framework, _ := core.NewFramework(component,
+    core.WithLogLevel("debug"),      // Set log level
+    core.WithLogFormat("json"),      // Set output format
+)
+```
+
+#### Environment Variables (Recommended for Containers)
+
+The framework automatically reads these environment variables at startup, making them ideal for container deployments:
+
+| Variable | Values | Default | Description |
+|----------|--------|---------|-------------|
+| `GOMIND_LOG_LEVEL` | `error`, `warn`, `info`, `debug` | `info` | Minimum logging level (filters output) |
+| `GOMIND_LOG_FORMAT` | `json`, `text` | `json` | Output format |
+| `GOMIND_DEV_MODE` | `true`, `false` | `false` | Overrides logging to debug + text format |
+
+**Important Notes:**
+- `GOMIND_DEV_MODE=true` overrides both level and format to `debug` and `text`
+- Log levels properly filter output - `error` only shows errors, `warn` shows warn+error, etc.
+- Default `info` level is recommended for production
+
+**Local Development:**
+```bash
+# Enable debug logging to see framework internals
+export GOMIND_LOG_LEVEL=debug
+export GOMIND_LOG_FORMAT=json
+go run main.go
+```
+
+**Kubernetes Deployment:**
+```yaml
+env:
+- name: GOMIND_LOG_LEVEL
+  value: "info"     # Change to "debug" for troubleshooting
+- name: GOMIND_LOG_FORMAT
+  value: "json"
+```
+
+**Docker Compose:**
+```yaml
+services:
+  my-service:
+    image: my-service:latest
+    environment:
+      - GOMIND_LOG_LEVEL=debug
+      - GOMIND_LOG_FORMAT=json
+```
+
+**Changing Log Level Without Restart (Kubernetes):**
+```bash
+# Enable debug mode
+kubectl set env deployment/my-service GOMIND_LOG_LEVEL=debug -n my-namespace
+
+# Watch the logs
+kubectl logs -f deployment/my-service -n my-namespace
+
+# Set back to info
+kubectl set env deployment/my-service GOMIND_LOG_LEVEL=info -n my-namespace
+```
+
+#### Log Levels Explained
+
+The framework implements proper log level filtering with a standard hierarchy:
+
+| Level | What Gets Logged | Use Case |
+|-------|------------------|----------|
+| `error` | Only Error messages | Production - minimal logging, only critical issues |
+| `warn` | Warn + Error messages | Production - standard monitoring |
+| `info` | Info + Warn + Error messages | Production default - normal operations |
+| `debug` | Debug + Info + Warn + Error | Development/troubleshooting - verbose |
+
+**Log Level Hierarchy:**
+```
+ERROR (highest severity)
+  ↑
+WARN
+  ↑
+INFO (default)
+  ↑
+DEBUG (most verbose)
+```
+
+**How It Works:**
+- Setting a level includes all higher severity levels
+- `GOMIND_LOG_LEVEL=error` → Only critical errors logged
+- `GOMIND_LOG_LEVEL=warn` → Warnings and errors logged
+- `GOMIND_LOG_LEVEL=info` → Info, warnings, and errors (default)
+- `GOMIND_LOG_LEVEL=debug` → Everything logged
+
+**Performance Note:**
+- Debug level is significantly more verbose
+- Early return prevents formatting costs for filtered messages
+- Use `debug` only for troubleshooting, not in production
+
+#### Output Formats
+
+**JSON (recommended for production):**
+
+Best for log aggregation systems (Elasticsearch, Splunk, CloudWatch, etc.).
+
+```json
+{"timestamp":"2025-01-29T10:30:45Z", "level":"INFO", "service":"weather-service", "component":"framework", "message":"HTTP server started", "port":8080}
+{"timestamp":"2025-01-29T10:30:46Z", "level":"DEBUG", "service":"weather-service", "component":"framework", "message":"Registering capability", "capability":"current_weather"}
+```
+
+**Text (human-readable for development):**
+
+Easier to read during local development.
+
+```
+2025-01-29 10:30:45 INFO [weather-service] HTTP server started port=8080
+2025-01-29 10:30:46 DEBUG [weather-service] Registering capability name=current_weather
+```
+
+#### What the Framework Logs
+
+The framework automatically logs important events at appropriate levels:
+
+**DEBUG level logs:**
+- Capability registration details
+- Discovery query results
+- Request routing decisions
+- Configuration loading steps
+- Heartbeat operations
+- Circuit breaker state changes
+- Detailed internal operations
+
+**INFO level logs:**
+- Service startup and shutdown
+- HTTP server start/stop
+- Redis connection established
+- Service registration success
+- Health check results
+- Normal operational events
+
+**WARN level logs:**
+- Configuration issues (non-fatal)
+- Retry attempts
+- Degraded performance
+- Resource constraints
+- Deprecated feature usage
+
+**ERROR level logs:**
+- Failed service connections
+- HTTP server errors
+- Registration failures
+- Discovery errors
+- Critical operational issues
+
+#### Using the Logger in Your Code
+
+Every component (Tool or Agent) automatically gets a logger injected. Use it for structured logging:
+
+```go
+// Debug - verbose details for troubleshooting
+tool.Logger.Debug("Cache lookup", map[string]interface{}{
+    "key":   "weather:nyc",
+    "found": true,
+})
+
+// Info - normal operational events
+tool.Logger.Info("Processing request", map[string]interface{}{
+    "method":   "POST",
+    "path":     "/api/weather",
+    "location": "New York",
+})
+
+// Warn - potential issues that aren't errors
+tool.Logger.Warn("Cache miss, fetching from API", map[string]interface{}{
+    "cache_key": "weather:nyc",
+    "fallback":  "api",
+})
+
+// Error - critical issues
+tool.Logger.Error("API call failed", map[string]interface{}{
+    "error":    err.Error(),
+    "provider": "openweathermap",
+    "retry":    3,
+})
+```
+
+For detailed examples of using the Logger interface, see [core/README.md - Logging Interface](../core/README.md#-logging-interface-know-whats-happening).
+
 ### Interfaces
 
 #### Discovery Interface
@@ -720,12 +911,13 @@ orchestrator, _ := orchestration.CreateOrchestrator(config, deps)
 Define and execute structured multi-step workflows.
 
 ```go
-func NewWorkflowEngine(discovery core.Discovery) *WorkflowEngine
+func NewWorkflowEngine(discovery core.Discovery, stateStore StateStore, logger core.Logger) *WorkflowEngine
 ```
 
 **Example:**
 ```go
-engine := orchestration.NewWorkflowEngine(discovery)
+stateStore := orchestration.NewRedisStateStore(discovery)
+engine := orchestration.NewWorkflowEngine(discovery, stateStore, logger)
 
 // Define workflow as YAML
 yamlDef := `

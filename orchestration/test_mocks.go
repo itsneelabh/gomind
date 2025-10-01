@@ -92,6 +92,23 @@ func (m *mockLogger) Error(msg string, fields map[string]interface{}) {
 	}
 }
 
+// Context-aware logging methods
+func (m *mockLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.Debug(msg, fields)
+}
+
+func (m *mockLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.Info(msg, fields)
+}
+
+func (m *mockLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.Warn(msg, fields)
+}
+
+func (m *mockLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.Error(msg, fields)
+}
+
 func (m *mockLogger) WithFields(fields map[string]interface{}) core.Logger {
 	return m
 }

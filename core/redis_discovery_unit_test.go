@@ -332,6 +332,22 @@ func (m *MockLogger) Error(msg string, fields map[string]interface{}) {
 	m.entries = append(m.entries, LogEntry{Level: "error", Message: msg, Fields: fields})
 }
 
+func (m *MockLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.entries = append(m.entries, LogEntry{Level: "debug", Message: msg, Fields: fields})
+}
+
+func (m *MockLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.entries = append(m.entries, LogEntry{Level: "info", Message: msg, Fields: fields})
+}
+
+func (m *MockLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.entries = append(m.entries, LogEntry{Level: "warn", Message: msg, Fields: fields})
+}
+
+func (m *MockLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.entries = append(m.entries, LogEntry{Level: "error", Message: msg, Fields: fields})
+}
+
 // Mock discovery for testing wrapper functions without Redis
 type mockRedisDiscovery struct {
 	lastFilter DiscoveryFilter

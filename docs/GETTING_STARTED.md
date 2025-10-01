@@ -191,19 +191,17 @@ func main() {
         
         // Development helpers
         core.WithDevelopmentMode(true),  // Better error messages, debug logging
+
+        // Logging is controlled via environment variables:
+        // GOMIND_LOG_LEVEL=debug (to see framework internals)
+        // GOMIND_LOG_FORMAT=json (structured logs)
     )
     if err != nil {
         log.Fatalf("Failed to create framework: %v", err)
     }
-    
-    log.Println("🧮 Calculator Tool Starting...")
-    log.Println("Available endpoints:")
-    log.Println("  POST /api/capabilities/add      - Add two numbers")
-    log.Println("  POST /api/capabilities/multiply - Multiply two numbers")
-    log.Println("  GET  /api/capabilities          - List all capabilities")
-    log.Println("  GET  /health                    - Health check")
-    
+
     // 4. Start the framework (this will block until shutdown)
+    // The framework logs startup info automatically at INFO level
     ctx := context.Background()
     if err := framework.Run(ctx); err != nil {
         log.Fatalf("Framework failed: %v", err)
@@ -370,15 +368,8 @@ func main() {
     if err != nil {
         log.Fatalf("Failed to create framework: %v", err)
     }
-    
-    log.Println("🧠 Coordinator Agent Starting...")
-    log.Println("This agent can discover and coordinate other components!")
-    log.Println("Available endpoints:")
-    log.Println("  POST /api/capabilities/process_request - Process intelligent requests")
-    log.Println("  GET  /api/capabilities                 - List all capabilities")
-    log.Println("  GET  /health                           - Health check")
-    
-    // 4. Start the framework
+
+    // 4. Start the framework - it logs startup automatically
     ctx := context.Background()
     if err := framework.Run(ctx); err != nil {
         log.Fatalf("Framework failed: %v", err)
@@ -1636,7 +1627,7 @@ framework.Run(ctx)
 GOMIND_AGENT_NAME=my-service      # Service name
 GOMIND_PORT=8080                  # HTTP port
 REDIS_URL=redis://localhost:6379  # Redis connection
-GOMIND_LOG_LEVEL=debug           # Log level
+GOMIND_LOG_LEVEL=debug           # Log level (debug, info, warn, error)
 
 # AI Integration (optional - choose one)
 GROQ_API_KEY=gsk-...              # Groq API key (FREE - recommended!)
@@ -1645,6 +1636,110 @@ ANTHROPIC_API_KEY=sk-ant-...      # Anthropic API key (paid)
 
 # Production
 GOMIND_NAMESPACE=production       # Service namespace
-GOMIND_LOG_LEVEL=warn            # Less verbose logging
+GOMIND_LOG_LEVEL=warn            # Warn level - only warnings and errors
 ```
+
+---
+
+## 🐛 Troubleshooting
+
+### Enable Debug Logging
+
+If something isn't working as expected, enable debug logs to see what the framework is doing internally:
+
+**Local Development:**
+```bash
+# Enable debug logging
+export GOMIND_LOG_LEVEL=debug
+export GOMIND_LOG_FORMAT=json
+go run main.go
+
+# You'll see detailed logs like:
+# {"level":"DEBUG","service":"my-service","message":"Registering capability","capability":"add"}
+# {"level":"DEBUG","service":"my-service","message":"Connecting to Redis","url":"redis://localhost:6379"}
+```
+
+**Kubernetes:**
+```bash
+# Enable debug mode without restart
+kubectl set env deployment/my-service GOMIND_LOG_LEVEL=debug -n my-namespace
+
+# Watch the logs
+kubectl logs -f deployment/my-service -n my-namespace
+
+# Set back to info when done
+kubectl set env deployment/my-service GOMIND_LOG_LEVEL=info -n my-namespace
+```
+
+**Docker Compose:**
+```yaml
+services:
+  my-service:
+    environment:
+      - GOMIND_LOG_LEVEL=debug
+```
+
+### Common Issues
+
+#### "Can't see what's happening during startup"
+
+**Solution:** Enable debug logging to see framework internals:
+```bash
+GOMIND_LOG_LEVEL=debug go run main.go
+```
+
+#### "Redis connection errors"
+
+**Problem:** Service discovery not working.
+
+**Solution:**
+```bash
+# Check if Redis is running
+docker ps | grep redis
+
+# Or for standalone Redis
+redis-cli ping
+
+# If Redis is not available, disable discovery temporarily
+# Remove these lines from your code:
+# core.WithDiscovery(true, "redis"),
+# core.WithRedisURL("redis://localhost:6379"),
+```
+
+#### "Port already in use"
+
+**Problem:** Another service is using port 8080.
+
+**Solution:**
+```bash
+# Find what's using the port
+lsof -i :8080
+
+# Kill the process
+kill -9 <PID>
+
+# Or use a different port
+core.WithPort(8081)
+```
+
+#### "AI provider not responding"
+
+**Problem:** API key issues or rate limits.
+
+**Solution:**
+```bash
+# Verify your API key is set
+echo $GROQ_API_KEY  # or OPENAI_API_KEY
+
+# Enable debug logging to see API calls
+GOMIND_LOG_LEVEL=debug go run main.go
+
+# Check for error messages about API calls
+```
+
+### Getting More Help
+
+For comprehensive logging configuration, see [Logging Configuration](API_REFERENCE.md#logging-configuration) in the API Reference.
+
+For more examples and patterns, explore the [examples directory](../examples/README.md).
 

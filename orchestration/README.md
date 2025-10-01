@@ -372,7 +372,8 @@ on_error:
 
 ```go
 // Step 1: Create the workflow engine
-engine := orchestration.NewWorkflowEngine(discovery)
+stateStore := orchestration.NewRedisStateStore(discovery)
+engine := orchestration.NewWorkflowEngine(discovery, stateStore, logger)
 
 // Step 2: Load your workflow (from file or string)
 yamlData, _ := os.ReadFile("investment-analysis.yaml")
@@ -966,7 +967,7 @@ These features are not yet implemented but could be added:
 - `CreateSimpleOrchestrator(discovery, aiClient)` - Quick start orchestrator
 - `CreateOrchestratorWithOptions(deps, opts...)` - Create with option functions
 - `NewAIOrchestrator(config, discovery, aiClient)` - Low-level orchestrator creation
-- `NewWorkflowEngine(discovery)` - Create workflow engine
+- `NewWorkflowEngine(discovery, stateStore, logger)` - Create workflow engine
 - `ProcessRequest(ctx, request, metadata)` - Process natural language request
 - `ExecuteWorkflow(ctx, workflow, inputs)` - Execute defined workflow
 - `ParseWorkflowYAML(data)` - Parse workflow from YAML

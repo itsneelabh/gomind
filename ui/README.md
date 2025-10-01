@@ -524,21 +524,33 @@ limiter := security.NewSmartRateLimiter(config)
 
 ### Protecting Your Transports
 
-The module includes built-in circuit breaker functionality to protect against cascading failures:
+The UI module integrates with the resilience module's circuit breaker to protect against cascading failures. Circuit breaker functionality is provided through dependency injection:
 
 ```go
-config := ui.CircuitBreakerConfig{
-    FailureThreshold: 5,               // Open after 5 failures
-    SuccessThreshold: 2,               // Close after 2 successes
-    Timeout:          30 * time.Second, // How long to stay open
-    MaxRequests:      1,                // Requests allowed in half-open state
+import (
+    "github.com/itsneelabh/gomind/ui"
+    "github.com/itsneelabh/gomind/resilience"
+)
+
+// Create a circuit breaker from the resilience module
+cbConfig := &resilience.CircuitBreakerConfig{
+    Name:             "chat-transport",
+    ErrorThreshold:   0.5,  // 50% error rate triggers opening
+    VolumeThreshold:  10,   // Need 10 requests minimum
+    SleepWindow:      30 * time.Second,
+    HalfOpenRequests: 5,    // Test with 5 requests when recovering
+}
+breaker, _ := resilience.NewCircuitBreaker(cbConfig)
+
+// Inject it into the chat agent
+deps := ui.ChatAgentDependencies{
+    AIClient:       aiClient,
+    CircuitBreaker: breaker,  // Inject the circuit breaker
+    Logger:         logger,
 }
 
-// Enable for all transports
-agentConfig := ui.ChatAgentConfig{
-    CircuitBreakerEnabled: true,
-    CircuitBreakerConfig:  config,
-}
+// Create agent with circuit breaker protection
+agent := ui.NewChatAgentWithDependencies(config, sessions, deps)
 ```
 
 ### Circuit Breaker States
@@ -557,18 +569,23 @@ CLOSED (Back to Normal)
 
 ```go
 // Wrap any transport with circuit breaker
-protected := ui.NewCircuitBreakerTransport(
+protected, err := ui.NewCircuitBreakerTransport(
     transport,
-    config,
-    logger,    // optional
-    telemetry, // optional
+    breaker,   // Required: core.CircuitBreaker implementation
+    logger,    // Optional: defaults to NoOpLogger
 )
+if err != nil {
+    // Handle configuration error (missing required parameters)
+    return err
+}
 
 // The transport is now protected:
-// - Fails fast when circuit is open
+// - Fails fast when circuit is open (503 Service Unavailable)
 // - Automatically recovers when service is healthy
+// - Server errors (5xx) count as failures
+// - Client errors (4xx) don't affect circuit state
 // - Logs state transitions
-// - Reports metrics
+// - Reports metrics through the breaker's GetMetrics()
 ```
 
 ## 🔧 Advanced Configuration
@@ -617,14 +634,8 @@ config := ui.ChatAgentConfig{
         },
     },
     
-    // Circuit breaker
-    CircuitBreakerEnabled: true,
-    CircuitBreakerConfig: ui.CircuitBreakerConfig{
-        FailureThreshold: 10,
-        SuccessThreshold: 3,
-        Timeout:          60 * time.Second,
-        MaxRequests:      5,
-    },
+    // Circuit breaker - enable but configuration is done via dependency injection
+    CircuitBreakerEnabled: true,  // Set to true to enable circuit breaker protection
     
     // Redis for distributed features
     RedisURL: "redis://redis.example.com:6379/0",

@@ -207,9 +207,11 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 			// Start heartbeat to keep registration alive (Redis-specific)
 			if redisDiscovery, ok := b.Discovery.(*RedisDiscovery); ok {
 				redisDiscovery.StartHeartbeat(ctx, b.ID)
-				b.Logger.Debug("Started heartbeat for agent registration", map[string]interface{}{
-					"agent_id": b.ID,
-					"ttl":      redisDiscovery.ttl,
+				b.Logger.Info("Started heartbeat for agent registration", map[string]interface{}{
+					"agent_id":     b.ID,
+					"agent_name":   b.Name,
+					"interval_sec": int(redisDiscovery.ttl.Seconds() / 2),
+					"ttl_sec":      int(redisDiscovery.ttl.Seconds()),
 				})
 			}
 		}
@@ -618,7 +620,7 @@ func RecoveryMiddleware(logger Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
-					// Log the panic with stack trace
+					// Log the panic with stack trace using structured logging
 					stackTrace := debug.Stack()
 					if logger != nil {
 						logger.Error("HTTP handler panic recovered", map[string]interface{}{
@@ -627,11 +629,9 @@ func RecoveryMiddleware(logger Logger) func(http.Handler) http.Handler {
 							"path":       r.URL.Path,
 							"method":     r.Method,
 							"stack":      string(stackTrace),
+							"user_agent": r.UserAgent(),
+							"remote_ip":  r.RemoteAddr,
 						})
-					} else {
-						// Fallback to standard logging if no logger available
-						fmt.Printf("HTTP handler panic recovered: %v\nPath: %s\nMethod: %s\nStack trace:\n%s\n",
-							err, r.URL.Path, r.Method, stackTrace)
 					}
 
 					// Return Internal Server Error to client

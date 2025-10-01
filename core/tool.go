@@ -167,9 +167,11 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 		// Start heartbeat to keep registration alive (Redis-specific)
 		if redisRegistry, ok := t.Registry.(*RedisRegistry); ok {
 			redisRegistry.StartHeartbeat(ctx, t.ID)
-			t.Logger.Debug("Started heartbeat for tool registration", map[string]interface{}{
-				"tool_id": t.ID,
-				"ttl":     redisRegistry.ttl,
+			t.Logger.Info("Started heartbeat for tool registration", map[string]interface{}{
+				"tool_id":      t.ID,
+				"tool_name":    t.Name,
+				"interval_sec": int(redisRegistry.ttl.Seconds() / 2),
+				"ttl_sec":      int(redisRegistry.ttl.Seconds()),
 			})
 		}
 	} else {

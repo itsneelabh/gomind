@@ -18,6 +18,7 @@ type WorkflowEngine struct {
 	executor   *WorkflowExecutor
 	stateStore StateStore
 	metrics    *WorkflowMetrics
+	logger     core.Logger // For structured logging
 }
 
 // WorkflowDefinition defines a complete workflow
@@ -156,15 +157,20 @@ const (
 )
 
 // NewWorkflowEngine creates a new workflow execution engine
-func NewWorkflowEngine(discovery core.Discovery) *WorkflowEngine {
+func NewWorkflowEngine(discovery core.Discovery, stateStore StateStore, logger core.Logger) *WorkflowEngine {
+	if logger == nil {
+		logger = &core.NoOpLogger{}
+	}
 	return &WorkflowEngine{
 		discovery: discovery,
 		executor: &WorkflowExecutor{
 			discovery: discovery,
 			client:    NewWorkflowHTTPClient(),
+			logger:    logger,
 		},
-		stateStore: NewRedisStateStore(discovery),
+		stateStore: stateStore,
 		metrics:    NewWorkflowMetrics(),
+		logger:     logger,
 	}
 }
 
@@ -225,7 +231,12 @@ func (e *WorkflowEngine) ExecuteWorkflow(ctx context.Context, workflow *Workflow
 		execution.EndTime = &endTime
 		if updateErr := e.stateStore.UpdateExecution(ctx, execution); updateErr != nil {
 			// Log error but continue with original error
-			fmt.Printf("Failed to update execution state on error: %v\n", updateErr)
+			e.logger.Error("Failed to update execution state on error", map[string]interface{}{
+				"execution_id": execution.ID,
+				"workflow_id":  execution.WorkflowID,
+				"error":        updateErr.Error(),
+				"original_err": err.Error(),
+			})
 		}
 		return execution, err
 	}
@@ -239,7 +250,11 @@ func (e *WorkflowEngine) ExecuteWorkflow(ctx context.Context, workflow *Workflow
 	// Save final state
 	if err := e.stateStore.UpdateExecution(ctx, execution); err != nil {
 		// Log error but continue
-		fmt.Printf("Failed to update final execution state: %v\n", err)
+		e.logger.Error("Failed to update final execution state", map[string]interface{}{
+			"execution_id": execution.ID,
+			"workflow_id":  execution.WorkflowID,
+			"error":        err.Error(),
+		})
 	}
 
 	// Update metrics
@@ -271,11 +286,11 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 					select {
 					case <-ctx.Done():
 						// Context already cancelled, log and exit
-						// TODO: Replace with proper logging
-						// Using structured format for easier parsing
-						if false { // Disabled, enable for debugging
-							fmt.Printf("PANIC|worker=%d|context=cancelled|error=%v\n", workerID, r)
-						}
+						e.logger.Warn("Worker panic with cancelled context", map[string]interface{}{
+							"worker_id": workerID,
+							"panic":     fmt.Sprintf("%v", r),
+							"context":   "cancelled",
+						})
 						return
 					default:
 					}
@@ -459,7 +474,11 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 			// Update state only if step exists
 			if err := e.stateStore.UpdateStepExecution(ctx, execution.ID, stepExec); err != nil {
 				// Log error but don't fail the step
-				fmt.Printf("Failed to update step state: %v\n", err)
+				e.logger.Error("Failed to update step state", map[string]interface{}{
+					"execution_id": execution.ID,
+					"step_id":      stepExec.StepID,
+					"error":        err.Error(),
+				})
 			}
 
 		case <-done:

@@ -13,6 +13,16 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+// HeartbeatStats tracks heartbeat statistics for periodic summaries
+type HeartbeatStats struct {
+	SuccessCount  int64
+	FailureCount  int64
+	LastSuccess   time.Time
+	LastFailure   time.Time
+	StartedAt     time.Time
+	LastSummaryAt time.Time // Track when we last logged summary
+}
+
 // RedisRegistry provides Redis-based service registration (implements Registry interface)
 type RedisRegistry struct {
 	client    *redis.Client
@@ -23,6 +33,10 @@ type RedisRegistry struct {
 	// Self-healing state management (internal enhancement)
 	registrationState map[string]*ServiceInfo
 	stateMutex       sync.RWMutex
+
+	// Heartbeat tracking for periodic summaries
+	heartbeatStats map[string]*HeartbeatStats
+	heartbeatMutex sync.RWMutex
 }
 
 // NewRedisRegistry creates a new Redis registry client
@@ -75,6 +89,8 @@ func NewRedisRegistryWithNamespace(redisURL, namespace string) (*RedisRegistry, 
 		ttl:               30 * time.Second,
 		registrationState: make(map[string]*ServiceInfo), // Enhanced: state storage
 		stateMutex:        sync.RWMutex{},                // Enhanced: thread safety
+		heartbeatStats:    make(map[string]*HeartbeatStats),
+		heartbeatMutex:    sync.RWMutex{},
 	}
 
 	// Note: Logger will be set later via SetLogger method if needed
@@ -507,6 +523,26 @@ func (r *RedisRegistry) maintainRegistration(ctx context.Context, serviceID stri
 	// Try lightweight health update first (normal operation)
 	err := r.UpdateHealth(ctx, serviceID, HealthHealthy)
 
+	// Update stats and capture values for logging (under lock for thread safety)
+	var failureCount int64
+	var lastSuccessTime time.Time
+
+	r.heartbeatMutex.Lock()
+	stats := r.heartbeatStats[serviceID]
+	if stats != nil {
+		if err == nil {
+			stats.SuccessCount++
+			stats.LastSuccess = time.Now()
+		} else {
+			stats.FailureCount++
+			stats.LastFailure = time.Now()
+		}
+		// Capture values under lock for safe logging later
+		failureCount = stats.FailureCount
+		lastSuccessTime = stats.LastSuccess
+	}
+	r.heartbeatMutex.Unlock()
+
 	if err != nil && r.isServiceNotFoundError(err) {
 		// Service expired from Redis - attempt re-registration
 		if serviceInfo := r.getStoredRegistrationState(serviceID); serviceInfo != nil {
@@ -518,29 +554,149 @@ func (r *RedisRegistry) maintainRegistration(ctx context.Context, serviceID stri
 			if regErr := r.Register(ctx, serviceInfo); regErr != nil {
 				if r.logger != nil {
 					r.logger.Error("Failed to re-register service during recovery", map[string]interface{}{
-						"service_id":               serviceID,
-						"error":                    regErr,
+						"service_id":                serviceID,
+						"error":                     regErr,
 						"will_retry_next_heartbeat": true,
+						"total_failures":            failureCount,
 					})
 				}
 			} else {
 				if r.logger != nil {
+					downtime := time.Duration(0)
+					if !lastSuccessTime.IsZero() {
+						downtime = time.Since(lastSuccessTime)
+					}
 					r.logger.Info("Successfully re-registered service after Redis recovery", map[string]interface{}{
-						"service_id": serviceID,
+						"service_id":        serviceID,
+						"downtime_seconds":  int(downtime.Seconds()),
+						"missed_heartbeats": int(downtime.Seconds() / (r.ttl.Seconds() / 2)),
 					})
 				}
+				// Reset failure count after successful recovery
+				r.heartbeatMutex.Lock()
+				if stats := r.heartbeatStats[serviceID]; stats != nil {
+					stats.FailureCount = 0
+					stats.LastSuccess = time.Now()
+				}
+				r.heartbeatMutex.Unlock()
 			}
 		}
 	} else if err != nil && r.logger != nil {
 		r.logger.Error("Failed to send heartbeat", map[string]interface{}{
-			"service_id": serviceID,
-			"error":      err.Error(),
+			"service_id":     serviceID,
+			"error":          err.Error(),
+			"total_failures": failureCount,
 		})
+	}
+}
+
+// checkAndLogPeriodicSummary logs heartbeat health every 5 minutes
+func (r *RedisRegistry) checkAndLogPeriodicSummary(serviceID string) {
+	// Check if it's time to log (read LastSummaryAt under lock)
+	r.heartbeatMutex.RLock()
+	stats := r.heartbeatStats[serviceID]
+	if stats == nil || r.logger == nil {
+		r.heartbeatMutex.RUnlock()
+		return
+	}
+	shouldLog := time.Since(stats.LastSummaryAt) >= 5*time.Minute
+	r.heartbeatMutex.RUnlock()
+
+	// Log summary if needed
+	if shouldLog {
+		r.logHeartbeatSummary(serviceID, false)
+
+		// Update LastSummaryAt (re-check stats exists under lock)
+		r.heartbeatMutex.Lock()
+		if stats := r.heartbeatStats[serviceID]; stats != nil {
+			stats.LastSummaryAt = time.Now()
+		}
+		r.heartbeatMutex.Unlock()
+	}
+}
+
+// logHeartbeatSummary logs heartbeat statistics
+func (r *RedisRegistry) logHeartbeatSummary(serviceID string, isFinal bool) {
+	// Capture consistent snapshot of stats under RLock
+	var snapshot struct {
+		successCount int64
+		failureCount int64
+		lastSuccess  time.Time
+		lastFailure  time.Time
+		startedAt    time.Time
+	}
+
+	r.heartbeatMutex.RLock()
+	stats := r.heartbeatStats[serviceID]
+	if stats == nil {
+		r.heartbeatMutex.RUnlock()
+		return
+	}
+	// Copy all fields under lock for consistent snapshot
+	snapshot.successCount = stats.SuccessCount
+	snapshot.failureCount = stats.FailureCount
+	snapshot.lastSuccess = stats.LastSuccess
+	snapshot.lastFailure = stats.LastFailure
+	snapshot.startedAt = stats.StartedAt
+	r.heartbeatMutex.RUnlock()
+
+	if r.logger == nil {
+		return
+	}
+
+	// Get service info for better context (not protected by heartbeatMutex)
+	serviceInfo := r.getStoredRegistrationState(serviceID)
+	serviceName := "unknown"
+	serviceType := "unknown"
+	if serviceInfo != nil {
+		serviceName = serviceInfo.Name
+		serviceType = string(serviceInfo.Type)
+	}
+
+	// Calculate metrics from consistent snapshot
+	uptime := time.Since(snapshot.startedAt)
+	total := snapshot.successCount + snapshot.failureCount
+	successRate := float64(0)
+	if total > 0 {
+		successRate = float64(snapshot.successCount) / float64(total) * 100
+	}
+
+	logData := map[string]interface{}{
+		"service_id":     serviceID,
+		"service_name":   serviceName,
+		"service_type":   serviceType,
+		"success_count":  snapshot.successCount,
+		"failure_count":  snapshot.failureCount,
+		"success_rate":   fmt.Sprintf("%.2f%%", successRate),
+		"uptime_minutes": int(uptime.Minutes()),
+	}
+
+	// Only add timestamps if they're valid
+	if !snapshot.lastSuccess.IsZero() {
+		logData["time_since_last_success_sec"] = int(time.Since(snapshot.lastSuccess).Seconds())
+	}
+
+	if snapshot.failureCount > 0 && !snapshot.lastFailure.IsZero() {
+		logData["time_since_last_failure_sec"] = int(time.Since(snapshot.lastFailure).Seconds())
+	}
+
+	if isFinal {
+		r.logger.Info("Heartbeat final summary (service shutting down)", logData)
+	} else {
+		r.logger.Info("Heartbeat health summary", logData)
 	}
 }
 
 // StartHeartbeat starts a heartbeat goroutine to keep registration alive (enhanced for self-healing)
 func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
+	// Initialize heartbeat stats
+	r.heartbeatMutex.Lock()
+	r.heartbeatStats[serviceID] = &HeartbeatStats{
+		StartedAt:     time.Now(),
+		LastSummaryAt: time.Now(),
+	}
+	r.heartbeatMutex.Unlock()
+
 	// Base interval with jitter to distribute load
 	baseInterval := r.ttl / 2
 	maxJitter := int64(baseInterval.Milliseconds() / 4)
@@ -554,10 +710,18 @@ func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
 		for {
 			select {
 			case <-ctx.Done():
+				// Log final stats on shutdown
+				r.logHeartbeatSummary(serviceID, true)
+				// Clean up stats
+				r.heartbeatMutex.Lock()
+				delete(r.heartbeatStats, serviceID)
+				r.heartbeatMutex.Unlock()
 				return
 			case <-ticker.C:
 				// Use enhanced maintenance logic with self-healing
 				r.maintainRegistration(ctx, serviceID)
+				// Check if it's time for periodic summary (every 5 minutes)
+				r.checkAndLogPeriodicSummary(serviceID)
 			}
 		}
 	}()

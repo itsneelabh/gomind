@@ -1710,12 +1710,130 @@ GoMind uses a **three-layer configuration system**:
 
 #### Kubernetes Integration
 
-| Variable | Example | Description |
-|----------|---------|-------------|
-| `GOMIND_K8S_SERVICE_NAME` | `my-agent` | Kubernetes Service name |
-| `GOMIND_K8S_SERVICE_PORT` | `80` | Service port (not container port!) |
-| `GOMIND_K8S_NAMESPACE` | `production` | Current namespace |
-| `HOSTNAME` | `my-agent-abc123` | Current pod name |
+**Critical for Service Discovery**: These environment variables control how your service registers in the discovery system.
+
+| Variable | Required | Example | Description |
+|----------|----------|---------|-------------|
+| `GOMIND_K8S_SERVICE_NAME` | **YES** | `my-agent-service` | Kubernetes Service name (must match Service metadata.name) |
+| `GOMIND_K8S_SERVICE_PORT` | **YES** | `80` | Service port (NOT container port!) |
+| `GOMIND_K8S_NAMESPACE` | **YES** | Use fieldRef | Current namespace (set via fieldRef to metadata.namespace) |
+| `GOMIND_K8S_POD_IP` | Optional | Use fieldRef | Pod IP for metadata (set via fieldRef to status.podIP) |
+| `GOMIND_K8S_NODE_NAME` | Optional | Use fieldRef | Node name for metadata (set via fieldRef to spec.nodeName) |
+| `HOSTNAME` | Auto-set | `my-agent-abc123` | Current pod name (auto-set by K8s) |
+
+**How Service Discovery Works** (from [core/address_resolver.go:32-65](../../core/address_resolver.go#L32-L65)):
+
+```go
+// Framework checks two conditions:
+if config.Kubernetes.Enabled && config.Kubernetes.ServiceName != "" {
+    // Builds K8s Service DNS name
+    address := fmt.Sprintf("%s.%s.svc.cluster.local",
+        config.Kubernetes.ServiceName,  // From GOMIND_K8S_SERVICE_NAME
+        namespace)                       // From GOMIND_K8S_NAMESPACE
+    return address, config.Kubernetes.ServicePort
+}
+// Otherwise falls back to config.Address (0.0.0.0 in K8s)
+```
+
+**What happens without these variables:**
+
+❌ **Without `GOMIND_K8S_SERVICE_NAME`:**
+```
+- Registers with: "0.0.0.0:8080"
+- Load balancing: BROKEN
+- Service mesh: INCOMPATIBLE
+- Other services: CANNOT DISCOVER
+```
+
+✅ **With `GOMIND_K8S_SERVICE_NAME`:**
+```
+- Registers with: "my-agent-service.production.svc.cluster.local:80"
+- Load balancing: WORKS
+- Service mesh: COMPATIBLE
+- Other services: CAN DISCOVER
+```
+
+**Example deployment configuration:**
+```yaml
+env:
+  # Required for proper service discovery
+  - name: GOMIND_K8S_SERVICE_NAME
+    value: "my-agent-service"  # Must match Service name below
+  - name: GOMIND_K8S_SERVICE_PORT
+    value: "80"
+  - name: GOMIND_K8S_NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
+  # Optional but recommended for observability
+  - name: GOMIND_K8S_POD_IP
+    valueFrom:
+      fieldRef:
+        fieldPath: status.podIP
+  - name: GOMIND_K8S_NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-agent-service  # Must match GOMIND_K8S_SERVICE_NAME
+spec:
+  ports:
+  - port: 80              # Must match GOMIND_K8S_SERVICE_PORT
+    targetPort: 8080      # Your container port
+```
+
+### Heartbeat Monitoring
+
+The framework maintains service registration through periodic heartbeats to ensure services remain discoverable in the mesh.
+
+#### Heartbeat Mechanism
+- **Service TTL**: 30 seconds - services expire if not refreshed
+- **Heartbeat Interval**: 15 seconds (TTL/2) - ensures 2 attempts before expiry
+- **Auto-recovery**: Services automatically re-register if Redis connection recovers
+
+#### Log Visibility
+
+The framework provides strategic logging for heartbeat monitoring without flooding logs:
+
+| Operation | Log Level | Frequency | Example |
+|-----------|-----------|-----------|---------|
+| Heartbeat Started | INFO | Once at startup | `Started heartbeat for tool registration (tool_id=weather-abc123, tool_name=weather-tool, interval_sec=15, ttl_sec=30)` |
+| Health Summary | INFO | Every 5 minutes | `Heartbeat health summary (service_id=weather-abc123, service_name=weather-tool, success_count=20, failure_count=0, success_rate=100.00%, uptime_minutes=5)` |
+| Heartbeat Failure | ERROR | On each failure | `Failed to send heartbeat (service_id=weather-abc123, error=connection refused, total_failures=2)` |
+| Service Recovery | INFO | After re-registration | `Successfully re-registered service after Redis recovery (service_id=weather-abc123, downtime_seconds=45, missed_heartbeats=3)` |
+| Shutdown Summary | INFO | On service shutdown | `Heartbeat final summary (service shutting down) (service_id=weather-abc123, success_count=240, failure_count=2, success_rate=99.17%)` |
+
+#### Monitoring Best Practices
+
+1. **Normal Operations** - Set `GOMIND_LOG_LEVEL=info`
+   - See heartbeat start confirmation
+   - Get health summaries every 5 minutes
+   - Immediate error notifications
+
+2. **Debugging Issues** - Set `GOMIND_LOG_LEVEL=debug`
+   - See individual heartbeat operations
+   - Detailed health update logs
+   - Complete discovery operation traces
+
+3. **Production Monitoring**
+   ```bash
+   # View heartbeat health for a specific service
+   kubectl logs deployment/weather-tool -n gomind-examples | grep -E "(heartbeat|Heartbeat)"
+
+   # Check for heartbeat failures
+   kubectl logs deployment/weather-tool -n gomind-examples | grep -E "Failed to send heartbeat"
+
+   # Monitor all health summaries
+   kubectl logs -f deployment/weather-tool -n gomind-examples | grep "Heartbeat health summary"
+   ```
+
+4. **Alert Triggers**
+   - Alert if `failure_count` > 0 in health summary
+   - Alert if `success_rate` < 95%
+   - Alert if no health summary logged for > 6 minutes
 
 #### AI Configuration (Optional)
 

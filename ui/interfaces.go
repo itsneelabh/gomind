@@ -261,8 +261,9 @@ type ChatAgentConfig struct {
 	TransportConfigs map[string]TransportConfig `json:"transport_configs"`
 
 	// Circuit breaker configuration
-	CircuitBreakerEnabled bool                 `json:"circuit_breaker_enabled"`
-	CircuitBreakerConfig  CircuitBreakerConfig `json:"circuit_breaker_config"`
+	CircuitBreakerEnabled bool `json:"circuit_breaker_enabled"`
+	// Note: Circuit breaker is now provided via dependency injection
+	// Use ChatAgentDependencies.CircuitBreaker to inject a core.CircuitBreaker implementation
 
 	// Redis connection (reused from discovery)
 	RedisURL string `json:"redis_url"`

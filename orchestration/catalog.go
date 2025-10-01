@@ -258,7 +258,13 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 		defer func() {
 			if closeErr := resp.Body.Close(); closeErr != nil {
 				// Log error but don't fail the operation
-				fmt.Printf("Error closing response body: %v\n", closeErr)
+				if c.logger != nil {
+					c.logger.Warn("Error closing response body", map[string]interface{}{
+						"operation":  "http_response_cleanup",
+						"service_id": service.ID,
+						"error":      closeErr.Error(),
+					})
+				}
 			}
 		}()
 

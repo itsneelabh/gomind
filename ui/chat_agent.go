@@ -44,7 +44,6 @@ func DefaultChatAgentConfig(name string) ChatAgentConfig {
 		},
 		TransportConfigs:      make(map[string]TransportConfig),
 		CircuitBreakerEnabled: true,
-		CircuitBreakerConfig:  DefaultCircuitBreakerConfig(),
 	}
 }
 
@@ -338,36 +337,31 @@ func (c *DefaultChatAgent) AutoConfigureTransports() {
 			"config_source":  configSource,
 		})
 
-		// Wrap with circuit breaker if enabled with enhanced logging
-		if c.config.CircuitBreakerEnabled {
-			// Use injected circuit breaker if available (preferred)
-			if c.circuitBreaker != nil {
-				transport = NewInterfaceBasedCircuitBreakerTransport(transport, c.circuitBreaker)
-
-				c.Logger.Info("Transport wrapped with injected circuit breaker", map[string]interface{}{
+		// Wrap with circuit breaker if enabled and available
+		if c.config.CircuitBreakerEnabled && c.circuitBreaker != nil {
+			cbTransport, err := NewCircuitBreakerTransport(transport, c.circuitBreaker, c.Logger)
+			if err != nil {
+				// Log error but continue without circuit breaker protection
+				c.Logger.Error("Failed to wrap transport with circuit breaker", map[string]interface{}{
+					"operation": "configure_transport",
+					"transport": transportName,
+					"error":     err.Error(),
+				})
+				// Continue with unwrapped transport - graceful degradation
+			} else {
+				transport = cbTransport
+				c.Logger.Info("Transport wrapped with circuit breaker", map[string]interface{}{
 					"operation":  "configure_transport",
 					"transport":  transportName,
-					"cb_type":    "injected",
 					"cb_state":   c.circuitBreaker.GetState(),
 				})
-			} else {
-				// Fall back to legacy built-in circuit breaker (deprecated)
-				// TODO: Remove this fallback in next major version
-				cbConfig := c.config.CircuitBreakerConfig
-				cbConfig.Logger = c.BaseAgent.Logger
-				cbConfig.Telemetry = c.BaseAgent.Telemetry
-
-				transport = NewCircuitBreakerTransport(transport, cbConfig)
-
-				c.Logger.Info("Transport wrapped with legacy circuit breaker", map[string]interface{}{
-					"operation":           "configure_transport",
-					"transport":           transportName,
-					"cb_type":             "legacy",
-					"failure_threshold":   cbConfig.FailureThreshold,
-					"timeout":             cbConfig.Timeout.String(),
-					"deprecation_warning": "Please use dependency injection for circuit breaker",
-				})
 			}
+		} else if c.config.CircuitBreakerEnabled {
+			c.Logger.Warn("Circuit breaker enabled but not injected", map[string]interface{}{
+				"operation": "configure_transport",
+				"transport": transportName,
+				"solution":  "Inject circuit breaker via ChatAgentDependencies",
+			})
 		}
 
 		// Start transport with enhanced logging and timing

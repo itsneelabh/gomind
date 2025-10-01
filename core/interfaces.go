@@ -9,10 +9,17 @@ import (
 
 // Logger interface - minimal logging interface
 type Logger interface {
+	// Basic logging methods
 	Info(msg string, fields map[string]interface{})
 	Error(msg string, fields map[string]interface{})
 	Warn(msg string, fields map[string]interface{})
 	Debug(msg string, fields map[string]interface{})
+
+	// Context-aware methods for distributed tracing and request correlation
+	InfoWithContext(ctx context.Context, msg string, fields map[string]interface{})
+	ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{})
+	WarnWithContext(ctx context.Context, msg string, fields map[string]interface{})
+	DebugWithContext(ctx context.Context, msg string, fields map[string]interface{})
 }
 
 // Telemetry interface - optional telemetry support
@@ -107,6 +114,11 @@ func (n *NoOpLogger) Info(msg string, fields map[string]interface{})  {}
 func (n *NoOpLogger) Error(msg string, fields map[string]interface{}) {}
 func (n *NoOpLogger) Warn(msg string, fields map[string]interface{})  {}
 func (n *NoOpLogger) Debug(msg string, fields map[string]interface{}) {}
+
+func (n *NoOpLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{})  {}
+func (n *NoOpLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {}
+func (n *NoOpLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{})  {}
+func (n *NoOpLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {}
 
 // NoOpTelemetry provides a no-op telemetry implementation
 type NoOpTelemetry struct{}

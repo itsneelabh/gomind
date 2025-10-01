@@ -84,7 +84,13 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		otelProvider, err := telemetry.NewOTelProvider("orchestrator", endpoint)
 		if err != nil {
 			// Resilient runtime behavior - continue without telemetry
-			fmt.Printf("Warning: Failed to initialize telemetry: %v\n", err)
+			if factoryLogger != nil {
+				factoryLogger.Warn("Failed to initialize telemetry", map[string]interface{}{
+					"operation": "telemetry_initialization",
+					"error":     err.Error(),
+					"endpoint":  endpoint,
+				})
+			}
 		} else {
 			orchestrator.SetTelemetry(otelProvider)
 		}

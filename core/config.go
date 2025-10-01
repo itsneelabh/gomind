@@ -1421,16 +1421,45 @@ func NewConfig(opts ...Option) (*Config, error) {
 // ProductionLogger Implementation - Layered Observability Architecture
 // ============================================================================
 
+// LogLevel represents logging severity levels with proper hierarchy
+type LogLevel int
+
+const (
+	// LogLevelDebug is the most verbose level - for development/troubleshooting
+	LogLevelDebug LogLevel = iota
+	// LogLevelInfo is the default production level - standard operations
+	LogLevelInfo
+	// LogLevelWarn is for warnings and potential issues
+	LogLevelWarn
+	// LogLevelError is the highest severity - only critical errors
+	LogLevelError
+)
+
+// parseLogLevel converts string level to LogLevel enum
+// Returns LogLevelInfo as safe default for invalid inputs
+func parseLogLevel(level string) LogLevel {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return LogLevelDebug
+	case "warn", "warning":
+		return LogLevelWarn
+	case "error":
+		return LogLevelError
+	case "info", "":
+		return LogLevelInfo
+	default:
+		// Unknown level defaults to info (safe fallback)
+		return LogLevelInfo
+	}
+}
+
 // ProductionLogger provides layered observability for framework operations
 type ProductionLogger struct {
-	level       string
-	debug       bool
-	serviceName string
-	format      string
-	output      io.Writer
-
-	// Metrics layer (enabled when telemetry available)
-	metricsEnabled bool
+	level          LogLevel // Numeric level for efficient comparison
+	serviceName    string
+	format         string
+	output         io.Writer
+	metricsEnabled bool // Metrics layer (enabled when telemetry available)
 }
 
 // NewProductionLogger creates a logger from LoggingConfig
@@ -1440,9 +1469,14 @@ func NewProductionLogger(logging LoggingConfig, dev DevelopmentConfig, serviceNa
 		output = os.Stderr
 	}
 
+	// Parse log level - development mode overrides to debug
+	level := parseLogLevel(logging.Level)
+	if dev.Enabled || dev.DebugLogging {
+		level = LogLevelDebug
+	}
+
 	return &ProductionLogger{
-		level:          strings.ToLower(logging.Level),
-		debug:          dev.DebugLogging || logging.Level == "debug",
+		level:          level,
 		serviceName:    serviceName,
 		format:         logging.Format,
 		output:         output,
@@ -1455,29 +1489,57 @@ func (p *ProductionLogger) EnableMetrics() {
 	p.metricsEnabled = true
 }
 
+// Debug logs debug-level messages (only when level is Debug)
+func (p *ProductionLogger) Debug(msg string, fields map[string]interface{}) {
+	if p.level <= LogLevelDebug {
+		p.logEvent("DEBUG", msg, fields, nil)
+	}
+}
+
+// Info logs informational messages (when level is Info or Debug)
 func (p *ProductionLogger) Info(msg string, fields map[string]interface{}) {
-	p.logEvent("INFO", msg, fields, nil)
+	if p.level <= LogLevelInfo {
+		p.logEvent("INFO", msg, fields, nil)
+	}
 }
 
+// InfoWithContext logs informational messages with context
 func (p *ProductionLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
-	p.logEvent("INFO", msg, fields, ctx)
+	if p.level <= LogLevelInfo {
+		p.logEvent("INFO", msg, fields, ctx)
+	}
 }
 
+// Warn logs warning messages (when level is Warn, Info, or Debug)
+func (p *ProductionLogger) Warn(msg string, fields map[string]interface{}) {
+	if p.level <= LogLevelWarn {
+		p.logEvent("WARN", msg, fields, nil)
+	}
+}
+
+// Error logs error messages (always logged - highest severity)
 func (p *ProductionLogger) Error(msg string, fields map[string]interface{}) {
+	// Errors always log regardless of level (highest severity)
 	p.logEvent("ERROR", msg, fields, nil)
 }
 
+// ErrorWithContext logs error messages with context
 func (p *ProductionLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	// Errors always log regardless of level (highest severity)
 	p.logEvent("ERROR", msg, fields, ctx)
 }
 
-func (p *ProductionLogger) Warn(msg string, fields map[string]interface{}) {
-	p.logEvent("WARN", msg, fields, nil)
+// WarnWithContext logs warning messages with context for request correlation
+func (p *ProductionLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	if p.level <= LogLevelWarn {
+		p.logEvent("WARN", msg, fields, ctx)
+	}
 }
 
-func (p *ProductionLogger) Debug(msg string, fields map[string]interface{}) {
-	if p.debug {
-		p.logEvent("DEBUG", msg, fields, nil)
+// DebugWithContext logs debug information with context for request correlation
+func (p *ProductionLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	if p.level <= LogLevelDebug {
+		p.logEvent("DEBUG", msg, fields, ctx)
 	}
 }
 

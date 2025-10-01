@@ -148,7 +148,8 @@ outputs:
 
 ```go
 // 1. Create the engine
-engine := orchestration.NewWorkflowEngine(discovery)
+stateStore := orchestration.NewRedisStateStore(discovery)
+engine := orchestration.NewWorkflowEngine(discovery, stateStore, logger)
 
 // 2. Load your workflow
 yamlData, _ := os.ReadFile("workflow.yaml")

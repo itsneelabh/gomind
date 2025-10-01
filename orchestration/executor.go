@@ -162,11 +162,14 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 						stackTrace := string(debug.Stack())
 						errorMsg := fmt.Sprintf("step %s execution panic: %v", s.StepID, r)
 
-						// Structured logging placeholder - enable for debugging
-						// When proper logging is integrated, replace this with logger calls
-						if false { // Disabled in production, enable for debugging
-							fmt.Printf("PANIC|step=%s|agent=%s|error=%v|stack=%s\n",
-								s.StepID, s.AgentName, r, stackTrace)
+						// Log panic with structured logging
+						if e.logger != nil {
+							e.logger.Error("Step execution panicked", map[string]interface{}{
+								"step_id":    s.StepID,
+								"agent_name": s.AgentName,
+								"panic":      fmt.Sprintf("%v", r),
+								"stack":      string(stackTrace),
+							})
 						}
 
 						// Store panic as a failed step result in the execution results.
@@ -543,7 +546,12 @@ func (e *SmartExecutor) callAgent(ctx context.Context, url string, parameters ma
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			// Log error but don't fail the operation
-			fmt.Printf("Error closing response body: %v\n", closeErr)
+			if e.logger != nil {
+				e.logger.Warn("Error closing response body", map[string]interface{}{
+					"url":   url,
+					"error": closeErr.Error(),
+				})
+			}
 		}
 	}()
 

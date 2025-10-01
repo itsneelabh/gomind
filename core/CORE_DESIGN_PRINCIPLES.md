@@ -252,12 +252,19 @@ type MockDiscovery struct { ... }     // Testing implementation
 
 #### 1. **Minimal Interface Principle**
 ```go
-// ✅ Good: Focused, single-responsibility interface
+// ✅ Good: Focused, single-responsibility interface with context support
 type Logger interface {
+    // Basic logging methods
     Info(msg string, fields map[string]interface{})
     Error(msg string, fields map[string]interface{})
     Warn(msg string, fields map[string]interface{})
     Debug(msg string, fields map[string]interface{})
+
+    // Context-aware methods for distributed tracing and request correlation
+    InfoWithContext(ctx context.Context, msg string, fields map[string]interface{})
+    ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{})
+    WarnWithContext(ctx context.Context, msg string, fields map[string]interface{})
+    DebugWithContext(ctx context.Context, msg string, fields map[string]interface{})
 }
 
 // ❌ Bad: Bloated interface mixing concerns

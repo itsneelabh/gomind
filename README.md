@@ -494,7 +494,8 @@ import (
 
 // Run your workflow anytime
 ctx := context.Background()
-engine := orchestration.NewWorkflowEngine(discovery)
+stateStore := orchestration.NewRedisStateStore(discovery)
+engine := orchestration.NewWorkflowEngine(discovery, stateStore, logger)
 
 workflow, err := engine.ParseWorkflowYAML(yamlFile)
 if err != nil {

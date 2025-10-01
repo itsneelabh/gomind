@@ -151,7 +151,12 @@ func (o *AIOrchestrator) catalogRefreshLoop() {
 		case <-ticker.C:
 			if err := o.catalog.Refresh(o.ctx); err != nil {
 				// Log error but continue
-				fmt.Printf("Catalog refresh error: %v\n", err)
+				if o.logger != nil {
+					o.logger.Error("Catalog refresh error", map[string]interface{}{
+						"operation": "catalog_refresh",
+						"error":     err.Error(),
+					})
+				}
 			}
 		case <-o.ctx.Done():
 			return

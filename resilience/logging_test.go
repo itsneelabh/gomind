@@ -37,6 +37,23 @@ func (t *TestLogger) Debug(msg string, fields map[string]interface{}) {
 	t.logs = append(t.logs, LogEntry{Level: "DEBUG", Message: msg, Fields: fields})
 }
 
+// Context-aware logging methods
+func (t *TestLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	t.Info(msg, fields)
+}
+
+func (t *TestLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	t.Error(msg, fields)
+}
+
+func (t *TestLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	t.Warn(msg, fields)
+}
+
+func (t *TestLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	t.Debug(msg, fields)
+}
+
 func (t *TestLogger) GetLogsByOperation(operation string) []LogEntry {
 	var result []LogEntry
 	for _, log := range t.logs {

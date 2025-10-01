@@ -17,6 +17,7 @@ import (
 type WorkflowExecutor struct {
 	discovery core.Discovery
 	client    *WorkflowHTTPClient
+	logger    core.Logger // For structured logging
 }
 
 // WorkflowHTTPClient wraps HTTP client for service calls
