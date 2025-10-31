@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telemetry-example
+  namespace: gomind-examples
+  labels:
+    app: telemetry-example
+    component: demo
+    version: v1.0.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: telemetry-example
+  template:
+    metadata:
+      labels:
+        app: telemetry-example
+        component: demo
+        version: v1.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: telemetry-example
+        image: telemetry-example:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        # Telemetry Configuration
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4318"
+        - name: GOMIND_TELEMETRY_PROFILE
+          value: "production"
+        # Logging Configuration
+        - name: GOMIND_LOG_LEVEL
+          value: "info"
+        - name: GOMIND_LOG_FORMAT
+          value: "json"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telemetry-example-service
+  namespace: gomind-examples
+  labels:
+    app: telemetry-example
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: telemetry-example
+
+---
+# Optional: ServiceMonitor for Prometheus Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: telemetry-example
+  namespace: gomind-examples
+  labels:
+    app: telemetry-example
+spec:
+  selector:
+    matchLabels:
+      app: telemetry-example
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
