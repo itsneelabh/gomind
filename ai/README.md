@@ -6,6 +6,9 @@ Multi-provider LLM integration with automatic detection, universal compatibility
 
 - [🎯 What Does This Module Do?](#-what-does-this-module-do)
 - [🚀 Quick Start](#-quick-start)
+- [🏷️ Provider Aliases - The Clean Way](#️-provider-aliases---the-clean-way)
+- [🔗 Automatic Failover with Chain Client](#-automatic-failover-with-chain-client)
+- [🎨 Model Aliases - Portable Model Names](#-model-aliases---portable-model-names)
 - [🌍 Supported Providers](#-supported-providers)
 - [🧠 How It Works](#-how-it-works)
 - [📚 Core Concepts](#-core-concepts-explained)
@@ -98,6 +101,401 @@ fmt.Println(response.Content)
 
 For example, if you have `OPENAI_API_KEY` set, it uses OpenAI. If you have `GROQ_API_KEY` instead, it automatically configures the OpenAI provider to use Groq's endpoint. No code changes needed!
 
+## 🏷️ Provider Aliases - The Clean Way
+
+### Real-World Analogy: Email Addresses vs Phone Extensions
+
+Think about how email addresses work: `john@company.com` clearly identifies both the person (john) and the organization (company.com). Similarly, provider aliases like `openai.deepseek` clearly identify both the API compatibility (openai) and the specific service (deepseek).
+
+Without aliases, it's like everyone at your company sharing the same email address - chaos!
+
+### The Problem Provider Aliases Solve
+
+**Before (Manual Configuration - Messy):**
+```go
+// Setting up DeepSeek the old way
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),
+    ai.WithBaseURL("https://api.deepseek.com"),  // Have to remember this URL
+    ai.WithAPIKey(os.Getenv("DEEPSEEK_API_KEY")),
+    ai.WithModel("deepseek-reasoner"),  // Have to know model names
+)
+
+// Setting up Groq the old way
+client, _ := ai.NewClient(
+    ai.WithProvider("openai"),
+    ai.WithBaseURL("https://api.groq.com/openai/v1"),  // Different URL to remember
+    ai.WithAPIKey(os.Getenv("GROQ_API_KEY")),
+    ai.WithModel("llama-3.3-70b-versatile"),  // Different model names
+)
+```
+
+**After (Provider Aliases - Clean):**
+```go
+// DeepSeek with alias - clean and clear!
+client, _ := ai.NewClient(ai.WithProviderAlias("openai.deepseek"))
+
+// Groq with alias - just as simple!
+client, _ := ai.NewClient(ai.WithProviderAlias("openai.groq"))
+
+// xAI with alias
+client, _ := ai.NewClient(ai.WithProviderAlias("openai.xai"))
+
+// Together AI with alias
+client, _ := ai.NewClient(ai.WithProviderAlias("openai.together"))
+```
+
+### What Happens Behind the Scenes?
+
+When you use `WithProviderAlias("openai.deepseek")`, the framework automatically:
+
+1. **Picks the right API key**: Looks for `DEEPSEEK_API_KEY` environment variable
+2. **Sets the correct endpoint**: Uses `https://api.deepseek.com` (no need to remember!)
+3. **Configures defaults**: Sets up sensible timeouts and retry policies
+4. **Enables model aliases**: So you can use "smart" instead of "deepseek-reasoner"
+
+It's like speed dial for your phone - instead of remembering full phone numbers, just press one button!
+
+### Supported Provider Aliases
+
+| Alias | What It Is | Environment Variables | Auto-Configured URL |
+|-------|-----------|----------------------|-------------------|
+| `"openai"` | Vanilla OpenAI | `OPENAI_API_KEY` | `https://api.openai.com/v1` |
+| `"openai.deepseek"` | DeepSeek (reasoning) | `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` |
+| `"openai.groq"` | Groq (ultra-fast) | `GROQ_API_KEY`, `GROQ_BASE_URL` | `https://api.groq.com/openai/v1` |
+| `"openai.xai"` | xAI Grok | `XAI_API_KEY`, `XAI_BASE_URL` | `https://api.x.ai/v1` |
+| `"openai.qwen"` | Qwen (Alibaba) | `QWEN_API_KEY`, `QWEN_BASE_URL` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| `"openai.together"` | Together AI | `TOGETHER_API_KEY`, `TOGETHER_BASE_URL` | `https://api.together.xyz/v1` |
+| `"openai.ollama"` | Local Ollama | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` |
+
+### Flexibility: Override URLs Without Code Changes
+
+Need to use a different endpoint (regional, proxy, or testing)? Just set an environment variable!
+
+```bash
+# Production: Use default DeepSeek URL
+export DEEPSEEK_API_KEY=sk-production-key
+
+# Testing: Override to use EU endpoint (no code changes!)
+export DEEPSEEK_BASE_URL=https://eu.api.deepseek.com
+export DEEPSEEK_API_KEY=sk-test-key
+
+# Corporate: Route through internal proxy
+export GROQ_BASE_URL=https://ai-proxy.company.internal/groq
+export GROQ_API_KEY=internal-key
+```
+
+Your code stays exactly the same:
+```go
+// This works with any DEEPSEEK_BASE_URL you set!
+client, _ := ai.NewClient(ai.WithProviderAlias("openai.deepseek"))
+```
+
+### Using Multiple Providers Simultaneously
+
+**The Old Problem:** You couldn't use OpenAI and DeepSeek at the same time because they both fought over `OPENAI_API_KEY`.
+
+**The New Solution:** Each alias has its own namespace!
+
+```go
+// All three can coexist happily!
+openaiClient, _ := ai.NewClient(ai.WithProviderAlias("openai"))
+deepseekClient, _ := ai.NewClient(ai.WithProviderAlias("openai.deepseek"))
+groqClient, _ := ai.NewClient(ai.WithProviderAlias("openai.groq"))
+
+// Use different providers for different tasks
+summary, _ := openaiClient.GenerateResponse(ctx, "Summarize this...", nil)
+reasoning, _ := deepseekClient.GenerateResponse(ctx, "Analyze this complex problem...", nil)
+fastResponse, _ := groqClient.GenerateResponse(ctx, "Quick answer please...", nil)
+```
+
+**Environment Setup:**
+```bash
+# All three configured simultaneously - no conflicts!
+export OPENAI_API_KEY=sk-openai-production
+export DEEPSEEK_API_KEY=sk-deepseek-key
+export GROQ_API_KEY=gsk-groq-key
+```
+
+## 🔗 Automatic Failover with Chain Client
+
+### Real-World Analogy: Your Phone's Emergency Contacts
+
+When you dial 911, if one emergency service doesn't answer, the system automatically tries the next one. That's exactly what Chain Client does with AI providers!
+
+### The Problem: Manual Failover is Tedious
+
+**Before (Manual Failover - Repetitive Code):**
+```go
+// You had to write all this error handling yourself!
+response, err := primaryClient.GenerateResponse(ctx, prompt, nil)
+if err != nil {
+    log.Warn("Primary failed, trying fallback...")
+    response, err = fallbackClient.GenerateResponse(ctx, prompt, nil)
+    if err != nil {
+        log.Warn("Fallback failed, trying emergency...")
+        response, err = emergencyClient.GenerateResponse(ctx, prompt, nil)
+        if err != nil {
+            return nil, fmt.Errorf("all providers failed: %w", err)
+        }
+    }
+}
+```
+
+**After (Automatic Failover - One Line):**
+```go
+// Chain Client handles all the failover automatically!
+client, _ := ai.NewChainClient(
+    ai.WithProviderChain("openai", "openai.deepseek", "openai.groq"),
+)
+
+// Just make the call - failover happens automatically
+response, err := client.GenerateResponse(ctx, prompt, nil)
+// Tries: OpenAI → DeepSeek → Groq (stops at first success)
+```
+
+### How It Works
+
+Think of Chain Client as having multiple backup generators:
+
+1. **Primary Provider (OpenAI)**: Try this first
+2. **First Backup (DeepSeek)**: If primary fails, try this
+3. **Emergency Backup (Groq)**: If everything else fails, try this
+
+The chain stops at the **first successful response** - no wasted API calls!
+
+### Complete Example: Building a Resilient AI System
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "github.com/itsneelabh/gomind/ai"
+    _ "github.com/itsneelabh/gomind/ai/providers/openai"
+    _ "github.com/itsneelabh/gomind/ai/providers/anthropic"
+)
+
+func main() {
+    // Create a resilient AI client with 3 fallback levels
+    client, err := ai.NewChainClient(
+        ai.WithProviderChain(
+            "openai",              // Primary: Best quality
+            "openai.deepseek",     // Backup: Good reasoning
+            "anthropic",           // Emergency: Different provider entirely
+        ),
+        // ai.WithChainLogger(logger),  // Optional: Add custom logger
+    )
+    if err != nil {
+        log.Fatal("Failed to create chain client:", err)
+    }
+
+    // Use it just like any other client!
+    response, err := client.GenerateResponse(
+        context.Background(),
+        "Explain quantum computing in simple terms",
+        nil,
+    )
+
+    if err != nil {
+        log.Fatal("All providers failed:", err)
+    }
+
+    log.Println(response.Content)
+}
+```
+
+**What Happens When You Run This:**
+
+| Scenario | What Chain Client Does |
+|----------|----------------------|
+| ✅ OpenAI works | Uses OpenAI, returns immediately (fastest) |
+| ⚠️ OpenAI down | Tries DeepSeek automatically, returns if it works |
+| 🚨 OpenAI + DeepSeek down | Tries Anthropic as last resort |
+| ❌ All providers down | Returns error with details from last attempt |
+
+### Environment Setup for Chain Client
+
+```bash
+# Set up API keys for each provider in the chain
+export OPENAI_API_KEY=sk-openai-production-key
+export DEEPSEEK_API_KEY=sk-deepseek-backup-key
+export ANTHROPIC_API_KEY=sk-ant-emergency-key
+
+# Optional: Override endpoints if needed
+export DEEPSEEK_BASE_URL=https://eu.api.deepseek.com
+```
+
+### Smart Failover: When NOT to Retry
+
+Chain Client is smart about errors:
+
+- **Retryable (tries next provider)**: Network errors, timeouts, server errors (5xx), rate limits
+- **Non-retryable (fails immediately)**: Invalid API key (401), bad request (400), content policy violations
+
+```go
+// If your API key is wrong, Chain Client won't waste time trying other providers
+response, err := client.GenerateResponse(ctx, prompt, nil)
+// Error: "Authentication failed (not retrying): invalid API key"
+```
+
+### Partial Chain: Some Providers Missing API Keys
+
+Chain Client is forgiving - if some providers aren't configured, it skips them gracefully:
+
+```bash
+# Only OpenAI and Groq configured (DeepSeek missing)
+export OPENAI_API_KEY=sk-xxx
+export GROQ_API_KEY=gsk-yyy
+# DEEPSEEK_API_KEY not set
+```
+
+```go
+// This still works! DeepSeek is skipped with a warning
+client, _ := ai.NewChainClient(
+    ai.WithProviderChain("openai", "openai.deepseek", "openai.groq"),
+)
+// Logs: "Provider not available (will skip in chain): openai.deepseek"
+// Effective chain: OpenAI → Groq
+```
+
+### Use Cases for Chain Client
+
+| Use Case | Primary | Backup | Emergency | Why? |
+|----------|---------|--------|-----------|------|
+| **Production API** | OpenAI (quality) | DeepSeek (reasoning) | Groq (speed) | Best quality first, fast fallback |
+| **Cost Optimization** | Groq (free tier) | DeepSeek (cheap) | OpenAI (expensive) | Use cheap first, OpenAI only if needed |
+| **Privacy-First** | Ollama (local) | Company LLM (private) | OpenAI (public) | Keep data local when possible |
+| **Global App** | Regional OpenAI | US OpenAI | Anthropic | Use nearest region, fallback to others |
+
+## 🎨 Model Aliases - Portable Model Names
+
+### Real-World Analogy: T-Shirt Sizes
+
+When you buy a t-shirt, you don't say "I want a garment measuring 22 inches across the chest" - you say "Size Medium." Similarly, instead of remembering "llama-3.3-70b-versatile" or "deepseek-reasoner," just say "smart"!
+
+### The Problem: Every Provider Has Different Model Names
+
+**Without Model Aliases:**
+```go
+// Using different providers means remembering different model names
+openai, _ := ai.NewClient(
+    ai.WithProviderAlias("openai"),
+    ai.WithModel("gpt-4"),  // OpenAI's name for smart model
+)
+
+deepseek, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.deepseek"),
+    ai.WithModel("deepseek-reasoner"),  // DeepSeek's name for smart model
+)
+
+groq, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.groq"),
+    ai.WithModel("mixtral-8x7b-32768"),  // Groq's name for smart model
+)
+```
+
+**With Model Aliases:**
+```go
+// Same model alias works across all providers!
+openai, _ := ai.NewClient(
+    ai.WithProviderAlias("openai"),
+    ai.WithModel("smart"),  // Automatically uses gpt-4
+)
+
+deepseek, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.deepseek"),
+    ai.WithModel("smart"),  // Automatically uses deepseek-reasoner
+)
+
+groq, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.groq"),
+    ai.WithModel("smart"),  // Automatically uses mixtral-8x7b-32768
+)
+```
+
+### Standard Model Aliases
+
+| Alias | Purpose | OpenAI | DeepSeek | Groq | Together | xAI | Qwen |
+|-------|---------|--------|----------|------|----------|-----|------|
+| **`fast`** | Quick responses, lower cost | `gpt-3.5-turbo` | `deepseek-chat` | `llama-3.3-70b-versatile` | `meta-llama/Llama-3-8b-chat-hf` | `grok-2` | `qwen-turbo` |
+| **`smart`** | Best reasoning, higher quality | `gpt-4` | `deepseek-reasoner` | `mixtral-8x7b-32768` | `meta-llama/Llama-3-70b-chat-hf` | `grok-2` | `qwen-plus` |
+| **`code`** | Code generation & analysis | `gpt-4` | `deepseek-coder` | `llama-3.3-70b-versatile` | `deepseek-ai/deepseek-coder-33b-instruct` | `grok-2` | `qwen-plus` |
+| **`vision`** | Image understanding | `gpt-4-vision-preview` | _(not supported)_ | _(not supported)_ | _(not supported)_ | _(not supported)_ | _(not supported)_ |
+
+### Write Once, Switch Providers Anytime
+
+```go
+// Configuration function that works with ANY provider
+func createAIClient(provider string) (core.AIClient, error) {
+    return ai.NewClient(
+        ai.WithProviderAlias(provider),
+        ai.WithModel("smart"),  // Portable! Works with all providers
+    )
+}
+
+// Switch providers just by changing the argument!
+client, _ := createAIClient("openai")          // Uses gpt-4
+client, _ := createAIClient("openai.deepseek") // Uses deepseek-reasoner
+client, _ := createAIClient("openai.groq")     // Uses mixtral-8x7b-32768
+
+// Your business logic never changes!
+response, _ := client.GenerateResponse(ctx, "Analyze this data...", nil)
+```
+
+### When to Use Model Aliases vs Explicit Names
+
+**Use Aliases When:**
+- ✅ You want portable code that works across providers
+- ✅ You're building a framework or library
+- ✅ You want to switch providers easily (dev → prod, testing different providers)
+- ✅ You don't care about specific model versions
+
+**Use Explicit Names When:**
+- 🎯 You need a specific model for compliance/certification reasons
+- 🎯 You're fine-tuning and need exact model control
+- 🎯 You need features only available in specific models
+- 🎯 You're comparing model performance scientifically
+
+```go
+// Alias for flexibility
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai"),
+    ai.WithModel("smart"),  // Will use whatever OpenAI considers "smart"
+)
+
+// Explicit for control
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai"),
+    ai.WithModel("gpt-4-0125-preview"),  // Exactly this version
+)
+```
+
+### Combining All Three Features
+
+Here's how provider aliases, chain client, and model aliases work together beautifully:
+
+```go
+// Create a resilient multi-provider system with portable model names!
+client, _ := ai.NewChainClient(
+    ai.WithProviderChain(
+        "openai",           // Primary: Use OpenAI's "smart" model (gpt-4)
+        "openai.deepseek",  // Backup: Use DeepSeek's "smart" model (deepseek-reasoner)
+        "openai.groq",      // Emergency: Use Groq's "smart" model (mixtral-8x7b-32768)
+    ),
+)
+
+// Use the same model alias, but it adapts to whatever provider succeeds!
+response, _ := client.GenerateResponse(
+    context.Background(),
+    "Complex reasoning task...",
+    &core.AIOptions{
+        Model: "smart",  // Portable across all providers in the chain!
+    },
+)
+```
+
 ## 🌍 Supported Providers
 
 ### Universal OpenAI-Compatible Provider
@@ -171,13 +569,14 @@ When you use `ai.NewClient()` without specifying a provider, the module checks f
 1. **OpenAI** (priority: 100) - Checks for `OPENAI_API_KEY`
 2. **Groq** (priority: 95) - Checks for `GROQ_API_KEY`, configures endpoint automatically
 3. **DeepSeek** (priority: 90) - Checks for `DEEPSEEK_API_KEY`, configures endpoint automatically
-4. **xAI Grok** (priority: 85) - Checks for `XAI_API_KEY`, configures endpoint automatically  
+4. **xAI Grok** (priority: 85) - Checks for `XAI_API_KEY`, configures endpoint automatically
 5. **Qwen** (priority: 80) - Checks for `QWEN_API_KEY`, configures endpoint automatically
-6. **Anthropic** (priority: 80) - Checks for `ANTHROPIC_API_KEY` (native implementation)
-7. **Gemini** (priority: 70) - Checks for `GEMINI_API_KEY` or `GOOGLE_API_KEY`
-8. **AWS Bedrock** (priority: 60+) - Checks for AWS credentials, IAM roles, or profiles
+6. **Together AI** (priority: 75) - Checks for `TOGETHER_API_KEY`, configures endpoint automatically
+7. **Anthropic** (priority: 80) - Checks for `ANTHROPIC_API_KEY` (native implementation)
+8. **Gemini** (priority: 70) - Checks for `GEMINI_API_KEY` or `GOOGLE_API_KEY`
+9. **AWS Bedrock** (priority: 60+) - Checks for AWS credentials, IAM roles, or profiles
    - Gets +10 priority when running on AWS infrastructure (EC2/ECS/Lambda)
-9. **Ollama** (priority: 50) - Checks if local Ollama is running at `localhost:11434`
+10. **Ollama** (priority: 50) - Checks if local Ollama is running at `localhost:11434`
 
 ### Environment Variable Configuration
 
@@ -346,6 +745,30 @@ client, _ := ai.NewClient(
 
 ### Method 3: Multi-Provider Strategy (Advanced)
 
+**🆕 NEW: Use Chain Client for automatic failover!** (Recommended)
+
+The easiest way to use multiple providers is with Chain Client, which handles failover automatically:
+
+```go
+// Automatic failover - Chain Client handles everything!
+client, _ := ai.NewChainClient(
+    ai.WithProviderChain(
+        "openai",           // Primary
+        "openai.deepseek",  // Backup
+        "openai.groq",      // Emergency
+    ),
+)
+
+// Just use it - failover happens automatically!
+response, err := client.GenerateResponse(ctx, prompt, nil)
+```
+
+See the [Automatic Failover with Chain Client](#-automatic-failover-with-chain-client) section above for full details!
+
+---
+
+**Alternative: Manual Provider Management** (When you need fine-grained control)
+
 Use different providers for different purposes in your application:
 
 ```go
@@ -356,25 +779,15 @@ type AISystem struct {
 }
 
 func NewAISystem() *AISystem {
-    // Primary: OpenAI for general use
-    primary, _ := ai.NewClient(
-        ai.WithProvider("openai"),
-        ai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
-    )
-    
-    // Fallback: Another OpenAI-compatible service
-    fallback, _ := ai.NewClient(
-        ai.WithProvider("openai"),
-        ai.WithBaseURL("https://api.groq.com/openai/v1"),
-        ai.WithAPIKey(os.Getenv("GROQ_API_KEY")),
-    )
-    
-    // Local: For sensitive data
-    local, _ := ai.NewClient(
-        ai.WithProvider("openai"),
-        ai.WithBaseURL("http://localhost:11434/v1"),
-    )
-    
+    // Primary: OpenAI for general use (using alias - cleaner!)
+    primary, _ := ai.NewClient(ai.WithProviderAlias("openai"))
+
+    // Fallback: Groq for speed (using alias!)
+    fallback, _ := ai.NewClient(ai.WithProviderAlias("openai.groq"))
+
+    // Local: Ollama for sensitive data (using alias!)
+    local, _ := ai.NewClient(ai.WithProviderAlias("openai.ollama"))
+
     return &AISystem{primary, fallback, local}
 }
 
@@ -383,17 +796,21 @@ func (s *AISystem) Process(ctx context.Context, prompt string, sensitive bool) (
         // Use local model for sensitive data
         return s.local.GenerateResponse(ctx, prompt, nil)
     }
-    
+
     // Try primary first
     response, err := s.primary.GenerateResponse(ctx, prompt, nil)
     if err != nil {
-        // Fallback on error
+        // Manual fallback on error
         return s.fallback.GenerateResponse(ctx, prompt, nil)
     }
-    
+
     return response, nil
 }
 ```
+
+**When to use Manual vs Chain Client:**
+- **Use Chain Client** when you want automatic failover for the same task
+- **Use Manual** when different providers serve different purposes (sensitive data vs public, different regions, etc.)
 
 ## 🔧 Provider Configuration
 
@@ -407,12 +824,26 @@ export OPENAI_API_KEY=sk-...          # OpenAI
 export ANTHROPIC_API_KEY=sk-ant-...   # Anthropic Claude
 export GEMINI_API_KEY=...             # Google Gemini
 
-# OpenAI-compatible services (auto-configured with the universal provider)
-export GROQ_API_KEY=gsk-...           # Automatically configures Groq endpoint
-export DEEPSEEK_API_KEY=...           # Automatically configures DeepSeek endpoint
-export XAI_API_KEY=...                # Automatically configures xAI endpoint
+# 🆕 OpenAI-compatible services with provider aliases (recommended!)
+# Each gets its own namespace - no conflicts!
+export DEEPSEEK_API_KEY=sk-...        # DeepSeek reasoning models
+export DEEPSEEK_BASE_URL=https://...  # Optional: Override endpoint
 
-# Custom OpenAI-compatible endpoint
+export GROQ_API_KEY=gsk-...           # Groq ultra-fast inference
+export GROQ_BASE_URL=https://...      # Optional: Override endpoint
+
+export XAI_API_KEY=xai-...            # xAI Grok models
+export XAI_BASE_URL=https://...       # Optional: Override endpoint
+
+export QWEN_API_KEY=...               # Qwen (Alibaba) models
+export QWEN_BASE_URL=https://...      # Optional: Override endpoint
+
+export TOGETHER_API_KEY=...           # Together AI models
+export TOGETHER_BASE_URL=https://...  # Optional: Override endpoint
+
+export OLLAMA_BASE_URL=http://localhost:11434/v1  # Local Ollama
+
+# Custom OpenAI-compatible endpoint (old method - still works)
 export OPENAI_BASE_URL=https://llm.company.internal/v1
 export OPENAI_API_KEY=internal-key
 
@@ -423,19 +854,29 @@ export AWS_SECRET_ACCESS_KEY=...         # or use IAM role/profile
 export AWS_PROFILE=...                   # Alternative: use named profile
 ```
 
+**🎯 Pro Tip:** The `*_BASE_URL` environment variables let you override endpoints without code changes! Perfect for:
+- **Regional endpoints**: `DEEPSEEK_BASE_URL=https://eu.api.deepseek.com`
+- **Corporate proxies**: `GROQ_BASE_URL=https://ai-proxy.company.internal/groq`
+- **Testing environments**: `OPENAI_BASE_URL=https://test.openai.com`
+- **Remote Ollama**: `OLLAMA_BASE_URL=http://gpu-server.local:11434/v1`
+
 ### Configuration Options - Fine Control
 
 All configuration options available when creating a client:
 
 ```go
 client, _ := ai.NewClient(
-    // Provider selection
-    ai.WithProvider("openai"),           // Which provider to use ("openai", "anthropic", "gemini", "auto")
-    ai.WithAPIKey("your-key"),          // API key for authentication
-    ai.WithBaseURL("https://..."),      // Custom endpoint (for OpenAI-compatible providers)
-    
+    // Provider selection (choose ONE of these methods):
+    ai.WithProvider("openai"),           // Method 1: Base provider ("openai", "anthropic", "gemini", "auto")
+    // OR
+    ai.WithProviderAlias("openai.groq"), // Method 2: 🆕 Provider alias (replaces WithProvider + WithBaseURL)
+
+    // Authentication
+    ai.WithAPIKey("your-key"),          // API key (optional with aliases - can use env vars)
+    ai.WithBaseURL("https://..."),      // Custom endpoint (rarely needed with aliases)
+
     // Model configuration
-    ai.WithModel("gpt-4"),               // Model to use (provider-specific)
+    ai.WithModel("gpt-4"),               // Model to use (provider-specific OR use alias like "smart")
     ai.WithTemperature(0.7),            // Creativity level (0.0 = focused, 1.0 = creative)
     ai.WithMaxTokens(2000),             // Maximum tokens in response
     

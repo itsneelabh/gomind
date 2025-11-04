@@ -1,33 +1,32 @@
 # API Reference
 
-Complete reference for all GoMind functions and types.
+A comprehensive guide to GoMind's APIs with practical examples and best practices.
 
 ## Quick Navigation
 
-**Most Used:**
-- [NewFramework](#newframework) - Start your component
-- [NewBaseAgent](#newbaseagent) - Create an agent
-- [NewTool](#newtool) - Create a tool
-- [NewAIAgent](#newaiagent) - Create an AI-powered agent
-- [RegisterCapability](#registercapability) - Add capabilities
+**Getting Started:**
+- [NewFramework](#newframework) - Bootstrap your component with the framework
+- [NewBaseAgent](#newbaseagent) - Create agents that discover and orchestrate
+- [NewTool](#newtool) - Build tools that provide specific capabilities
+- [NewAIAgent](#newaiagent) - Create AI-powered orchestration agents
 
 **By Module:**
-- [Core](#core-module) - Foundation types and interfaces
-- [AI](#ai-module) - AI providers and clients  
-- [Resilience](#resilience-module) - Circuit breakers and retries
-- [Telemetry](#telemetry-module) - Metrics and observability
+- [Core](#core-module) - Foundation types and component lifecycle
+- [AI](#ai-module) - AI provider integration and intelligent agents
+- [Resilience](#resilience-module) - Circuit breakers and retry mechanisms
+- [Telemetry](#telemetry-module) - Metrics, tracing, and observability
 - [Orchestration](#orchestration-module) - Multi-agent coordination
-- [UI](#ui-module) - Chat interfaces and transports
+- [UI](#ui-module) - Chat interfaces and web transports
 
 ---
 
 ## Core Module
 
-Foundation types that every component uses.
+The foundation of GoMind - components, discovery, and lifecycle management.
 
 ### Component Interface
 
-Every tool and agent implements this interface.
+Every GoMind component (tools and agents) implements this interface, providing a consistent API for initialization, identification, and capability discovery.
 
 ```go
 type Component interface {
@@ -39,465 +38,561 @@ type Component interface {
 }
 ```
 
+**Why this matters:** This unified interface allows the framework to manage any component type consistently, whether it's a simple tool or complex orchestration agent.
+
 **Example:**
 ```go
-// Every component has these methods
-component.Initialize(ctx)           // Start it up
-id := component.GetID()             // "agent-abc123"
-name := component.GetName()         // "calculator"
-caps := component.GetCapabilities() // [Capability{Name: "add", ...}]
-typ := component.GetType()          // ComponentTypeTool or ComponentTypeAgent
+// Any component can be queried uniformly
+func inspectComponent(comp core.Component) {
+    fmt.Printf("Component: %s (ID: %s)\n", comp.GetName(), comp.GetID())
+    fmt.Printf("Type: %s\n", comp.GetType()) // "agent" or "tool"
+
+    caps := comp.GetCapabilities()
+    fmt.Printf("Capabilities (%d):\n", len(caps))
+    for _, cap := range caps {
+        fmt.Printf("  - %s: %s\n", cap.Name, cap.Description)
+    }
+}
 ```
 
 ### NewBaseAgent
 
-Creates an agent that can discover and coordinate other components.
+Creates an agent - an active component that can discover and orchestrate other services. Agents are the "brains" of your system, capable of finding tools and other agents to accomplish complex tasks.
 
 ```go
 func NewBaseAgent(name string) *BaseAgent
 func NewBaseAgentWithConfig(config *Config) *BaseAgent
 ```
 
-Agents are active - they find tools and agents and make them work together.
+**When to use agents vs tools:**
+- **Use an Agent when:** You need to discover services, coordinate multiple components, or build orchestrators
+- **Use a Tool when:** You're providing a specific capability that others will use
 
-**Example:**
+**Example - Simple Agent:**
 ```go
-// Simple agent
-agent := core.NewBaseAgent("orchestrator")
+// Quick start with minimal config
+agent := core.NewBaseAgent("data-processor")
 
-// Agent with configuration  
+// Agent can discover other services (tools can't!)
+services, _ := agent.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeTool,
+    Capabilities: []string{"database"},
+})
+
+agent.Initialize(ctx)
+agent.Start(ctx, 8080)
+```
+
+**Example - Production Agent:**
+```go
+// Full configuration for production
 config := core.NewConfig(
     core.WithName("orchestrator"),
     core.WithPort(8080),
-    core.WithRedisURL("redis://localhost:6379"),
+    core.WithRedisURL("redis://redis:6379"),      // Enable discovery
+    core.WithLogLevel("info"),
+    core.WithEnableMetrics(true),
 )
+
 agent := core.NewBaseAgentWithConfig(config)
 
-// Initialize and start
-ctx := context.Background()
-err := agent.Initialize(ctx)
-err = agent.Start(ctx, 8080)
+// Register what this agent can do
+agent.RegisterCapability(core.Capability{
+    Name:        "orchestrate",
+    Description: "Coordinate multiple services to complete tasks",
+    Handler: func(w http.ResponseWriter, r *http.Request) {
+        // Handler implementation
+    },
+})
+
+// Initialize connects to Redis, sets up telemetry, etc.
+if err := agent.Initialize(ctx); err != nil {
+    log.Fatal("Failed to initialize:", err)
+}
+
+// Start begins serving HTTP requests
+if err := agent.Start(ctx, 8080); err != nil {
+    log.Fatal("Failed to start:", err)
+}
 ```
 
 ### NewTool
 
-Creates a tool that provides capabilities but cannot discover other components.
+Creates a tool - a passive component that provides specific capabilities. Tools are discovered and used by agents but cannot discover other components themselves.
 
 ```go
 func NewTool(name string) *BaseTool
 func NewToolWithConfig(config *Config) *BaseTool
 ```
 
-Tools are passive - they do work but can't discover other components.
+**Tools are perfect for:**
+- Microservices that perform specific tasks
+- API wrappers (weather, database, external services)
+- Stateless functions exposed as services
+- Any capability that doesn't need orchestration
 
-**Example:**
+**Example - Weather Tool:**
 ```go
-// Create a tool
-calculator := core.NewTool("calculator")
+// Create a specialized tool
+weatherTool := core.NewTool("weather-service")
 
-// Add what it can do
-calculator.RegisterCapability(core.Capability{
-    Name:        "add",
-    Description: "Add two numbers",
+// Define what it can do
+weatherTool.RegisterCapability(core.Capability{
+    Name:        "get_current_weather",
+    Description: "Get current weather for any city",
+    Endpoint:    "/api/weather/current",
     Handler: func(w http.ResponseWriter, r *http.Request) {
-        var params struct {
-            A float64 `json:"a"`
-            B float64 `json:"b"`
+        var req struct {
+            City string `json:"city"`
         }
-        json.NewDecoder(r.Body).Decode(&params)
-        
-        result := params.A + params.B
-        
+        json.NewDecoder(r.Body).Decode(&req)
+
+        weather := fetchWeatherData(req.City)
+
         w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]float64{
-            "result": result,
-        })
+        json.NewEncoder(w).Encode(weather)
     },
 })
 
-// Initialize and start
-calculator.Initialize(ctx)
-calculator.Start(ctx, 8081)
+// Tools still need initialization and startup
+weatherTool.Initialize(ctx)
+weatherTool.Start(ctx, 8081) // Different port from agents
 ```
+
+**Key differences between Agents and Tools:**
+
+| Feature | Agent | Tool |
+|---------|-------|------|
+| Can discover services | ✅ Yes | ❌ No |
+| Can be discovered | ✅ Yes | ✅ Yes |
+| Has HTTP server | ✅ Yes | ✅ Yes |
+| Typical use case | Orchestrator, Router | Microservice, API |
+| Complexity | Higher | Lower |
 
 ### Discover
 
-Find components in the system. Only agents can discover - tools cannot.
+**Agent-only capability** for finding components in your system. This is how agents build a dynamic picture of available services.
 
 ```go
 func (a *BaseAgent) Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error)
 ```
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `ctx` | `context.Context` | Request context |
-| `filter` | `DiscoveryFilter` | What to look for |
+**DiscoveryFilter fields:**
+- `Type` - Filter by ComponentType (agent/tool)
+- `Capabilities` - Required capability names
+- `Name` - Exact service name match
+- `Metadata` - Custom key-value filters
 
-**Example:**
+**Example - Smart Service Discovery:**
 ```go
-// Find all calculator tools
-services, err := agent.Discover(ctx, core.DiscoveryFilter{
-    Type:         core.ComponentTypeTool,
-    Capabilities: []string{"calculate"},
+// Find all database tools
+dbTools, err := agent.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeTool,
+    Capabilities: []string{"database"},
 })
 
-// Find tools in a specific region
-services, err := agent.Discover(ctx, core.DiscoveryFilter{
-    Metadata: map[string]interface{}{"region": "us-east"},
+// Find services in specific region (using metadata)
+regionalServices, err := agent.Discover(ctx, core.DiscoveryFilter{
+    Metadata: map[string]interface{}{
+        "region": "us-west",
+        "environment": "production",
+    },
 })
 
-// Use discovered services
-for _, service := range services {
-    fmt.Printf("Found: %s at %s\n", service.Name, service.Address)
-}
+// Find any service that can translate
+translators, err := agent.Discover(ctx, core.DiscoveryFilter{
+    Capabilities: []string{"translate"},
+})
+
+// Load balance across discovered services
+service := translators[rand.Intn(len(translators))]
+response, err := http.Post(service.Address, "application/json", payload)
 ```
+
+**Pro tip:** Discovery results are cached for 5 minutes by default to reduce Redis load. Use `WithDiscoveryCacheEnabled(false)` for real-time discovery in development.
 
 ### RegisterCapability
 
-Add a capability to any component.
+Add capabilities to any component. This is how you define what your component can do.
 
 ```go
 func (c *BaseAgent) RegisterCapability(cap Capability)
 func (c *BaseTool) RegisterCapability(cap Capability)
 ```
 
-**Example:**
+**Capability structure:**
 ```go
-tool.RegisterCapability(core.Capability{
-    Name:        "send_email",
-    Description: "Send an email message",
-    Endpoint:    "/api/email",
+type Capability struct {
+    Name        string           // Unique identifier
+    Description string           // Human-readable description
+    Endpoint    string           // HTTP endpoint path
+    InputTypes  []string         // Accepted content types
+    OutputTypes []string         // Response content types
+    Handler     http.HandlerFunc // HTTP handler function
+}
+```
+
+**Example - Multi-capability Tool:**
+```go
+calculator := core.NewTool("calculator")
+
+// Basic math operations
+calculator.RegisterCapability(core.Capability{
+    Name:        "add",
+    Description: "Add two numbers",
+    Endpoint:    "/api/add",
     InputTypes:  []string{"application/json"},
     OutputTypes: []string{"application/json"},
-    Handler: func(w http.ResponseWriter, r *http.Request) {
-        // Parse email request, send email, return response
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{
-            "status": "sent",
-        })
-    },
+    Handler:     handleAdd,
+})
+
+calculator.RegisterCapability(core.Capability{
+    Name:        "multiply",
+    Description: "Multiply two numbers",
+    Endpoint:    "/api/multiply",
+    InputTypes:  []string{"application/json"},
+    OutputTypes: []string{"application/json"},
+    Handler:     handleMultiply,
+})
+
+// Advanced operation
+calculator.RegisterCapability(core.Capability{
+    Name:        "solve_equation",
+    Description: "Solve algebraic equations",
+    Endpoint:    "/api/solve",
+    InputTypes:  []string{"application/json", "text/plain"},
+    OutputTypes: []string{"application/json"},
+    Handler:     handleSolveEquation,
 })
 ```
 
-### Types
+### Component Lifecycle Management
 
-#### ServiceInfo
-
-Describes a component in the system.
+Every component follows a three-phase lifecycle: Initialize → Start → Stop/Shutdown. Understanding this lifecycle is crucial for building robust services.
 
 ```go
-type ServiceInfo struct {
-    ID           string                 `json:"id"`
-    Name         string                 `json:"name"`
-    Type         ComponentType          `json:"type"`
-    Description  string                 `json:"description"`
-    Address      string                 `json:"address"`
-    Port         int                    `json:"port"`
-    Capabilities []Capability           `json:"capabilities"`
-    Metadata     map[string]interface{} `json:"metadata"`
-    Health       HealthStatus           `json:"health"`
-    LastSeen     time.Time              `json:"last_seen"`
-}
+// Initialize - Connect to dependencies, load config
+func (c *Component) Initialize(ctx context.Context) error
+
+// Start - Begin serving HTTP requests
+func (c *Component) Start(ctx context.Context, port int) error
+
+// Stop/Shutdown - Graceful shutdown with timeout
+func (c *Component) Stop(ctx context.Context) error     // Agents
+func (c *Component) Shutdown(ctx context.Context) error  // Tools
 ```
 
-#### DiscoveryFilter
+**Lifecycle best practices:**
 
-Filter for finding components.
+1. **Initialize Phase** - One-time setup
+   - Connect to databases
+   - Load configuration
+   - Set up telemetry
+   - Register with discovery
 
+2. **Start Phase** - Begin operations
+   - Start HTTP server
+   - Begin health checks
+   - Accept incoming requests
+
+3. **Stop Phase** - Clean shutdown
+   - Stop accepting new requests
+   - Wait for in-flight requests
+   - Unregister from discovery
+   - Close connections
+
+**Example - Production Lifecycle:**
 ```go
-type DiscoveryFilter struct {
-    Type         ComponentType          `json:"type,omitempty"`
-    Capabilities []string               `json:"capabilities,omitempty"`
-    Name         string                 `json:"name,omitempty"`
-    Metadata     map[string]interface{} `json:"metadata,omitempty"`
-}
-```
+func main() {
+    ctx := context.Background()
 
-#### Capability
+    // Create and configure
+    agent := core.NewBaseAgent("my-service")
+    agent.RegisterCapability(/* ... */)
 
-Represents something a component can do.
+    // Initialize (connects to Redis, etc.)
+    if err := agent.Initialize(ctx); err != nil {
+        log.Fatal("Initialization failed:", err)
+    }
 
-```go
-type Capability struct {
-    Name        string           `json:"name"`
-    Description string           `json:"description"`
-    Endpoint    string           `json:"endpoint"`
-    InputTypes  []string         `json:"input_types"`
-    OutputTypes []string         `json:"output_types"`
-    Handler     http.HandlerFunc `json:"-"`
+    // Start in goroutine
+    errChan := make(chan error, 1)
+    go func() {
+        if err := agent.Start(ctx, 8080); err != nil {
+            errChan <- err
+        }
+    }()
+
+    // Wait for shutdown signal
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+    select {
+    case <-sigChan:
+        log.Info("Received shutdown signal")
+    case err := <-errChan:
+        log.Error("Server error:", err)
+    }
+
+    // Graceful shutdown with timeout
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    if err := agent.Stop(shutdownCtx); err != nil {
+        log.Error("Graceful shutdown failed:", err)
+        os.Exit(1)
+    }
+
+    log.Info("Shutdown complete")
 }
 ```
 
 ### NewFramework
 
-Start your component with the framework.
+The main entry point for running GoMind components. The framework handles all the complex setup - discovery, telemetry, configuration - so you can focus on your business logic.
 
 ```go
 func NewFramework(component HTTPComponent, opts ...Option) (*Framework, error)
 ```
 
-This is the main entry point. Create a framework, add options, and run. Accepts any HTTPComponent (both Tools and Agents implement this interface).
+**Why use the framework:**
+- Automatic configuration from environment variables
+- Built-in health checks and metrics
+- Graceful shutdown handling
+- Service discovery registration
+- Standardized logging
 
-**Configuration Options:**
-
-| Option | Description | Example |
-|--------|-------------|---------| 
-| `WithName(name)` | Set component name | `"calculator"` |
-| `WithPort(port)` | Set HTTP port | `8080` |
-| `WithAddress(addr)` | Set bind address | `"0.0.0.0"` |
-| `WithRedisURL(url)` | Enable Redis discovery | `"redis://localhost:6379"` |
-| `WithDiscovery(discovery)` | Set custom discovery | `NewMockDiscovery()` |
-| `WithAI(client)` | Add AI capabilities | `aiClient` |
-| `WithTelemetry(telemetry)` | Add telemetry | `telemetryProvider` |
-| `WithLogLevel(level)` | Set log level | `"info"` |
-| `WithCORSDefaults()` | Enable CORS | - |
-
-**Example:**
+**Example - Simple:**
 ```go
-// Simple - just run it
+// Minimal setup - just works!
+agent := core.NewBaseAgent("my-agent")
 framework, _ := core.NewFramework(agent)
 framework.Run(ctx)
+```
 
-// Production - with all features
-framework, _ := core.NewFramework(agent,
-    core.WithRedisURL("redis://localhost:6379"),
-    core.WithPort(8080),
+**Example - Production:**
+```go
+// Full production setup
+agent := createMyAgent()
+
+framework, err := core.NewFramework(agent,
+    // Discovery
+    core.WithRedisURL("redis://redis:6379"),
+
+    // Observability
+    core.WithTelemetry(true, "http://otel:4317"),
     core.WithLogLevel("info"),
+
+    // Networking
+    core.WithPort(8080),
     core.WithCORSDefaults(),
+
+    // Features
+    core.WithEnableMetrics(true),
+    core.WithEnableTracing(true),
 )
-framework.Run(ctx)
+
+if err != nil {
+    log.Fatal("Framework creation failed:", err)
+}
+
+// Run blocks until shutdown
+if err := framework.Run(ctx); err != nil {
+    log.Fatal("Framework run failed:", err)
+}
 ```
 
 ### Configuration
 
+GoMind's configuration system is designed for flexibility - use code, environment variables, or config files.
+
 #### NewConfig
 
-Create configuration for components.
+Create configuration programmatically with validation and defaults.
 
 ```go
 func NewConfig(options ...Option) (*Config, error)
 func DefaultConfig() *Config
 ```
 
-**Example:**
+**Configuration priority (highest to lowest):**
+1. Explicit options in code
+2. Environment variables
+3. Config file (if specified)
+4. Default values
+
+**Example - Different Configuration Styles:**
 ```go
+// 1. Code-based (explicit, testable)
 config := core.NewConfig(
-    core.WithName("my-agent"),
+    core.WithName("weather-service"),
     core.WithPort(8080),
-    core.WithRedisURL("redis://localhost:6379"),
-    core.WithDevelopmentMode(),
+    core.WithRedisDiscovery("redis://localhost:6379"),
+)
+
+// 2. Environment-based (12-factor app)
+// Set: GOMIND_NAME=weather-service
+// Set: GOMIND_PORT=8080
+// Set: REDIS_URL=redis://localhost:6379
+config := core.DefaultConfig() // Reads from env
+
+// 3. File-based (complex configs)
+config := core.NewConfig(
+    core.WithConfigFile("/etc/gomind/config.yaml"),
 )
 ```
 
-### Logging Configuration
+#### Key Configuration Options
 
-Control framework logging behavior through configuration options or environment variables.
-
-#### Configuration Options
-
+**Service Discovery:**
 ```go
-// Via code configuration
-framework, _ := core.NewFramework(component,
-    core.WithLogLevel("debug"),      // Set log level
-    core.WithLogFormat("json"),      // Set output format
-)
+// Enable Redis discovery
+WithRedisURL(url string)           // Redis connection
+WithRedisDiscovery(url string)     // Shorthand for Redis setup
+WithDiscoveryCacheEnabled(bool)    // Cache discovery results
+WithMockDiscovery(bool)            // Use mock for testing
 ```
 
-#### Environment Variables (Recommended for Containers)
+**AI Integration:**
+```go
+WithAI(enabled bool, model string)  // Enable AI with model
+WithOpenAIAPIKey(key string)        // Set OpenAI key
+WithAIModel(model string)           // Choose model (gpt-4, claude-3, etc.)
+WithMockAI(bool)                    // Use mock for testing
+```
 
-The framework automatically reads these environment variables at startup, making them ideal for container deployments:
+**Observability:**
+```go
+WithTelemetry(enabled bool, endpoint string)  // Enable telemetry
+WithEnableMetrics(bool)                       // Metrics only
+WithEnableTracing(bool)                       // Tracing only
+WithLogLevel(level string)                    // error, warn, info, debug
+WithLogFormat(format string)                  // json or text
+```
 
-| Variable | Values | Default | Description |
-|----------|--------|---------|-------------|
-| `GOMIND_LOG_LEVEL` | `error`, `warn`, `info`, `debug` | `info` | Minimum logging level (filters output) |
-| `GOMIND_LOG_FORMAT` | `json`, `text` | `json` | Output format |
-| `GOMIND_DEV_MODE` | `true`, `false` | `false` | Overrides logging to debug + text format |
+**Networking:**
+```go
+WithPort(port int)                  // HTTP port
+WithAddress(addr string)            // Bind address
+WithCORS(config CORSConfig)         // CORS settings
+WithCORSDefaults()                  // Permissive CORS for dev
+```
 
-**Important Notes:**
-- `GOMIND_DEV_MODE=true` overrides both level and format to `debug` and `text`
-- Log levels properly filter output - `error` only shows errors, `warn` shows warn+error, etc.
-- Default `info` level is recommended for production
+**Advanced:**
+```go
+WithMemoryProvider(provider string) // "inmemory" or "redis"
+WithCircuitBreaker(config)          // Resilience settings
+WithRetry(config)                   // Retry configuration
+WithKubernetes(discovery, leader)   // K8s integration
+WithDevelopmentMode()               // Debug logging, mock services
+```
 
-**Local Development:**
+### Logging
+
+GoMind provides structured logging with automatic context propagation. The framework automatically injects loggers into all components.
+
+**Log Levels (hierarchical):**
+- `error` - Critical errors only
+- `warn` - Warnings and errors
+- `info` - Normal operations (default)
+- `debug` - Detailed debugging information
+
+**Using the Logger:**
+```go
+// Every component gets a logger automatically
+func (t *MyTool) ProcessRequest(ctx context.Context, req Request) error {
+    // Structured logging with context
+    t.Logger.Info("Processing request", map[string]interface{}{
+        "request_id": req.ID,
+        "user_id":    req.UserID,
+        "action":     req.Action,
+    })
+
+    result, err := t.performAction(req)
+    if err != nil {
+        t.Logger.Error("Action failed", map[string]interface{}{
+            "error":      err.Error(),
+            "request_id": req.ID,
+            "duration":   time.Since(start).Milliseconds(),
+        })
+        return err
+    }
+
+    t.Logger.Debug("Action completed", map[string]interface{}{
+        "request_id": req.ID,
+        "result":     result,
+    })
+
+    return nil
+}
+```
+
+**Configuration via Environment:**
 ```bash
-# Enable debug logging to see framework internals
-export GOMIND_LOG_LEVEL=debug
+# Production
+export GOMIND_LOG_LEVEL=info
 export GOMIND_LOG_FORMAT=json
-go run main.go
+
+# Development
+export GOMIND_LOG_LEVEL=debug
+export GOMIND_LOG_FORMAT=text
+
+# Or use dev mode (sets debug + text automatically)
+export GOMIND_DEV_MODE=true
 ```
-
-**Kubernetes Deployment:**
-```yaml
-env:
-- name: GOMIND_LOG_LEVEL
-  value: "info"     # Change to "debug" for troubleshooting
-- name: GOMIND_LOG_FORMAT
-  value: "json"
-```
-
-**Docker Compose:**
-```yaml
-services:
-  my-service:
-    image: my-service:latest
-    environment:
-      - GOMIND_LOG_LEVEL=debug
-      - GOMIND_LOG_FORMAT=json
-```
-
-**Changing Log Level Without Restart (Kubernetes):**
-```bash
-# Enable debug mode
-kubectl set env deployment/my-service GOMIND_LOG_LEVEL=debug -n my-namespace
-
-# Watch the logs
-kubectl logs -f deployment/my-service -n my-namespace
-
-# Set back to info
-kubectl set env deployment/my-service GOMIND_LOG_LEVEL=info -n my-namespace
-```
-
-#### Log Levels Explained
-
-The framework implements proper log level filtering with a standard hierarchy:
-
-| Level | What Gets Logged | Use Case |
-|-------|------------------|----------|
-| `error` | Only Error messages | Production - minimal logging, only critical issues |
-| `warn` | Warn + Error messages | Production - standard monitoring |
-| `info` | Info + Warn + Error messages | Production default - normal operations |
-| `debug` | Debug + Info + Warn + Error | Development/troubleshooting - verbose |
-
-**Log Level Hierarchy:**
-```
-ERROR (highest severity)
-  ↑
-WARN
-  ↑
-INFO (default)
-  ↑
-DEBUG (most verbose)
-```
-
-**How It Works:**
-- Setting a level includes all higher severity levels
-- `GOMIND_LOG_LEVEL=error` → Only critical errors logged
-- `GOMIND_LOG_LEVEL=warn` → Warnings and errors logged
-- `GOMIND_LOG_LEVEL=info` → Info, warnings, and errors (default)
-- `GOMIND_LOG_LEVEL=debug` → Everything logged
-
-**Performance Note:**
-- Debug level is significantly more verbose
-- Early return prevents formatting costs for filtered messages
-- Use `debug` only for troubleshooting, not in production
-
-#### Output Formats
-
-**JSON (recommended for production):**
-
-Best for log aggregation systems (Elasticsearch, Splunk, CloudWatch, etc.).
-
-```json
-{"timestamp":"2025-01-29T10:30:45Z", "level":"INFO", "service":"weather-service", "component":"framework", "message":"HTTP server started", "port":8080}
-{"timestamp":"2025-01-29T10:30:46Z", "level":"DEBUG", "service":"weather-service", "component":"framework", "message":"Registering capability", "capability":"current_weather"}
-```
-
-**Text (human-readable for development):**
-
-Easier to read during local development.
-
-```
-2025-01-29 10:30:45 INFO [weather-service] HTTP server started port=8080
-2025-01-29 10:30:46 DEBUG [weather-service] Registering capability name=current_weather
-```
-
-#### What the Framework Logs
-
-The framework automatically logs important events at appropriate levels:
-
-**DEBUG level logs:**
-- Capability registration details
-- Discovery query results
-- Request routing decisions
-- Configuration loading steps
-- Heartbeat operations
-- Circuit breaker state changes
-- Detailed internal operations
-
-**INFO level logs:**
-- Service startup and shutdown
-- HTTP server start/stop
-- Redis connection established
-- Service registration success
-- Health check results
-- Normal operational events
-
-**WARN level logs:**
-- Configuration issues (non-fatal)
-- Retry attempts
-- Degraded performance
-- Resource constraints
-- Deprecated feature usage
-
-**ERROR level logs:**
-- Failed service connections
-- HTTP server errors
-- Registration failures
-- Discovery errors
-- Critical operational issues
-
-#### Using the Logger in Your Code
-
-Every component (Tool or Agent) automatically gets a logger injected. Use it for structured logging:
-
-```go
-// Debug - verbose details for troubleshooting
-tool.Logger.Debug("Cache lookup", map[string]interface{}{
-    "key":   "weather:nyc",
-    "found": true,
-})
-
-// Info - normal operational events
-tool.Logger.Info("Processing request", map[string]interface{}{
-    "method":   "POST",
-    "path":     "/api/weather",
-    "location": "New York",
-})
-
-// Warn - potential issues that aren't errors
-tool.Logger.Warn("Cache miss, fetching from API", map[string]interface{}{
-    "cache_key": "weather:nyc",
-    "fallback":  "api",
-})
-
-// Error - critical issues
-tool.Logger.Error("API call failed", map[string]interface{}{
-    "error":    err.Error(),
-    "provider": "openweathermap",
-    "retry":    3,
-})
-```
-
-For detailed examples of using the Logger interface, see [core/README.md - Logging Interface](../core/README.md#-logging-interface-know-whats-happening).
 
 ### Interfaces
 
 #### Discovery Interface
 
-Service discovery for agents (registration + discovery).
+Service discovery interface for agents. Combines registration with powerful query capabilities.
 
 ```go
 type Discovery interface {
-    Registry  // Embeds Registry interface
+    Registry  // Embed Registry (Register, UpdateHealth, Unregister)
+
+    // Query methods
     Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error)
     FindService(ctx context.Context, serviceName string) ([]*ServiceInfo, error)
     FindByCapability(ctx context.Context, capability string) ([]*ServiceInfo, error)
 }
 ```
 
-#### Registry Interface  
+**Method usage guide:**
 
-Service registration for tools (registration only).
+| Method | Use When | Example |
+|--------|----------|---------|
+| `Discover()` | Complex multi-criteria search | Find healthy services in region with capability |
+| `FindService()` | Know exact service name | Find all "user-service" instances |
+| `FindByCapability()` | Need any service with capability | Find any translator |
+
+**Example - Building a Load Balancer:**
+```go
+type LoadBalancer struct {
+    discovery core.Discovery
+    current   uint32
+}
+
+func (lb *LoadBalancer) GetService(ctx context.Context, capability string) (*core.ServiceInfo, error) {
+    // Find all healthy services
+    services, err := lb.discovery.Discover(ctx, core.DiscoveryFilter{
+        Capability: capability,
+        HealthOnly: true,
+    })
+
+    if len(services) == 0 {
+        return nil, fmt.Errorf("no services available for %s", capability)
+    }
+
+    // Round-robin selection
+    index := atomic.AddUint32(&lb.current, 1) % uint32(len(services))
+    return services[index], nil
+}
+```
+
+#### Registry Interface
+
+Service registration interface for tools. Handles registration, health updates, and cleanup.
 
 ```go
 type Registry interface {
@@ -507,9 +602,34 @@ type Registry interface {
 }
 ```
 
+**Registration lifecycle:**
+```go
+// 1. Register on startup
+info := &core.ServiceInfo{
+    ID:       "weather-1",
+    Name:     "weather-service",
+    Type:     "tool",
+    Address:  "http://localhost:8081",
+    Health:   core.HealthHealthy,
+}
+registry.Register(ctx, info)
+
+// 2. Periodic health updates
+ticker := time.NewTicker(30 * time.Second)
+go func() {
+    for range ticker.C {
+        health := checkHealth()
+        registry.UpdateHealth(ctx, info.ID, health)
+    }
+}()
+
+// 3. Unregister on shutdown
+defer registry.Unregister(ctx, info.ID)
+```
+
 #### Memory Interface
 
-State storage abstraction.
+Abstract storage for state, sessions, and caching.
 
 ```go
 type Memory interface {
@@ -520,269 +640,860 @@ type Memory interface {
 }
 ```
 
-### Discovery Implementations
-
-#### NewRedisDiscovery
-
-Redis-based service discovery.
-
+**Example - Session Management:**
 ```go
-func NewRedisDiscovery(redisURL string) (*RedisDiscovery, error)
-```
+type SessionManager struct {
+    store core.Memory
+}
 
-#### NewMockDiscovery  
+func (sm *SessionManager) CreateSession(userID string) (string, error) {
+    sessionID := generateSessionID()
+    data := map[string]string{
+        "user_id": userID,
+        "created": time.Now().Format(time.RFC3339),
+    }
 
-Mock discovery for testing.
+    jsonData, _ := json.Marshal(data)
 
-```go
-func NewMockDiscovery() *MockDiscovery
+    // Session expires in 24 hours
+    err := sm.store.Set(ctx, "session:"+sessionID, string(jsonData), 24*time.Hour)
+    return sessionID, err
+}
+
+func (sm *SessionManager) ValidateSession(sessionID string) (string, error) {
+    data, err := sm.store.Get(ctx, "session:"+sessionID)
+    if err != nil {
+        return "", errors.New("invalid or expired session")
+    }
+
+    var session map[string]string
+    json.Unmarshal([]byte(data), &session)
+    return session["user_id"], nil
+}
 ```
 
 ### Memory Implementations
 
 #### NewInMemoryStore
 
-In-memory storage implementation.
+Fast, local memory storage with automatic expiration. Perfect for development and single-instance deployments.
 
 ```go
 func NewInMemoryStore() *InMemoryStore
+```
+
+**Features:**
+- **Automatic TTL expiration** - Items expire based on TTL
+- **Background cleanup** - Removes expired items every 10 minutes
+- **Thread-safe** - Concurrent access with RWMutex
+- **Capacity limited** - Max 1000 items (prevents memory leaks)
+
+**When to use:**
+- Development and testing
+- Single-instance deployments
+- Temporary caching
+- Session storage for small apps
+
+**Example - Rate Limiting:**
+```go
+func RateLimitMiddleware(store core.Memory, limit int) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            clientIP := r.RemoteAddr
+            key := "rate:" + clientIP
+
+            // Check current count
+            val, err := store.Get(ctx, key)
+            if err != nil {
+                // First request - allow and start counting
+                store.Set(ctx, key, "1", 1*time.Minute)
+                next.ServeHTTP(w, r)
+                return
+            }
+
+            count, _ := strconv.Atoi(val)
+            if count >= limit {
+                http.Error(w, "Rate limit exceeded", 429)
+                return
+            }
+
+            // Increment counter
+            store.Set(ctx, key, strconv.Itoa(count+1), 1*time.Minute)
+            next.ServeHTTP(w, r)
+        })
+    }
+}
 ```
 
 ---
 
 ## AI Module
 
-Connect to AI providers like OpenAI, Anthropic, Google, and more.
+Connect to AI providers and build intelligent agents that leverage LLMs for natural language understanding and generation.
 
 ### NewClient
 
-Create an AI client with auto-detection.
+Create an AI client with automatic provider detection. The client intelligently selects the best available AI provider based on environment variables.
 
 ```go
 func NewClient(opts ...AIOption) (core.AIClient, error)
-func MustNewClient(opts ...AIOption) core.AIClient
+func MustNewClient(opts ...AIOption) core.AIClient  // Panics on error
 ```
 
-Auto-detects your AI provider from environment variables.
+**Provider auto-detection order:**
+1. OpenAI (`OPENAI_API_KEY`)
+2. Anthropic (`ANTHROPIC_API_KEY`)
+3. Google Gemini (`GEMINI_API_KEY`)
+4. Groq (`GROQ_API_KEY`)
+5. Together AI (`TOGETHER_API_KEY`) - Priority 75
+6. DeepSeek (`DEEPSEEK_API_KEY`) - Priority 80
+7. xAI Grok (`XAI_API_KEY`) - Priority 85
+8. Qwen (`QWEN_API_KEY`) - Priority 90
 
-**AI Options:**
-
-| Option | Description | Example |
-|--------|-------------|---------|
-| `WithProvider(provider)` | Choose provider | `"openai"`, `"anthropic"` |
-| `WithAPIKey(key)` | Override API key | `"sk-..."` |
-| `WithModel(model)` | Choose model | `"gpt-4"`, `"claude-3-opus"` |
-| `WithTemperature(temp)` | Set creativity (0-1) | `0.7` |
-| `WithMaxTokens(tokens)` | Response length | `1000` |
-| `WithTimeout(duration)` | Request timeout | `30*time.Second` |
-
-**Example:**
+**Example - Auto-detect Provider:**
 ```go
-// Auto-detect from environment variables
-client, _ := ai.NewClient()
+// Automatically uses first available provider
+client, err := ai.NewClient()
+if err != nil {
+    log.Fatal("No AI provider available. Set OPENAI_API_KEY or ANTHROPIC_API_KEY")
+}
 
-// Specific provider
-client, _ := ai.NewClient(
-    ai.WithProvider("openai"),
-    ai.WithModel("gpt-4"),
+response, _ := client.GenerateResponse(ctx, "Explain quantum computing", nil)
+fmt.Println(response.Content)
+```
+
+**Example - Specific Provider:**
+```go
+// Use specific provider with custom settings
+client, err := ai.NewClient(
+    ai.WithProvider("anthropic"),
+    ai.WithModel("claude-3-opus-20240229"),
     ai.WithTemperature(0.7),
+    ai.WithMaxTokens(2000),
 )
 
-// Ask a question
-response, _ := client.GenerateResponse(ctx, "What is 2+2?", nil)
-fmt.Println(response.Content)  // "4"
+// Use for complex reasoning tasks
+response, _ := client.GenerateResponse(ctx,
+    "Analyze this code for potential issues and suggest improvements",
+    &core.AIOptions{
+        Temperature: 0.3,  // Lower temperature for technical analysis
+    },
+)
+```
+
+### WithProviderAlias
+
+Configure OpenAI-compatible providers with automatic endpoint and model resolution. Provider aliases offer a clean way to use alternative AI providers that implement the OpenAI API specification.
+
+```go
+func WithProviderAlias(alias string) AIOption
+```
+
+**Supported provider aliases:**
+- `"openai"` - Standard OpenAI (default)
+- `"openai.deepseek"` - DeepSeek with reasoning models
+- `"openai.groq"` - Groq for ultra-fast inference
+- `"openai.together"` - Together AI for open models
+- `"openai.xai"` - xAI Grok models
+- `"openai.qwen"` - Alibaba Qwen models
+
+**Features:**
+- **Automatic endpoint configuration** - No need to specify base URLs
+- **Model aliases** - Use portable names like "smart", "fast", "code"
+- **Environment variable support** - Override endpoints via environment
+- **Three-tier configuration** - Explicit → Environment → Defaults
+
+**Example - Using Alternative Providers:**
+```go
+// Use DeepSeek's reasoning model
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.deepseek"),
+    ai.WithModel("smart"),  // Resolves to "deepseek-reasoner"
+)
+
+// Use Groq for fast inference
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.groq"),
+    ai.WithModel("fast"),   // Resolves to "llama-3.3-70b-versatile"
+)
+
+// Use Together AI with explicit model
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.together"),
+    ai.WithModel("meta-llama/Llama-3-70b-chat-hf"), // Explicit model name
+)
+```
+
+**Configuration priority:**
+```go
+// 1. Explicit configuration (highest priority)
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.groq"),
+    ai.WithAPIKey("explicit-key"),        // Overrides environment
+    ai.WithBaseURL("https://custom.url"), // Overrides defaults
+)
+
+// 2. Environment variables (medium priority)
+// Set: GROQ_API_KEY=your-key
+// Set: GROQ_BASE_URL=https://custom.groq.com  // Optional override
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.groq"),
+)
+
+// 3. Hardcoded defaults (lowest priority)
+// Uses built-in endpoints like https://api.groq.com/openai/v1
+```
+
+### Model Aliases
+
+Use portable model names across different providers. Model aliases allow you to write provider-agnostic code.
+
+**Standard aliases:**
+- `"smart"` - Most capable model for complex tasks
+- `"fast"` - Quick responses for simple queries
+- `"code"` - Optimized for code generation
+- `"vision"` - Multimodal/vision capabilities (if available)
+- `"default"` - Provider's recommended default
+
+**Model alias resolution examples:**
+```go
+// "smart" resolves differently per provider
+ai.WithProviderAlias("openai")         // → gpt-4
+ai.WithProviderAlias("openai.deepseek") // → deepseek-reasoner
+ai.WithProviderAlias("openai.groq")     // → mixtral-8x7b-32768
+
+// "fast" for quick responses
+ai.WithProviderAlias("openai")         // → gpt-3.5-turbo
+ai.WithProviderAlias("openai.deepseek") // → deepseek-chat
+ai.WithProviderAlias("openai.groq")     // → llama-3.3-70b-versatile
+
+// Direct model names still work (pass-through)
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.deepseek"),
+    ai.WithModel("deepseek-coder-v2"), // Exact model, not an alias
+)
+```
+
+### NewChainClient
+
+Create a chain client that automatically fails over between multiple AI providers. Perfect for production systems requiring high availability and resilience.
+
+```go
+func NewChainClient(opts ...ChainOption) (*ChainClient, error)
+```
+
+**Features:**
+- **Automatic failover** - Seamlessly switches to backup providers
+- **Graceful degradation** - Works with single provider if needed
+- **Smart error handling** - Only fails over on infrastructure errors
+- **Configurable chain** - Define your provider priority order
+
+**Example - High Availability Setup:**
+```go
+// Create a resilient AI client with fallback providers
+chain, err := ai.NewChainClient(
+    ai.WithProviderChain([]ai.ChainProvider{
+        {Provider: "openai", Model: "gpt-4", Priority: 1},
+        {Provider: "anthropic", Model: "claude-3-opus", Priority: 2},
+        {Provider: "openai.groq", Model: "mixtral-8x7b", Priority: 3},
+    }),
+)
+
+// Automatically tries providers in order until one succeeds
+response, err := chain.GenerateResponse(ctx, "Explain quantum computing", nil)
+// Tries: OpenAI → Anthropic → Groq
+```
+
+**Example - Using Provider Aliases:**
+```go
+// Chain with OpenAI-compatible providers
+chain, _ := ai.NewChainClient(
+    ai.WithProviderChain([]ai.ChainProvider{
+        {ProviderAlias: "openai.deepseek", Model: "smart", Priority: 1},
+        {ProviderAlias: "openai.groq", Model: "fast", Priority: 2},
+        {ProviderAlias: "openai", Model: "gpt-3.5-turbo", Priority: 3},
+    }),
+)
+```
+
+**Graceful degradation:**
+```go
+// Single provider still works (no chain, direct pass-through)
+chain, _ := ai.NewChainClient(
+    ai.WithProviderChain([]ai.ChainProvider{
+        {Provider: "openai", Model: "gpt-4"},
+    }),
+)
+
+// Empty chain auto-detects from environment
+chain, _ := ai.NewChainClient()  // Uses first available provider
+```
+
+### WithProviderChain
+
+Configure the provider chain for automatic failover.
+
+```go
+func WithProviderChain(providers []ChainProvider) ChainOption
+```
+
+**ChainProvider fields:**
+- `Provider` - Provider name ("openai", "anthropic", etc.)
+- `ProviderAlias` - Alternative: use provider alias ("openai.groq")
+- `Model` - Model to use (can be alias like "smart" or explicit)
+- `Priority` - Order in chain (lower = higher priority)
+- `APIKey` - Optional: override API key for this provider
+
+**Example - Production Failover Strategy:**
+```go
+providers := []ai.ChainProvider{
+    // Primary: Fast and cheap
+    {
+        ProviderAlias: "openai",
+        Model:         "gpt-3.5-turbo",
+        Priority:      1,
+    },
+    // Backup 1: More capable but slower
+    {
+        Provider: "anthropic",
+        Model:    "claude-3-sonnet",
+        Priority: 2,
+    },
+    // Backup 2: Alternative fast provider
+    {
+        ProviderAlias: "openai.groq",
+        Model:         "llama-3.3-70b-versatile",
+        Priority:      3,
+    },
+    // Emergency: Most capable model
+    {
+        Provider: "openai",
+        Model:    "gpt-4",
+        Priority: 4,
+        APIKey:   os.Getenv("OPENAI_BACKUP_KEY"), // Different key/account
+    },
+}
+
+chain, _ := ai.NewChainClient(
+    ai.WithProviderChain(providers),
+)
 ```
 
 ### GenerateResponse
 
-Ask the AI a question.
+Generate AI responses with optional parameters for fine-tuning behavior.
 
 ```go
 func (c *AIClient) GenerateResponse(ctx context.Context, prompt string, options *AIOptions) (*AIResponse, error)
+func (c *ChainClient) GenerateResponse(ctx context.Context, prompt string, options *AIOptions) (*AIResponse, error)
 ```
 
-**Example:**
-```go
-// Simple question
-response, _ := client.GenerateResponse(ctx, "Hello!", nil)
+**AIOptions parameters:**
+- `Temperature` (0.0-1.0) - Creativity level (0=deterministic, 1=creative)
+- `MaxTokens` - Maximum response length
+- `TopP` - Nucleus sampling (alternative to temperature)
+- `Model` - Override default model
 
-// With custom options
-response, _ := client.GenerateResponse(ctx, "Write a poem", &core.AIOptions{
-    Temperature: 0.9,  // Note: float32 type
-    MaxTokens:   200,
-})
+**Example - Different Use Cases:**
+```go
+// Technical analysis (low temperature for accuracy)
+codeReview, _ := client.GenerateResponse(ctx,
+    "Review this Go code for bugs",
+    &core.AIOptions{
+        Temperature: 0.2,
+        MaxTokens:   1500,
+    },
+)
+
+// Creative writing (high temperature for variety)
+story, _ := client.GenerateResponse(ctx,
+    "Write a short story about AI",
+    &core.AIOptions{
+        Temperature: 0.9,
+        MaxTokens:   2000,
+    },
+)
+
+// Structured data extraction (deterministic)
+data, _ := client.GenerateResponse(ctx,
+    "Extract JSON data from this text",
+    &core.AIOptions{
+        Temperature: 0,  // Deterministic
+        MaxTokens:   500,
+    },
+)
 ```
 
 ### NewAIAgent
 
-Create an AI-powered agent.
+Create an intelligent agent with both AI capabilities and service discovery powers. Perfect for building orchestrators and assistants.
 
 ```go
 func NewAIAgent(name string, apiKey string) (*AIAgent, error)
-func NewIntelligentAgent(id string) *IntelligentAgent  // For testing
 ```
 
-**Example:**
+**AIAgent capabilities:**
+- Full agent powers (discovery, orchestration)
+- Built-in AI for natural language processing
+- Conversation memory management
+- Tool use and function calling
+- Autonomous decision making
+
+**Example - Intelligent Orchestrator:**
 ```go
-// Create an AI assistant
-agent, err := ai.NewAIAgent("assistant", os.Getenv("OPENAI_API_KEY"))
+// Create an AI-powered orchestrator
+agent, err := ai.NewAIAgent("ai-orchestrator", os.Getenv("OPENAI_API_KEY"))
 if err != nil {
     log.Fatal(err)
 }
 
-// It can answer questions
-response, _ := agent.GenerateResponse(ctx, "What's the weather like?", nil)
+// It can process natural language
+response, _ := agent.GenerateResponse(ctx,
+    "Find the weather service and get weather for NYC",
+    nil,
+)
 
-// It can process with memory
-result, _ := agent.ProcessWithMemory(ctx, "Remember my name is John")
+// It remembers conversations
+agent.ProcessWithMemory(ctx, "My name is John")
+agent.ProcessWithMemory(ctx, "What's my name?") // "Your name is John"
+
+// It can discover and use other services
+tools, _ := agent.Discover(ctx, core.DiscoveryFilter{
+    Capabilities: []string{"weather", "news"},
+})
+
+// Orchestrate multiple tools based on user request
+result := agent.ProcessRequest(ctx,
+    "Get weather and news for NYC and summarize both",
+    tools,
+)
 ```
 
-### AI Providers
+### NewAITool
 
-GoMind supports these AI providers (auto-detected from environment):
+Create an AI-powered tool that exposes AI capabilities as a service. Unlike AIAgent, tools are passive and cannot discover other services.
 
-| Provider | Environment Variable | Models |
-|----------|---------------------|---------|
-| OpenAI | `OPENAI_API_KEY` | gpt-4, gpt-4-turbo, gpt-3.5-turbo |
-| Anthropic | `ANTHROPIC_API_KEY` | claude-3-opus, claude-3-sonnet |
-| Google | `GEMINI_API_KEY` | gemini-pro |
-| Groq | `GROQ_API_KEY` | llama3, mixtral |
-
-**Provider Detection:**
 ```go
-// Provider auto-detection is handled internally by NewClient()
-// The client automatically detects and uses the best available provider
-// based on environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
-client, err := ai.NewClient()  // Auto-detects provider
+func NewAITool(name string, capability string, apiKey string) (*AITool, error)
+```
+
+**When to use AITool vs AIAgent:**
+
+| Feature | AITool | AIAgent |
+|---------|--------|---------|
+| **Purpose** | Provide AI service | Orchestrate services |
+| **Discovery** | Can be discovered | Can discover & be discovered |
+| **Memory** | Stateless | Stateful conversations |
+| **Use case** | Translation, summarization | Orchestrators, assistants |
+
+**Example - AI Microservices:**
+```go
+// Create specialized AI tools
+translator, _ := ai.NewAITool(
+    "translator-service",
+    "translate",
+    apiKey,
+)
+
+summarizer, _ := ai.NewAITool(
+    "summarizer-service",
+    "summarize",
+    apiKey,
+)
+
+sentiment, _ := ai.NewAITool(
+    "sentiment-service",
+    "analyze_sentiment",
+    apiKey,
+)
+
+// Each runs as independent microservice
+go translator.Start(ctx, 8081)
+go summarizer.Start(ctx, 8082)
+go sentiment.Start(ctx, 8083)
+
+// Agents can discover and use these tools
+// POST http://localhost:8081/api/capabilities/translate
+// {"text": "Hello", "target_lang": "es"}
+```
+
+### AI Provider Support
+
+GoMind supports multiple AI providers with consistent APIs.
+
+| Provider | Models | Best For |
+|----------|--------|----------|
+| **OpenAI** | gpt-4, gpt-4-turbo, gpt-3.5-turbo | General purpose, code generation |
+| **Anthropic** | claude-3-opus, claude-3-sonnet | Complex reasoning, analysis |
+| **Google** | gemini-pro, gemini-1.5-pro | Multimodal, long context |
+| **Groq** | llama3, mixtral, gemma | Fast inference, open models |
+
+**Example - Multi-Provider Strategy:**
+```go
+// Use different providers for different tasks
+type AIService struct {
+    reasoning  core.AIClient  // Claude for complex reasoning
+    creative   core.AIClient  // GPT-4 for creative tasks
+    fast       core.AIClient  // Groq for quick responses
+}
+
+func NewAIService() *AIService {
+    return &AIService{
+        reasoning: ai.MustNewClient(
+            ai.WithProvider("anthropic"),
+            ai.WithModel("claude-3-opus-20240229"),
+        ),
+        creative: ai.MustNewClient(
+            ai.WithProvider("openai"),
+            ai.WithModel("gpt-4"),
+        ),
+        fast: ai.MustNewClient(
+            ai.WithProvider("groq"),
+            ai.WithModel("llama3-70b"),
+        ),
+    }
+}
+
+func (s *AIService) AnalyzeCode(code string) (string, error) {
+    // Use Claude for code analysis
+    return s.reasoning.GenerateResponse(ctx,
+        fmt.Sprintf("Analyze this code:\n%s", code),
+        &core.AIOptions{Temperature: 0.3},
+    )
+}
+
+func (s *AIService) GenerateDocumentation(code string) (string, error) {
+    // Use GPT-4 for documentation
+    return s.creative.GenerateResponse(ctx,
+        fmt.Sprintf("Generate comprehensive docs for:\n%s", code),
+        &core.AIOptions{Temperature: 0.7},
+    )
+}
 ```
 
 ---
 
 ## Resilience Module
 
-Handle failures gracefully with circuit breakers and retry logic.
+Build fault-tolerant systems with circuit breakers and intelligent retry mechanisms.
 
-### NewCircuitBreaker
+### Circuit Breakers
 
-Stop calling services that are failing.
+Protect your application from cascading failures by automatically stopping calls to failing services.
+
+#### NewCircuitBreaker
+
+Create a production-ready circuit breaker with comprehensive configuration.
 
 ```go
 func NewCircuitBreaker(config *CircuitBreakerConfig) (*CircuitBreaker, error)
 func NewCircuitBreakerLegacy(failureThreshold int, recoveryTimeout time.Duration) *CircuitBreaker
-func DefaultConfig() *CircuitBreakerConfig
 ```
 
-**Example:**
+**How it works:**
+- **Closed State**: Normal operation, requests pass through
+- **Open State**: Service is down, requests fail immediately
+- **Half-Open State**: Testing recovery with limited requests
+
+**Configuration parameters:**
+- `ErrorThreshold` - Percentage of failures to open (0.0-1.0)
+- `VolumeThreshold` - Minimum requests before evaluation
+- `SleepWindow` - How long to wait before testing recovery
+- `HalfOpenRequests` - Test requests in half-open state
+- `SuccessThreshold` - Success rate to close again
+
+**Example - Production Configuration:**
 ```go
-// Create circuit breaker with config
-config := &resilience.CircuitBreakerConfig{
-    Name:             "external-api",
-    ErrorThreshold:   0.5,  // 50% error rate triggers opening
-    VolumeThreshold:  10,   // Need 10 requests minimum
-    SleepWindow:      30 * time.Second,
-    HalfOpenRequests: 3,
-}
-breaker, err := resilience.NewCircuitBreaker(config)
+// Sophisticated circuit breaker for production
+breaker, err := resilience.NewCircuitBreaker(&resilience.CircuitBreakerConfig{
+    Name:             "payment-api",
+    ErrorThreshold:   0.5,              // Open at 50% error rate
+    VolumeThreshold:  10,                // Need 10+ requests to evaluate
+    SleepWindow:      30 * time.Second, // Wait 30s before recovery test
+    HalfOpenRequests: 5,                 // Test with 5 requests
+    SuccessThreshold: 0.6,               // Need 60% success to recover
 
-// Or use legacy simple version
-breaker := resilience.NewCircuitBreakerLegacy(5, 30*time.Second)
-
-// Use it to protect calls
-err := breaker.Execute(ctx, func() error {
-    return callExternalService()
+    // Smart error classification
+    ErrorClassifier: func(err error) bool {
+        // Only infrastructure errors trip the breaker
+        if errors.Is(err, context.Canceled) {
+            return false  // User cancelled, don't count
+        }
+        if httpErr, ok := err.(*HTTPError); ok {
+            return httpErr.StatusCode >= 500  // Only server errors
+        }
+        return true  // Network/timeout errors count
+    },
 })
+```
 
+#### Execute Methods
+
+Execute functions with circuit breaker protection.
+
+```go
+func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() error) error
+func (cb *CircuitBreaker) ExecuteWithTimeout(ctx context.Context, timeout time.Duration, fn func() error) error
+```
+
+**What Execute does:**
+1. Checks circuit state (fails fast if open)
+2. Executes your function
+3. Records success/failure
+4. Updates circuit state
+5. Handles panics gracefully
+
+**Example - API Call Protection:**
+```go
+func CallPaymentAPI(order Order) error {
+    return paymentBreaker.Execute(ctx, func() error {
+        // This is protected by the circuit breaker
+        resp, err := http.Post(paymentURL, "application/json", order)
+        if err != nil {
+            return err
+        }
+
+        if resp.StatusCode >= 500 {
+            return fmt.Errorf("server error: %d", resp.StatusCode)
+        }
+
+        return nil
+    })
+}
+
+// Handle circuit breaker states
+err := CallPaymentAPI(order)
 if errors.Is(err, core.ErrCircuitBreakerOpen) {
-    return fallbackResponse()
+    // Service is down, use fallback
+    log.Warn("Payment service unavailable, using queue")
+    return queuePaymentForLater(order)
 }
 ```
 
-### Retry
+#### Monitoring and Control
 
-Automatically retry failed operations.
+Monitor circuit breaker state and metrics for operational visibility.
+
+```go
+// Get current state
+state := breaker.GetState()  // "closed", "open", or "half-open"
+
+// Get detailed metrics
+metrics := breaker.GetMetrics()
+// Returns: state, success, failure, error_rate, total_executions, rejected
+
+// Manual control for maintenance
+breaker.ForceOpen()    // Block all requests
+breaker.ForceClosed()  // Allow all requests
+breaker.ClearForce()   // Resume automatic operation
+
+// State change notifications
+breaker.AddStateChangeListener(func(name string, from, to CircuitState) {
+    if to == resilience.StateOpen {
+        alert.Send("Circuit breaker %s opened!", name)
+    }
+})
+```
+
+### Retry Mechanisms
+
+Automatically retry failed operations with configurable backoff strategies.
+
+#### Retry Function
+
+Simple retry with exponential backoff.
 
 ```go
 func Retry(ctx context.Context, config *RetryConfig, fn func() error) error
-func DefaultRetryConfig() *RetryConfig
 ```
+
+**RetryConfig parameters:**
+- `MaxAttempts` - Maximum retry attempts
+- `InitialDelay` - First retry delay
+- `BackoffFactor` - Delay multiplier (2.0 = double each time)
+- `MaxDelay` - Maximum delay between retries
+- `JitterEnabled` - Add randomness to prevent thundering herd
 
 **Example:**
 ```go
-// Use default retry config
-err := resilience.Retry(ctx, resilience.DefaultRetryConfig(), func() error {
-    return unreliableOperation()
-})
-
-// Custom retry config
 config := &resilience.RetryConfig{
     MaxAttempts:   5,
     InitialDelay:  100 * time.Millisecond,
-    BackoffFactor: 2.0,
+    BackoffFactor: 2.0,      // 100ms, 200ms, 400ms, 800ms, 1600ms
     MaxDelay:      5 * time.Second,
-    JitterEnabled: true,
+    JitterEnabled: true,      // Prevent synchronized retries
 }
+
 err := resilience.Retry(ctx, config, func() error {
-    return flakeyAPICall()
+    return callFlakyService()
 })
 ```
 
-### RetryWithCircuitBreaker
+#### RetryExecutor
 
-Combine retry logic with circuit breaker protection.
+Production-ready retry with logging and telemetry.
+
+```go
+func NewRetryExecutor(config *RetryConfig) *RetryExecutor
+func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func() error) error
+```
+
+**Why use RetryExecutor:**
+- Named operations in logs
+- Detailed retry logging
+- Telemetry integration
+- Success/failure metrics
+
+**Example - Database Operations:**
+```go
+executor := resilience.NewRetryExecutor(&resilience.RetryConfig{
+    MaxAttempts:   3,
+    InitialDelay:  50 * time.Millisecond,
+    BackoffFactor: 2.0,
+    JitterEnabled: true,
+})
+executor.SetLogger(logger)
+
+// Named operation appears in logs
+err := executor.Execute(ctx, "fetch-user-profile", func() error {
+    return db.QueryRow("SELECT * FROM users WHERE id = ?", userID).Scan(&user)
+})
+
+// Logs show:
+// INFO: Starting retry operation [fetch-user-profile]
+// DEBUG: Attempt 1 failed, retrying...
+// INFO: Operation succeeded on attempt 2
+```
+
+#### RetryWithCircuitBreaker
+
+Combine retry and circuit breaker for maximum resilience.
 
 ```go
 func RetryWithCircuitBreaker(ctx context.Context, config *RetryConfig, cb *CircuitBreaker, fn func() error) error
 ```
 
-**Example:**
+**Best practice pattern:**
 ```go
-retryConfig := resilience.DefaultRetryConfig()
-breaker := resilience.NewCircuitBreakerLegacy(3, 10*time.Second)
+type ResilientClient struct {
+    breaker *resilience.CircuitBreaker
+    retry   *resilience.RetryExecutor
+}
 
-err := resilience.RetryWithCircuitBreaker(ctx, retryConfig, breaker, func() error {
-    return callUnreliableService()
-})
+func (c *ResilientClient) Call(ctx context.Context, request Request) (Response, error) {
+    var response Response
+
+    // Retry handles transient failures
+    // Circuit breaker prevents cascading failures
+    err := c.breaker.Execute(ctx, func() error {
+        return c.retry.Execute(ctx, "api-call", func() error {
+            return c.makeHTTPCall(request, &response)
+        })
+    })
+
+    return response, err
+}
 ```
 
 ---
 
 ## Telemetry Module
 
-Monitor and observe your system with metrics and distributed tracing.
+Comprehensive observability with metrics, distributed tracing, and context propagation.
 
-### Metrics
+### Basic Metrics
 
-Track what's happening in your system.
+Simple functions for common metrics without boilerplate.
 
 ```go
-// Simple API for common metrics
 func Counter(name string, labels ...string)
 func Histogram(name string, value float64, labels ...string)
-func Gauge(name string, value float64, labels ...string)  
+func Gauge(name string, value float64, labels ...string)
 func Duration(name string, startTime time.Time, labels ...string)
 ```
 
-**Example:**
+**Example - Request Metrics:**
 ```go
-// Count events
-telemetry.Counter("requests.total", "method", "GET", "status", "200")
-telemetry.Counter("errors.count", "type", "timeout")
+// Count requests
+telemetry.Counter("api.requests",
+    "method", r.Method,
+    "endpoint", r.URL.Path,
+    "status", strconv.Itoa(status),
+)
 
-// Track distributions (latency, sizes)
-telemetry.Histogram("request.duration_ms", 125.3, "endpoint", "/api/users")
-telemetry.Histogram("request.size_bytes", 1024, "method", "POST")
-
-// Current values (memory, connections) 
-telemetry.Gauge("memory.used_bytes", 1024*1024*100)
-telemetry.Gauge("connections.active", 42, "pool", "database")
-
-// Time operations
+// Track latency
 start := time.Now()
 processRequest()
-telemetry.Duration("operation.duration_ms", start, "op", "process")
+telemetry.Duration("api.latency", start,
+    "endpoint", r.URL.Path,
+)
+
+// Monitor concurrent requests
+telemetry.Gauge("api.concurrent_requests", float64(active))
+
+// Track response sizes
+telemetry.Histogram("api.response_bytes", float64(len(response)),
+    "endpoint", r.URL.Path,
+)
 ```
 
-### Type-specific Helpers
+### Context-Aware Telemetry
+
+Advanced telemetry that automatically correlates metrics with distributed traces.
+
+```go
+func EmitWithContext(ctx context.Context, name string, value float64, labels ...string)
+func GetBaggage(ctx context.Context) map[string]string
+func SetBaggage(ctx context.Context, key, value string) context.Context
+```
+
+**Why use context-aware telemetry:**
+- Automatic trace correlation
+- Request metadata propagation
+- Cross-service tracking
+- Debugging complex flows
+
+**Example - Distributed Request Tracking:**
+```go
+// API Gateway
+func (gw *Gateway) Handle(ctx context.Context, req Request) error {
+    // Start trace and add metadata
+    ctx, span := telemetry.StartSpan(ctx, "gateway.handle")
+    defer span.End()
+
+    ctx = telemetry.SetBaggage(ctx, "request_id", req.ID)
+    ctx = telemetry.SetBaggage(ctx, "user_id", req.UserID)
+
+    // Metrics include trace context
+    telemetry.EmitWithContext(ctx, "gateway.requests", 1,
+        "endpoint", req.Path,
+    )
+
+    // Call downstream service (context propagates)
+    result, err := gw.authService.Authenticate(ctx, req.UserID)
+
+    return err
+}
+
+// Auth Service (automatically gets context)
+func (auth *AuthService) Authenticate(ctx context.Context, userID string) error {
+    // Access propagated metadata
+    baggage := telemetry.GetBaggage(ctx)
+    requestID := baggage["request_id"]  // From gateway!
+
+    // Metrics correlated to same trace
+    telemetry.EmitWithContext(ctx, "auth.attempts", 1,
+        "user_id", userID,
+        "request_id", requestID,
+    )
+
+    return nil
+}
+```
+
+### Type-Specific Helpers
+
+Semantic helper functions for common metric types.
 
 ```go
 func RecordError(name string, errorType string, labels ...string)
@@ -793,37 +1504,34 @@ func RecordBytes(name string, bytes int64, labels ...string)
 
 **Example:**
 ```go
-// Record operations
-telemetry.RecordSuccess("api.calls", "endpoint", "/users")
-telemetry.RecordError("api.calls", "timeout", "endpoint", "/users")
+start := time.Now()
+err := processOrder(order)
 
-// Record performance metrics
-telemetry.RecordLatency("api.latency", 150.0, "endpoint", "/users")
-telemetry.RecordBytes("response.size", 2048, "endpoint", "/users")
-```
+if err != nil {
+    telemetry.RecordError("order.processing", err.Error(),
+        "order_id", order.ID,
+    )
+} else {
+    telemetry.RecordSuccess("order.processing",
+        "order_id", order.ID,
+    )
+}
 
-### Advanced Configuration
-
-```go
-// Configure telemetry with OpenTelemetry
-func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
-```
-
-**Example:**
-```go
-provider, err := telemetry.NewOTelProvider("my-service", "http://jaeger:14268/api/traces")
-defer provider.Shutdown(ctx)
+telemetry.RecordLatency("order.processing",
+    float64(time.Since(start).Milliseconds()),
+    "order_id", order.ID,
+)
 ```
 
 ---
 
 ## Orchestration Module
 
-Coordinate multiple agents and tools to work together, with smart capability discovery for scaling to hundreds of agents.
+Intelligently coordinate multiple agents and tools to accomplish complex tasks.
 
 ### CreateSimpleOrchestrator
 
-Create an orchestrator with zero configuration - perfect for getting started.
+Zero-configuration orchestrator for getting started quickly.
 
 ```go
 func CreateSimpleOrchestrator(discovery core.Discovery, aiClient core.AIClient) *AIOrchestrator
@@ -831,293 +1539,422 @@ func CreateSimpleOrchestrator(discovery core.Discovery, aiClient core.AIClient) 
 
 **Example:**
 ```go
-// Zero configuration - just works!
+// Just works - no configuration needed!
 orchestrator := orchestration.CreateSimpleOrchestrator(discovery, aiClient)
 
-// Process natural language requests
+// Process complex natural language requests
 response, err := orchestrator.ProcessRequest(ctx,
-    "Get weather for NYC, find news about it, and write a summary",
-    nil,
+    "Get weather for NYC and find related news articles, then summarize everything",
+    nil,  // Auto-discovers needed services
 )
 
 fmt.Println(response.Response)
-fmt.Printf("Used agents: %v\n", response.AgentsInvolved)
+// Output: "Today in NYC, it's 72°F with partly cloudy skies. Recent news includes..."
 ```
 
-### CreateOrchestrator
+### CreateOrchestratorWithOptions
 
-Create an orchestrator with configuration and dependency injection for production use.
+Create an orchestrator with flexible configuration options.
 
 ```go
-func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencies) (*AIOrchestrator, error)
+func CreateOrchestratorWithOptions(deps OrchestratorDependencies, opts ...OrchestratorOption) (*AIOrchestrator, error)
 ```
 
-**Example:**
+**Available options:**
+- `WithCapabilityProvider(type, url)` - Configure capability discovery
+- `WithTelemetry(enabled)` - Enable metrics and tracing
+- `WithFallback(enabled)` - Graceful degradation
+- `WithCache(enabled, ttl)` - Cache discovery results
+
+**Example - Production Orchestrator:**
 ```go
-// Create dependencies with optional components
+// Set up dependencies
 deps := orchestration.OrchestratorDependencies{
-    Discovery:      discovery,                    // Required
-    AIClient:       aiClient,                     // Required
-    CircuitBreaker: circuitBreaker,              // Optional: for resilience
-    Logger:         logger,                       // Optional: for logging
-    Telemetry:      telemetry,                   // Optional: for observability
+    Discovery: redisDiscovery,
+    AIClient:  aiClient,
+    Logger:    logger,
 }
 
-// Configure orchestrator
-config := &orchestration.OrchestratorConfig{
-    RoutingMode:            orchestration.ModeAutonomous,
-    SynthesisStrategy:      orchestration.StrategyLLM,
-    CapabilityProviderType: "default",           // "default" or "service" for large scale
-    EnableFallback:         true,                 // Graceful degradation
-    CacheEnabled:           true,
-    CacheTTL:              5 * time.Minute,
-}
+// Create with options
+orchestrator, err := orchestration.CreateOrchestratorWithOptions(deps,
+    orchestration.WithCapabilityProvider("service", "http://capability-service:8080"),
+    orchestration.WithTelemetry(true),
+    orchestration.WithFallback(true),
+    orchestration.WithCache(true, 5*time.Minute),
+)
 
-orchestrator, err := orchestration.CreateOrchestrator(config, deps)
-
-// Process natural language requests
+// Process requests with automatic service discovery and coordination
 response, err := orchestrator.ProcessRequest(ctx,
-    "Get weather for NYC, find news about it, and write a summary",
+    "Analyze sales data and generate report",
     nil,
 )
 ```
 
-### Scaling to Hundreds of Agents
+### Orchestration Strategies
 
-When you have 100s-1000s of agents, use the service-based capability provider:
+Different strategies for different scales and use cases:
 
+| Strategy | Use Case | Scale |
+|----------|----------|-------|
+| **Autonomous** | AI decides which services to use | Small-medium |
+| **Directed** | Explicit service specification | Any scale |
+| **Hybrid** | Mix of AI and rules | Medium-large |
+
+**Example - Scaling Orchestration:**
 ```go
-// Configure for large scale with external RAG service
-config := orchestration.DefaultConfig()
-config.CapabilityProviderType = "service"
-config.CapabilityService = orchestration.ServiceCapabilityConfig{
-    Endpoint:  "http://capability-service:8080",
-    TopK:      20,        // Return top 20 relevant agents
-    Threshold: 0.7,       // Minimum relevance score
-    Timeout:   10 * time.Second,
+// Small scale (< 10 services) - Let AI figure it out
+config := &orchestration.OrchestratorConfig{
+    RoutingMode:       orchestration.ModeAutonomous,
+    SynthesisStrategy: orchestration.StrategyLLM,
 }
 
-deps := orchestration.OrchestratorDependencies{
-    Discovery:      discovery,
-    AIClient:       aiClient,
-    CircuitBreaker: cb,  // Recommended for production
+// Large scale (100+ services) - Use capability service
+config := &orchestration.OrchestratorConfig{
+    RoutingMode:            orchestration.ModeHybrid,
+    CapabilityProviderType: "service",
+    CapabilityServiceURL:   "http://capability-registry:8080",
 }
 
-orchestrator, _ := orchestration.CreateOrchestrator(config, deps)
-```
-
-### Workflow Engine
-
-Define and execute structured multi-step workflows.
-
-```go
-func NewWorkflowEngine(discovery core.Discovery, stateStore StateStore, logger core.Logger) *WorkflowEngine
-```
-
-**Example:**
-```go
-stateStore := orchestration.NewRedisStateStore(discovery)
-engine := orchestration.NewWorkflowEngine(discovery, stateStore, logger)
-
-// Define workflow as YAML
-yamlDef := `
-name: user-onboarding
-version: "1.0"
-inputs:
-  user_email:
-    type: string
-    required: true
-steps:
-  - name: validate_email
-    tool: validator          # Tool: passive validator
-    action: check_email
-    inputs:
-      email: ${inputs.user_email}
-  - name: create_account  
-    tool: user_service       # Tool: service that creates users
-    action: create_user
-    inputs:
-      email: ${inputs.user_email}
-    depends_on: [validate_email]
-  - name: send_welcome
-    tool: email_service      # Tool: service that sends emails
-    action: send_welcome
-    inputs:
-      user_id: ${steps.create_account.output.user_id}
-    depends_on: [create_account]
-outputs:
-  user_id: ${steps.create_account.output.user_id}
-`
-
-// Parse and execute
-workflow, _ := engine.ParseWorkflowYAML([]byte(yamlDef))
-execution, err := engine.ExecuteWorkflow(ctx, workflow, map[string]interface{}{
-    "user_email": "john@example.com",
-})
-
-fmt.Printf("Status: %s\n", execution.Status)
-fmt.Printf("User ID: %v\n", execution.Outputs["user_id"])
+// Capability service indexes all available capabilities
+// and provides fast, structured search without hitting discovery
 ```
 
 ---
 
 ## UI Module
 
-Create chat interfaces and user interactions.
+Build interactive chat interfaces and web transports for your GoMind applications.
 
-### NewChatAgent
+### Chat Transport
 
-Create a chat agent with pluggable transports.
+WebSocket-based chat interface for real-time interaction.
 
 ```go
-func NewChatAgent(config ChatAgentConfig, aiClient core.AIClient, sessions SessionManager) *DefaultChatAgent
-func NewChatAgentWithOptions(name string, aiClient core.AIClient, opts ...ChatAgentOption) *DefaultChatAgent
+func NewChatTransport(agent Agent, aiClient AIClient) *ChatTransport
 ```
+
+**Features:**
+- WebSocket for real-time communication
+- Automatic reconnection
+- Message history
+- Typing indicators
+- File upload support
+
+**Example - Chat Application:**
+```go
+// Create chat-enabled agent
+agent := core.NewBaseAgent("assistant")
+aiClient := ai.MustNewClient()
+
+transport := ui.NewChatTransport(agent, aiClient)
+
+// Attach to HTTP server
+http.Handle("/chat", transport)
+http.Handle("/", http.FileServer(http.Dir("./web")))
+
+log.Println("Chat interface available at http://localhost:8080")
+http.ListenAndServe(":8080", nil)
+```
+
+### REST Transport
+
+RESTful API transport for traditional HTTP interactions.
+
+```go
+func NewRESTTransport(agent Agent) *RESTTransport
+```
+
+**Automatic endpoints:**
+- `GET /api/capabilities` - List available capabilities
+- `POST /api/execute/{capability}` - Execute capability
+- `GET /api/health` - Health check
+- `GET /api/metrics` - Prometheus metrics
 
 **Example:**
 ```go
-// Create chat agent
-config := ui.DefaultChatAgentConfig("assistant")
+transport := ui.NewRESTTransport(agent)
 
-// Production: Use Redis session manager
-sessions, _ := ui.NewRedisSessionManager("redis://localhost:6379", ui.DefaultSessionConfig())
-// Development: Use mock session manager  
-// sessions := ui.NewMockSessionManager(ui.DefaultSessionConfig())
+// Adds REST endpoints to your agent
+agent.HandleFunc("/api/", transport.Handler())
 
-aiClient, _ := ai.NewClient()
-chatAgent := ui.NewChatAgent(config, aiClient, sessions)
-
-// Handle chat messages
-response, err := chatAgent.HandleMessage(ctx, ui.ChatMessage{
-    SessionID: "session-123",
-    Content:   "Hello, how can you help me?",
-    UserID:    "user-456",
-})
-
-fmt.Println(response.Content) // AI-generated response
-```
-
-### Transports
-
-Connect your chat agent to different protocols.
-
-#### WebSocket Transport
-```go
-transport := websocket.New(websocket.Config{
-    Address: ":8080",
-    Path:    "/ws",
-})
-```
-
-#### HTTP/REST Transport
-```go  
-transport := http.New(http.Config{
-    Address:  ":8080", 
-    BasePath: "/api/chat",
-})
-```
-
-#### Server-Sent Events (SSE)
-```go
-transport := sse.New(sse.Config{
-    Address: ":8080",
-    Path:    "/events", 
-})
-```
-
-### Session Management
-
-Create and manage chat sessions.
-
-#### NewRedisSessionManager
-
-Redis-based distributed session management.
-
-```go
-func NewRedisSessionManager(redisURL string, config SessionConfig) (*RedisSessionManager, error)
-```
-
-#### NewMockSessionManager (Development)
-
-Mock session manager for testing.
-
-```go
-func NewMockSessionManager(config SessionConfig) *MockSessionManager
-```
-
-### Security Features
-
-The UI module includes comprehensive security:
-
-```go
-// Rate limiting (in ui/security package)
-rateLimiter := security.NewRedisRateLimiter(config, redisClient)
-transport = security.NewRateLimitTransport(transport, config, rateLimiter, logger, telemetry)
+// Now available:
+// curl http://localhost:8080/api/capabilities
+// curl -X POST http://localhost:8080/api/execute/translate -d '{"text":"Hello"}'
 ```
 
 ---
 
-## HTTP API Endpoints
+## Common Patterns
 
-When components are started with the framework, they automatically expose HTTP endpoints.
+### Production Service Template
 
-### Health Check
+Complete template for production-ready services:
 
-```
-GET /health
-```
+```go
+package main
 
-**Response:**
-```json
-{
-    "status": "healthy",
-    "component": "component-name",
-    "id": "component-id"
-}
-```
+import (
+    "context"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
 
-### Capabilities
+    "github.com/itsneelabh/gomind/core"
+    "github.com/itsneelabh/gomind/resilience"
+)
 
-```
-GET /api/capabilities
-```
+func main() {
+    ctx := context.Background()
 
-Lists all capabilities provided by the component.
+    // Create component
+    agent := core.NewBaseAgent("production-service")
 
-**Response:**
-```json
-[
-    {
-        "name": "calculate",
-        "description": "Performs calculations",
-        "endpoint": "/api/capabilities/calculate",
-        "input_types": ["application/json"],
-        "output_types": ["application/json"]
+    // Register capabilities
+    agent.RegisterCapability(core.Capability{
+        Name:        "process",
+        Description: "Process data",
+        Handler:     handleProcess,
+    })
+
+    // Create framework with production settings
+    framework, err := core.NewFramework(agent,
+        // Discovery
+        core.WithRedisURL(os.Getenv("REDIS_URL")),
+
+        // Observability
+        core.WithTelemetry(true, os.Getenv("OTEL_ENDPOINT")),
+        core.WithLogLevel("info"),
+
+        // Networking
+        core.WithPort(8080),
+        core.WithCORSDefaults(),
+
+        // Resilience
+        core.WithCircuitBreaker(resilience.DefaultConfig()),
+    )
+
+    if err != nil {
+        log.Fatal("Failed to create framework:", err)
     }
-]
-```
 
-### Invoke Capability
+    // Run with graceful shutdown
+    errChan := make(chan error, 1)
+    go func() {
+        errChan <- framework.Run(ctx)
+    }()
 
-```
-POST /api/capabilities/{capability}
-```
+    // Wait for shutdown signal
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-Invokes a specific capability.
+    select {
+    case <-sigChan:
+        log.Info("Shutdown signal received")
+    case err := <-errChan:
+        log.Error("Framework error:", err)
+    }
 
-**Request:**
-```json
-{
-    "input": "capability-specific input data"
+    // Graceful shutdown
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    if err := framework.Shutdown(shutdownCtx); err != nil {
+        log.Error("Shutdown error:", err)
+        os.Exit(1)
+    }
+
+    log.Info("Graceful shutdown complete")
 }
 ```
 
-**Response:**
-```json
-{
-    "capability": "capability-name",
-    "status": "success", 
-    "result": "capability-specific result"
+### Multi-Provider AI Strategy
+
+Use different AI providers for different tasks:
+
+```go
+type SmartAI struct {
+    fast      core.AIClient  // Groq for speed
+    accurate  core.AIClient  // Claude for accuracy
+    creative  core.AIClient  // GPT-4 for creativity
+}
+
+func NewSmartAI() *SmartAI {
+    return &SmartAI{
+        fast: ai.MustNewClient(
+            ai.WithProvider("groq"),
+            ai.WithModel("llama3-8b"),
+        ),
+        accurate: ai.MustNewClient(
+            ai.WithProvider("anthropic"),
+            ai.WithModel("claude-3-opus-20240229"),
+        ),
+        creative: ai.MustNewClient(
+            ai.WithProvider("openai"),
+            ai.WithModel("gpt-4"),
+        ),
+    }
+}
+
+func (s *SmartAI) QuickAnswer(question string) (string, error) {
+    // Use fast model for simple queries
+    resp, err := s.fast.GenerateResponse(ctx, question, &core.AIOptions{
+        MaxTokens:   200,
+        Temperature: 0.3,
+    })
+    return resp.Content, err
+}
+
+func (s *SmartAI) AnalyzeCode(code string) (string, error) {
+    // Use accurate model for code analysis
+    resp, err := s.accurate.GenerateResponse(ctx,
+        fmt.Sprintf("Analyze this code for bugs and improvements:\n%s", code),
+        &core.AIOptions{
+            Temperature: 0.1,  // Very low for technical accuracy
+            MaxTokens:   2000,
+        },
+    )
+    return resp.Content, err
+}
+```
+
+### Service Mesh Pattern
+
+Build a resilient service mesh with discovery and circuit breakers:
+
+```go
+type ServiceMesh struct {
+    discovery core.Discovery
+    breakers  map[string]*resilience.CircuitBreaker
+    mu        sync.RWMutex
+}
+
+func (sm *ServiceMesh) Call(ctx context.Context, capability string, request interface{}) (interface{}, error) {
+    // Discover service
+    services, err := sm.discovery.FindByCapability(ctx, capability)
+    if err != nil || len(services) == 0 {
+        return nil, fmt.Errorf("no service found for %s", capability)
+    }
+
+    service := services[0]  // TODO: Add load balancing
+
+    // Get or create circuit breaker for this service
+    breaker := sm.getBreaker(service.ID)
+
+    var response interface{}
+    err = breaker.Execute(ctx, func() error {
+        // Call the service
+        return sm.callService(service, request, &response)
+    })
+
+    return response, err
+}
+
+func (sm *ServiceMesh) getBreaker(serviceID string) *resilience.CircuitBreaker {
+    sm.mu.RLock()
+    if breaker, exists := sm.breakers[serviceID]; exists {
+        sm.mu.RUnlock()
+        return breaker
+    }
+    sm.mu.RUnlock()
+
+    // Create new breaker
+    sm.mu.Lock()
+    defer sm.mu.Unlock()
+
+    breaker := resilience.NewCircuitBreakerLegacy(5, 30*time.Second)
+    sm.breakers[serviceID] = breaker
+    return breaker
+}
+```
+
+---
+
+## Best Practices
+
+### 1. Always Use the Framework
+
+The framework handles complex setup, so you don't have to:
+
+```go
+// ❌ Don't do this
+agent := core.NewBaseAgent("my-agent")
+agent.Initialize(ctx)
+agent.Start(ctx, 8080)
+
+// ✅ Do this instead
+framework, _ := core.NewFramework(agent, options...)
+framework.Run(ctx)
+```
+
+### 2. Configure via Environment
+
+Follow 12-factor app principles:
+
+```go
+// ✅ Good - configuration from environment
+framework, _ := core.NewFramework(agent,
+    core.WithRedisURL(os.Getenv("REDIS_URL")),
+    core.WithPort(getPortFromEnv()),
+)
+
+// ❌ Bad - hardcoded values
+framework, _ := core.NewFramework(agent,
+    core.WithRedisURL("redis://localhost:6379"),
+    core.WithPort(8080),
+)
+```
+
+### 3. Use Structured Logging
+
+Always log with context:
+
+```go
+// ✅ Good - structured with context
+logger.Info("Processing request", map[string]interface{}{
+    "request_id": req.ID,
+    "user_id":    req.UserID,
+    "action":     req.Action,
+})
+
+// ❌ Bad - unstructured string
+log.Printf("Processing request %s for user %s", req.ID, req.UserID)
+```
+
+### 4. Handle Circuit Breaker States
+
+Always check for circuit breaker errors:
+
+```go
+err := breaker.Execute(ctx, func() error {
+    return callService()
+})
+
+if errors.Is(err, core.ErrCircuitBreakerOpen) {
+    // Service is down, use fallback
+    return useFallback()
+}
+
+if err != nil {
+    // Other error, handle accordingly
+    return err
+}
+```
+
+### 5. Use Context for Cancellation
+
+Always respect context cancellation:
+
+```go
+func LongRunningOperation(ctx context.Context) error {
+    for {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()  // Respect cancellation
+        default:
+            // Do work
+        }
+    }
 }
 ```
 
@@ -1125,33 +1962,50 @@ Invokes a specific capability.
 
 ## Error Handling
 
-### Common Errors
-
-| Error | Package | Description |
-|-------|---------|-------------|
-| `ErrCircuitBreakerOpen` | core | Circuit breaker is open |
-| `ErrMaxRetriesExceeded` | core | Retry attempts exhausted |
-| `ErrTimeout` | core | Operation timed out |
-| `ErrNotFound` | core | Resource not found |
-| `ErrConfigurationError` | core | Invalid configuration |
-| `ErrStateError` | core | Invalid state |
-| `ErrContextCanceled` | core | Context was canceled |
-
-### Error Checking
+GoMind uses typed errors for better error handling:
 
 ```go
-// Check specific errors
-if errors.Is(err, core.ErrCircuitBreakerOpen) {
-    return fallbackResponse()
-}
+// Circuit breaker errors
+var ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
 
-// Check error categories
-if core.IsTimeout(err) {
-    // Handle timeout
-}
+// Retry errors
+var ErrMaxRetriesExceeded = errors.New("max retries exceeded")
 
-if core.IsNotFound(err) {
-    // Handle not found
+// Discovery errors
+var ErrServiceNotFound = errors.New("service not found")
+
+// Configuration errors
+var ErrInvalidConfiguration = errors.New("invalid configuration")
+```
+
+**Example - Comprehensive Error Handling:**
+```go
+func HandleRequest(ctx context.Context, req Request) error {
+    err := processWithResilience(ctx, req)
+
+    switch {
+    case errors.Is(err, core.ErrCircuitBreakerOpen):
+        // Service down, use fallback
+        return handleWithFallback(ctx, req)
+
+    case errors.Is(err, core.ErrMaxRetriesExceeded):
+        // Temporary failure, queue for later
+        return queueForRetry(req)
+
+    case errors.Is(err, context.DeadlineExceeded):
+        // Timeout, return error to client
+        return fmt.Errorf("request timeout: %w", err)
+
+    case err != nil:
+        // Unexpected error
+        logger.Error("Unexpected error", map[string]interface{}{
+            "error": err.Error(),
+            "request_id": req.ID,
+        })
+        return fmt.Errorf("internal error: %w", err)
+    }
+
+    return nil
 }
 ```
 
@@ -1159,126 +2013,117 @@ if core.IsNotFound(err) {
 
 ## Environment Variables
 
-Configure GoMind with these environment variables:
+GoMind supports configuration through environment variables:
 
-### AI Providers
-```bash
-OPENAI_API_KEY=sk-...           # OpenAI
-ANTHROPIC_API_KEY=sk-ant-...    # Claude  
-GEMINI_API_KEY=...              # Google Gemini
-GROQ_API_KEY=...                # Groq
+### Core Configuration
+- `GOMIND_NAME` - Component name
+- `GOMIND_PORT` - HTTP port (default: 8080)
+- `REDIS_URL` - Redis connection URL
+- `GOMIND_LOG_LEVEL` - Logging level (error/warn/info/debug)
+- `GOMIND_LOG_FORMAT` - Log format (json/text)
+- `GOMIND_DEV_MODE` - Development mode (true/false)
+
+### AI Configuration
+- `OPENAI_API_KEY` - OpenAI API key
+- `ANTHROPIC_API_KEY` - Anthropic API key
+- `GEMINI_API_KEY` - Google Gemini API key
+- `GROQ_API_KEY` - Groq API key
+- `TOGETHER_API_KEY` - Together AI API key
+- `DEEPSEEK_API_KEY` - DeepSeek API key
+- `XAI_API_KEY` - xAI Grok API key
+- `QWEN_API_KEY` - Qwen API key
+
+### OpenAI-Compatible Provider URLs (Optional)
+- `GROQ_BASE_URL` - Override Groq endpoint (default: https://api.groq.com/openai/v1)
+- `TOGETHER_BASE_URL` - Override Together endpoint (default: https://api.together.xyz/v1)
+- `DEEPSEEK_BASE_URL` - Override DeepSeek endpoint (default: https://api.deepseek.com/v1)
+- `XAI_BASE_URL` - Override xAI endpoint (default: https://api.x.ai/v1)
+- `QWEN_BASE_URL` - Override Qwen endpoint (default: https://dashscope.aliyuncs.com/compatible-mode/v1)
+
+### Kubernetes Configuration
+- `GOMIND_K8S_SERVICE_NAME` - Kubernetes service name
+- `GOMIND_K8S_SERVICE_PORT` - Kubernetes service port
+- `GOMIND_K8S_POD_IP` - Pod IP address
+- `HOSTNAME` - Pod hostname
+
+### Telemetry Configuration
+- `OTEL_EXPORTER_OTLP_ENDPOINT` - OpenTelemetry endpoint
+- `OTEL_SERVICE_NAME` - Service name for telemetry
+
+---
+
+## Migration Guide
+
+### From v0.x to v1.0
+
+The v1.0 release streamlines APIs and improves consistency:
+
+**Component Creation:**
+```go
+// Old (v0.x)
+agent := framework.NewAgent("my-agent")
+
+// New (v1.0)
+agent := core.NewBaseAgent("my-agent")
 ```
 
-### Service Discovery
-```bash
-REDIS_URL=redis://localhost:6379
+**Framework Usage:**
+```go
+// Old (v0.x)
+framework.RunAgent(agent, 8080)
+
+// New (v1.0)
+framework, _ := core.NewFramework(agent, core.WithPort(8080))
+framework.Run(ctx)
 ```
 
-### Logging and Telemetry
-```bash
-GOMIND_LOG_LEVEL=info          # debug, info, warn, error
-GOMIND_LOG_FORMAT=json         # json, text
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:14268/api/traces
-```
+**AI Client:**
+```go
+// Old (v0.x)
+client := ai.NewOpenAIClient(apiKey)
 
-### Framework
-```bash
-GOMIND_PORT=8080               # Default HTTP port
-GOMIND_ENV=production          # development, production
+// New (v1.0) - Provider agnostic
+client, _ := ai.NewClient()  // Auto-detects from environment
 ```
 
 ---
 
-## Import Paths
+## Troubleshooting
 
-```go
-// Main framework - re-exports all core types
-import "github.com/itsneelabh/gomind"
+### Common Issues
 
-// Individual modules  
-import "github.com/itsneelabh/gomind/core"
-import "github.com/itsneelabh/gomind/ai" 
-import "github.com/itsneelabh/gomind/resilience"
-import "github.com/itsneelabh/gomind/telemetry"
-import "github.com/itsneelabh/gomind/orchestration"
-import "github.com/itsneelabh/gomind/ui"
+**"No AI provider available"**
+- Set one of: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`
+
+**"Failed to connect to Redis"**
+- Check `REDIS_URL` is correct
+- Ensure Redis is running
+- Use `WithMockDiscovery(true)` for testing without Redis
+
+**"Circuit breaker is open"**
+- Check if downstream service is healthy
+- Review circuit breaker thresholds
+- Check logs for failure patterns
+
+**"Port already in use"**
+- Another service is using the port
+- Change port with `WithPort(different_port)`
+
+### Debug Mode
+
+Enable detailed logging for troubleshooting:
+
+```bash
+export GOMIND_LOG_LEVEL=debug
+export GOMIND_LOG_FORMAT=text
+# or
+export GOMIND_DEV_MODE=true
 ```
 
 ---
 
-## Quick Tips
+## Support
 
-### Always Check Errors
-```go
-// ✅ GOOD
-response, err := agent.ProcessRequest(ctx, request)
-if err != nil {
-    return fmt.Errorf("processing failed: %w", err)
-}
-
-// ❌ BAD  
-response, _ := agent.ProcessRequest(ctx, request)
-```
-
-### Use Context Timeouts
-```go
-// ✅ GOOD
-ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-defer cancel()
-
-// ❌ BAD
-ctx := context.Background()
-```
-
-### Component Separation
-```go
-// ✅ GOOD - Tools do specific tasks
-calculator := core.NewTool("calculator") 
-emailer := core.NewTool("emailer")
-
-// Agents orchestrate tools
-orchestrator := core.NewBaseAgent("orchestrator")
-
-// ❌ BAD - One component doing everything  
-everything := core.NewTool("do-all")
-```
-
----
-
-## Migration Examples
-
-**From LangChain:**
-```python
-# Before (Python)
-chain = LLMChain(llm=OpenAI())
-result = chain.run("Hello")
-```
-
-```go
-// After (Go)
-agent, _ := ai.NewAIAgent("assistant", os.Getenv("OPENAI_API_KEY"))
-result, _ := agent.GenerateResponse(ctx, "Hello", nil)
-```
-
-**From AutoGen:**
-```python
-# Before (Python)
-assistant = AssistantAgent("bot") 
-reply = assistant.generate_reply(msg)
-```
-
-```go
-// After (Go)  
-config := ui.DefaultChatAgentConfig("bot")
-agent := ui.NewChatAgent(config, aiClient, sessions)
-reply, _ := agent.HandleMessage(ctx, msg)
-```
-
----
-
-## Need Help?
-
-- **Quick Start**: [QUICK_START.md](./QUICK_START.md)
-- **Examples**: [github.com/itsneelabh/gomind/examples](https://github.com/itsneelabh/gomind/tree/main/examples)
-- **Issues**: [github.com/itsneelabh/gomind/issues](https://github.com/itsneelabh/gomind/issues)
-- **Documentation**: [docs/](https://github.com/itsneelabh/gomind/tree/main/docs)
+- GitHub Issues: [github.com/itsneelabh/gomind/issues](https://github.com/itsneelabh/gomind/issues)
+- Documentation: [github.com/itsneelabh/gomind/docs](https://github.com/itsneelabh/gomind/docs)
+- Examples: [github.com/itsneelabh/gomind/examples](https://github.com/itsneelabh/gomind/examples)

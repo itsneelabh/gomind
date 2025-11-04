@@ -33,6 +33,20 @@ func (m *mockLogger) Error(msg string, fields map[string]interface{}) {
 
 func (m *mockLogger) Warn(msg string, fields map[string]interface{}) {}
 
+func (m *mockLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.debugCalls = append(m.debugCalls, fields)
+}
+
+func (m *mockLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.infoCalls = append(m.infoCalls, fields)
+}
+
+func (m *mockLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {}
+
+func (m *mockLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.errorCalls = append(m.errorCalls, fields)
+}
+
 func TestNewBaseClient(t *testing.T) {
 	tests := []struct {
 		name    string

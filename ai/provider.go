@@ -1,6 +1,8 @@
 package ai
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
@@ -23,6 +25,11 @@ const (
 type AIConfig struct {
 	// Provider to use
 	Provider string
+
+	// ProviderAlias for OpenAI-compatible services (Phase 2)
+	// Examples: "openai.deepseek", "openai.groq", "openai.together"
+	// This enables multiple OpenAI-compatible providers to coexist without conflicts
+	ProviderAlias string
 
 	// API credentials
 	APIKey  string
@@ -155,4 +162,95 @@ func WithLogger(logger core.Logger) AIOption {
 	return func(c *AIConfig) {
 		c.Logger = logger
 	}
+}
+
+// WithProviderAlias sets the provider alias for OpenAI-compatible services (Phase 2)
+// Examples: "openai.deepseek", "openai.groq", "openai.together"
+// FOLLOWS FRAMEWORK PRINCIPLE: Intelligent Configuration Over Convention
+//
+// This function implements smart auto-configuration when user intent is clear:
+// - Parses alias to extract base provider ("openai" from "openai.deepseek")
+// - Auto-configures API keys and base URLs from environment variables
+// - Only auto-configures if user hasn't explicitly set these values
+//
+// The auto-configuration follows the three-tier hierarchy:
+// 1. Explicit config (if user set APIKey/BaseURL) - highest priority
+// 2. Environment variables (provider-specific like DEEPSEEK_API_KEY)
+// 3. Hardcoded defaults (well-known provider URLs)
+func WithProviderAlias(alias string) AIOption {
+	return func(c *AIConfig) {
+		c.ProviderAlias = alias
+
+		// Parse the alias to set the base provider
+		// "openai.deepseek" → provider="openai", subprovider="deepseek"
+		parts := strings.Split(alias, ".")
+		if len(parts) > 0 {
+			c.Provider = parts[0] // Set base provider from alias
+
+			// INTELLIGENT AUTO-CONFIGURATION: When intent is clear, auto-configure related settings
+			// This follows the framework's "Intelligent Configuration" principle
+			// Only auto-configure if user hasn't explicitly set these (respects explicit override)
+			if len(parts) > 1 && c.APIKey == "" && c.BaseURL == "" {
+				subprovider := parts[1]
+
+				// Auto-configure based on the subprovider
+				switch subprovider {
+				case "deepseek":
+					c.APIKey = os.Getenv("DEEPSEEK_API_KEY")
+					c.BaseURL = firstNonEmpty(
+						os.Getenv("DEEPSEEK_BASE_URL"),
+						"https://api.deepseek.com",
+					)
+
+				case "groq":
+					c.APIKey = os.Getenv("GROQ_API_KEY")
+					c.BaseURL = firstNonEmpty(
+						os.Getenv("GROQ_BASE_URL"),
+						"https://api.groq.com/openai/v1",
+					)
+
+				case "xai":
+					c.APIKey = os.Getenv("XAI_API_KEY")
+					c.BaseURL = firstNonEmpty(
+						os.Getenv("XAI_BASE_URL"),
+						"https://api.x.ai/v1",
+					)
+
+				case "qwen":
+					c.APIKey = os.Getenv("QWEN_API_KEY")
+					c.BaseURL = firstNonEmpty(
+						os.Getenv("QWEN_BASE_URL"),
+						"https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+					)
+
+				case "together":
+					c.APIKey = os.Getenv("TOGETHER_API_KEY")
+					c.BaseURL = firstNonEmpty(
+						os.Getenv("TOGETHER_BASE_URL"),
+						"https://api.together.xyz/v1",
+					)
+
+				case "ollama":
+					// Ollama doesn't need API key
+					c.BaseURL = firstNonEmpty(
+						os.Getenv("OLLAMA_BASE_URL"),
+						"http://localhost:11434/v1",
+					)
+
+				// Add more providers as needed
+				}
+			}
+		}
+	}
+}
+
+// firstNonEmpty returns the first non-empty string from the provided values
+// This helper implements the configuration precedence pattern used throughout the framework
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

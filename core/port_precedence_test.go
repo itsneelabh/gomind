@@ -14,14 +14,16 @@ import (
 func TestPortParameterPrecedence(t *testing.T) {
 	t.Run("Tool_Parameter_Overrides_Config", func(t *testing.T) {
 		tool := NewTool("test-tool")
+
+		// Use dynamic ports to avoid conflicts with system services
+		configPort := findAvailablePort(t)
+		testPort := findAvailablePort(t)
+
 		tool.Config = &Config{
-			Port:    8080, // Config specifies 8080
+			Port:    configPort, // Config specifies one port
 			Address: "localhost",
 		}
 
-		// Find available port for testing
-		testPort := findAvailablePort(t)
-		
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
@@ -41,9 +43,9 @@ func TestPortParameterPrecedence(t *testing.T) {
 		<-serverReady
 		time.Sleep(100 * time.Millisecond)
 
-		// Verify server is listening on testPort, NOT on config port (8080)
+		// Verify server is listening on testPort, NOT on config port
 		verifyServerOnPort(t, testPort, true, "tool should bind to parameter port")
-		verifyServerOnPort(t, 8080, false, "tool should NOT bind to config port")
+		verifyServerOnPort(t, configPort, false, "tool should NOT bind to config port")
 
 		// Cleanup
 		tool.Shutdown(ctx)
@@ -58,14 +60,16 @@ func TestPortParameterPrecedence(t *testing.T) {
 
 	t.Run("Agent_Parameter_Overrides_Config", func(t *testing.T) {
 		agent := NewBaseAgent("test-agent")
+
+		// Use dynamic ports to avoid conflicts with system services
+		configPort := findAvailablePort(t)
+		testPort := findAvailablePort(t)
+
 		agent.Config = &Config{
-			Port:    9090, // Config specifies 9090
+			Port:    configPort, // Config specifies one port
 			Address: "localhost",
 		}
 
-		// Find available port for testing
-		testPort := findAvailablePort(t)
-		
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
@@ -88,13 +92,13 @@ func TestPortParameterPrecedence(t *testing.T) {
 		<-serverReady
 		time.Sleep(200 * time.Millisecond)
 
-		// Verify server is listening on testPort, NOT on config port (9090)
+		// Verify server is listening on testPort, NOT on config port
 		verifyServerOnPort(t, testPort, true, "agent should bind to parameter port")
-		verifyServerOnPort(t, 9090, false, "agent should NOT bind to config port")
+		verifyServerOnPort(t, configPort, false, "agent should NOT bind to config port")
 
 		// Cleanup - cancel context to stop the agent
 		cancel()
-		
+
 		// Give agent time to shutdown gracefully
 		time.Sleep(100 * time.Millisecond)
 

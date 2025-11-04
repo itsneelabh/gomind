@@ -34,6 +34,22 @@ func (m *mockLogger) Error(msg string, fields map[string]interface{}) {
 	m.logs = append(m.logs, "ERROR: "+msg)
 }
 
+func (m *mockLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.logs = append(m.logs, "DEBUG: "+msg)
+}
+
+func (m *mockLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.logs = append(m.logs, "INFO: "+msg)
+}
+
+func (m *mockLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.logs = append(m.logs, "WARN: "+msg)
+}
+
+func (m *mockLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+	m.logs = append(m.logs, "ERROR: "+msg)
+}
+
 func TestNewClient(t *testing.T) {
 	logger := &mockLogger{}
 
