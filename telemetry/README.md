@@ -1,132 +1,263 @@
 # GoMind Telemetry Module
 
-Production-grade observability with zero-friction integration and progressive disclosure.
+Welcome to the observability powerhouse of GoMind! Think of this guide as your friendly companion who'll walk you through every aspect of telemetry, from the simplest metric to sophisticated production monitoring. Grab a coffee and let's dive in! ☕
 
 ## 📚 Table of Contents
 
-1. [What Does This Module Do?](#-what-does-this-module-do)
-2. [Quick Start](#-quick-start)
-3. [**Using Telemetry with GoMind Tools and Agents** ⭐](#-using-telemetry-with-gomind-tools-and-agents)
-   - Complete working examples for both Tools and Agents
-   - Step-by-step integration guide
-   - Where to add telemetry in your code
-   - Common patterns for both component types
-4. [How It Works](#-how-it-works)
-5. [Metric Types Explained](#-metric-types-explained)
-6. [Context Propagation](#-context-propagation-distributed-tracing)
-7. [Configuration Profiles](#-configuration-profiles)
-8. [Production Safety Features](#-production-safety-features)
-9. [FAQ for Junior Developers](#-faq-for-junior-developers)
-10. [API Reference](#api-reference)
+- [🎯 What Is Telemetry and Why Should You Care?](#-what-is-telemetry-and-why-should-you-care)
+- [🚀 The Simplest Thing That Works](#-the-simplest-thing-that-works)
+- [📊 The Three Types of Metrics](#-the-three-types-of-metrics-and-when-to-use-each)
+- [🎨 Adding Context with Labels](#-adding-context-with-labels)
+- [🔍 Progressive Disclosure: From Simple to Advanced](#-progressive-disclosure-from-simple-to-advanced)
+- [🏗️ Production-Ready Configuration](#️-production-ready-configuration)
+- [🐳 Deploying with Docker](#-deploying-with-docker)
+- [☸️ Deploying on Kubernetes](#️-deploying-on-kubernetes)
+- [🔧 Adding Telemetry to Tools and Agents](#-adding-telemetry-to-tools-and-agents)
+- [🏭 The Architecture Under the Hood](#-the-architecture-under-the-hood)
+- [🛡️ Production Safety Features](#️-production-safety-features)
+- [🧪 Testing Your Telemetry](#-testing-your-telemetry)
+- [🔍 Debugging Telemetry Issues](#-debugging-telemetry-issues)
+- [📈 Advanced Patterns](#-advanced-patterns)
+- [🎯 Best Practices Summary](#-best-practices-summary)
+- [🏁 Quick Reference](#-quick-reference)
+- [🎉 Summary](#-summary)
 
-## ⚠️ IMPORTANT: Enterprise Best Practice
+## 🎯 What Is Telemetry and Why Should You Care?
 
-**Never hardcode environment profiles!** Your code should work unchanged across all environments:
+Let me explain this with a story that everyone can relate to.
 
-```go
-// ✅ CORRECT - Environment-aware initialization
-func initTelemetry(serviceName string) {
-    profile := telemetry.ProfileDevelopment // safe default
+### The Dashboard Analogy
 
-    switch os.Getenv("APP_ENV") {
-    case "production": profile = telemetry.ProfileProduction
-    case "staging": profile = telemetry.ProfileStaging
-    }
+Imagine you're driving a car. Your dashboard tells you:
+- **Speed** - How fast you're going
+- **Fuel** - How much gas you have left
+- **Temperature** - If your engine is overheating
+- **Warning Lights** - If something needs attention
 
-    config := telemetry.UseProfile(profile)
-    config.ServiceName = serviceName
-    telemetry.Initialize(config)
-}
+Without this dashboard, you'd be driving blind. You wouldn't know if you're about to run out of gas or if your engine is about to overheat.
 
-// ❌ WRONG - Hardcoded profile
-telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
-```
+**That's exactly what telemetry does for your software!** It gives you a dashboard to see what's happening inside your running application:
+- **Metrics** tell you the numbers (requests per second, error rates)
+- **Traces** show you the journey (how a request flows through your system)
+- **Logs** capture the details (what happened and when)
+- **Health checks** warn you of problems (circuit breakers, failures)
 
-### Enterprise Configuration Pattern
+### Why Every Application Needs Telemetry
 
-```go
-// config/telemetry.go - Add this to your project
-package config
+Think about these scenarios:
+1. **Your app is slow** - But which part? Database? Network? Your code?
+2. **Users report errors** - But you can't reproduce them locally
+3. **Memory keeps growing** - But you don't know what's leaking
+4. **Your service crashed at 3 AM** - But you were asleep
 
-import (
-    "context"
-    "log"
-    "os"
-    "time"
+Without telemetry, you're debugging in the dark. With telemetry, you have X-ray vision into your application.
 
-    "github.com/itsneelabh/gomind/telemetry"
-)
+## 🚀 The Simplest Thing That Works
 
-// InitTelemetry initializes telemetry based on environment
-// This follows 12-factor app principles
-func InitTelemetry(serviceName string) {
-    profile := getProfile()
-
-    config := telemetry.UseProfile(profile)
-    config.ServiceName = serviceName
-
-    // Allow endpoint override via environment
-    if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
-        config.Endpoint = endpoint
-    }
-
-    if err := telemetry.Initialize(config); err != nil {
-        // Don't crash - telemetry should not break the service
-        log.Printf("WARNING: Telemetry init failed: %v (continuing without telemetry)", err)
-        return
-    }
-
-    log.Printf("✅ Telemetry initialized [env=%s, profile=%s, service=%s]",
-        os.Getenv("APP_ENV"), profile, serviceName)
-}
-
-func getProfile() telemetry.Profile {
-    // Priority: TELEMETRY_PROFILE > APP_ENV > default
-    if profile := os.Getenv("TELEMETRY_PROFILE"); profile != "" {
-        switch profile {
-        case "production":
-            return telemetry.ProfileProduction
-        case "staging":
-            return telemetry.ProfileStaging
-        case "development":
-            return telemetry.ProfileDevelopment
-        }
-    }
-
-    switch os.Getenv("APP_ENV") {
-    case "production", "prod":
-        return telemetry.ProfileProduction
-    case "staging", "qa":
-        return telemetry.ProfileStaging
-    default:
-        return telemetry.ProfileDevelopment // Safe default
-    }
-}
-```
-
-**Deployment without code changes:**
-```bash
-# Development (default)
-APP_ENV=development ./myapp
-
-# Staging
-APP_ENV=staging ./myapp
-
-# Production
-APP_ENV=production ./myapp
-```
-
-### Verifying Your Configuration
-
-Use this code to verify telemetry is properly initialized with the correct profile:
+Let's start with the absolute basics. Here's how to add telemetry to your application in 30 seconds:
 
 ```go
-// verification.go - Add to your project for testing
 package main
 
 import (
     "context"
-    "fmt"
+    "time"
+
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func main() {
+    // Step 1: Initialize telemetry (one line!)
+    telemetry.Initialize(telemetry.Config{
+        ServiceName: "my-app",
+        Enabled:     true,
+    })
+
+    // Step 2: Always clean up when your app exits
+    defer telemetry.Shutdown(context.Background())
+
+    // Step 3: Emit metrics anywhere in your code
+    telemetry.Counter("app.started")
+
+    // That's it! You're now tracking metrics
+    processRequest()
+}
+
+func processRequest() {
+    // Track how long something takes
+    start := time.Now()
+    defer telemetry.Duration("request.duration_ms", start)
+
+    // Count events
+    telemetry.Counter("request.received")
+
+    // Do your actual work here
+    time.Sleep(100 * time.Millisecond)
+
+    // Track success
+    telemetry.Counter("request.success")
+}
+```
+
+**That's literally all you need to start!** No complex setup, no configuration files, no external dependencies to install. The telemetry module handles everything internally.
+
+## 📊 The Three Types of Metrics (And When to Use Each)
+
+Just like there are different tools in a toolbox, there are different types of metrics for different jobs:
+
+### 1. Counters - Things That Only Go Up
+Think of counters like the odometer in your car - they only increase, never decrease.
+
+```go
+// Perfect for counting events
+telemetry.Counter("user.login")
+telemetry.Counter("api.request", "endpoint", "/users")
+telemetry.Counter("error.occurred", "type", "database")
+```
+
+**Use counters when you want to know "how many times did this happen?"**
+
+### 2. Histograms - Distributions of Values
+Think of histograms like a speed chart - they show you the range and frequency of values.
+
+```go
+// Perfect for measuring durations, sizes, or amounts
+telemetry.Histogram("response.time_ms", 125.5)
+telemetry.Histogram("payload.size_bytes", 2048)
+telemetry.Histogram("batch.size", 50)
+```
+
+**Use histograms when you want to know "what's the typical value, and what's the range?"**
+
+The beauty of histograms is they automatically calculate:
+- Average (mean)
+- Median (50th percentile)
+- 95th and 99th percentiles
+- Min and max values
+
+### 3. Gauges - Values That Go Up and Down
+Think of gauges like the fuel gauge in your car - they can increase or decrease.
+
+```go
+// Perfect for current state metrics
+telemetry.Gauge("memory.used_mb", 512)
+telemetry.Gauge("queue.size", 1500)
+telemetry.Gauge("active.connections", 42)
+```
+
+**Use gauges when you want to know "what's the current value right now?"**
+
+## 🎨 Adding Context with Labels
+
+Labels are like tags on your metrics - they add context and allow you to filter and group your data.
+
+### The Restaurant Menu Analogy
+Imagine you run a restaurant and track "orders". That's good, but wouldn't it be better to know:
+- **What** was ordered (pizza, pasta, salad)
+- **When** it was ordered (lunch, dinner)
+- **How** it was ordered (dine-in, takeout, delivery)
+
+That's exactly what labels do for your metrics:
+
+```go
+// Without labels - not very useful
+telemetry.Counter("orders")  // Total orders... but what kind?
+
+// With labels - now we're talking!
+telemetry.Counter("orders",
+    "item", "pizza",
+    "time", "dinner",
+    "type", "delivery")
+
+// You can now answer questions like:
+// - How many pizzas were ordered at dinner?
+// - What's our most popular delivery item?
+// - Is lunch or dinner busier?
+```
+
+### Label Best Practices
+
+```go
+// ✅ GOOD: Low cardinality labels (limited set of values)
+telemetry.Counter("api.request",
+    "method", "GET",        // Only ~5 values (GET, POST, PUT, DELETE, PATCH)
+    "status", "200",        // Only ~10 values (200, 201, 400, 404, 500, etc.)
+    "endpoint", "/users")   // Only ~20-50 endpoints in your API
+
+// ❌ BAD: High cardinality labels (unlimited unique values)
+telemetry.Counter("api.request",
+    "user_id", "12345",     // Could be millions of unique values!
+    "timestamp", "1234567", // Every request has a unique timestamp!
+    "request_id", "abc123") // Every request has a unique ID!
+```
+
+**Why does cardinality matter?** Each unique combination of labels creates a new metric series. Too many series = memory explosion!
+
+## 🔍 Progressive Disclosure: From Simple to Advanced
+
+The telemetry module follows the principle of progressive disclosure - start simple, add complexity only when needed.
+
+### Level 1: Dead Simple (90% of Your Needs)
+```go
+// Just emit metrics - that's it!
+telemetry.Counter("events.processed")
+telemetry.Histogram("processing.time_ms", 45.2)
+telemetry.Gauge("queue.depth", 100)
+```
+
+### Level 2: With Context (For Distributed Systems)
+```go
+// Add tracing context for distributed systems
+ctx := telemetry.WithBaggage(ctx,
+    "request_id", "req-123",
+    "user_id", "user-456")
+
+// Metrics now include trace context
+telemetry.EmitWithContext(ctx, "payment.processed", 99.99)
+```
+
+### Level 3: Full Control (When You Need It)
+```go
+// Declare metrics upfront for validation
+telemetry.DeclareMetrics("payment", telemetry.ModuleConfig{
+    Metrics: []telemetry.MetricDefinition{
+        {
+            Name:    "payment.amount",
+            Type:    "histogram",
+            Help:    "Payment amounts in USD",
+            Labels:  []string{"currency", "method"},
+            Unit:    "dollars",
+            Buckets: []float64{1, 10, 100, 1000, 10000},
+        },
+    },
+})
+
+// Use advanced emission options
+telemetry.EmitWithOptions(ctx, "payment.amount", 99.99,
+    telemetry.WithUnit(telemetry.UnitDollars),
+    telemetry.WithSampleRate(0.1),  // Sample 10% for high-volume metrics
+    telemetry.WithTimestamp(eventTime),
+)
+```
+
+## 🏗️ Production-Ready Configuration
+
+When you're ready to deploy to production, you need more sophisticated configuration. Let me show you how to set up telemetry that adapts to different environments.
+
+### The Smart Configuration Pattern
+
+Think of this like your phone's battery saver mode:
+- **Development**: Full brightness, all features on (capture everything for debugging)
+- **Staging**: Balanced mode (good visibility, moderate resource usage)
+- **Production**: Power saving mode (minimal overhead, only essential metrics)
+
+Here's how to implement environment-aware configuration:
+
+```go
+package main
+
+import (
+    "context"
     "log"
     "os"
     "time"
@@ -134,1513 +265,984 @@ import (
     "github.com/itsneelabh/gomind/telemetry"
 )
 
-func verifyTelemetry() {
-    // Initialize based on environment
-    profile := telemetry.ProfileDevelopment
-    switch os.Getenv("APP_ENV") {
-    case "production":
+// initTelemetry sets up telemetry based on your environment
+func initTelemetry(serviceName string) {
+    // Detect environment from APP_ENV variable
+    env := os.Getenv("APP_ENV")
+    if env == "" {
+        env = "development" // Safe default
+    }
+
+    // Select the appropriate profile
+    var profile telemetry.Profile
+    switch env {
+    case "production", "prod":
         profile = telemetry.ProfileProduction
-    case "staging":
+    case "staging", "stage", "qa":
         profile = telemetry.ProfileStaging
+    default:
+        profile = telemetry.ProfileDevelopment
     }
 
+    // Use the profile to get base configuration
     config := telemetry.UseProfile(profile)
-    config.ServiceName = "verification-test"
 
-    if err := telemetry.Initialize(config); err != nil {
-        log.Fatalf("Failed to initialize: %v", err)
+    // Override with your service name
+    config.ServiceName = serviceName
+
+    // Allow environment variables to override specific settings
+    if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+        config.Endpoint = endpoint
     }
-    defer telemetry.Shutdown(context.Background())
 
-    // Verify it's working
-    health := telemetry.GetHealth()
-    fmt.Printf("✅ Telemetry initialized\n")
-    fmt.Printf("   Profile: %s\n", profile)
-    fmt.Printf("   Environment: %s\n", os.Getenv("APP_ENV"))
-    fmt.Printf("   Initialized: %v\n", health.Initialized)
-    fmt.Printf("   Circuit Breaker: %s\n", health.CircuitBreakerStatus)
+    // Initialize telemetry
+    if err := telemetry.Initialize(config); err != nil {
+        // IMPORTANT: Don't let telemetry failures crash your app!
+        log.Printf("WARNING: Telemetry initialization failed: %v", err)
+        log.Printf("Application will continue without telemetry")
+        return
+    }
 
-    // Test metric emission
-    telemetry.Counter("test.verification", "status", "success")
-    telemetry.Emit("test.metric", 1.0, "env", string(profile))
+    log.Printf("✅ Telemetry initialized successfully")
+    log.Printf("   Environment: %s", env)
+    log.Printf("   Profile: %s", profile)
+    log.Printf("   Service: %s", serviceName)
+    log.Printf("   Endpoint: %s", config.Endpoint)
+}
 
-    // Check metrics were recorded
-    time.Sleep(100 * time.Millisecond)
-    health = telemetry.GetHealth()
-    fmt.Printf("   Metrics Emitted: %d\n", health.MetricsEmitted)
+func main() {
+    // Initialize telemetry with environment detection
+    initTelemetry("my-service")
+
+    // Always clean up
+    defer func() {
+        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        defer cancel()
+        if err := telemetry.Shutdown(ctx); err != nil {
+            log.Printf("Warning: Telemetry shutdown error: %v", err)
+        }
+    }()
+
+    // Your application code here
+    runApplication()
+}
+
+func runApplication() {
+    // Your main application logic here
+    // This is where your actual service runs
 }
 ```
 
-### Kubernetes Deployment Example
+### Understanding Telemetry Profiles
+
+The module comes with three pre-configured profiles that represent common deployment scenarios:
+
+#### Development Profile (Maximum Visibility)
+```go
+// ProfileDevelopment - Capture everything for debugging
+// - 100% sampling (see every request)
+// - No circuit breaker (don't hide problems)
+// - High cardinality limits (track everything)
+// - Local endpoint (localhost:4318)
+config := telemetry.UseProfile(telemetry.ProfileDevelopment)
+```
+
+#### Staging Profile (Balanced Approach)
+```go
+// ProfileStaging - Good visibility with reasonable overhead
+// - 10% sampling (see enough to understand patterns)
+// - Circuit breaker enabled (protect the telemetry backend)
+// - Moderate cardinality limits
+// - Staging collector endpoint
+config := telemetry.UseProfile(telemetry.ProfileStaging)
+```
+
+#### Production Profile (Optimized for Scale)
+```go
+// ProfileProduction - Minimal overhead, maximum reliability
+// - 0.1% sampling (tiny overhead for high-volume services)
+// - Aggressive circuit breaker (fail fast if backend is down)
+// - Strict cardinality limits (prevent memory explosion)
+// - Production collector endpoint
+config := telemetry.UseProfile(telemetry.ProfileProduction)
+```
+
+### The Three-Tier Configuration System
+
+Configuration follows a clear priority order (like CSS cascading):
+
+```go
+// Priority 1: Explicit configuration (highest priority)
+config := telemetry.Config{
+    ServiceName: "my-service",
+    Endpoint:    "my-collector:4318",  // This wins
+}
+
+// Priority 2: Environment variables (medium priority)
+// export OTEL_EXPORTER_OTLP_ENDPOINT=env-collector:4318
+// If no explicit endpoint, this is used
+
+// Priority 3: Profile defaults (lowest priority)
+// If nothing else is set, profile defaults are used
+```
+
+Here's a complete example:
+
+```go
+func configureTelemetry() telemetry.Config {
+    // Start with a profile
+    config := telemetry.UseProfile(telemetry.ProfileProduction)
+
+    // Override with explicit values
+    config.ServiceName = "payment-service"
+
+    // Environment variables can override
+    if endpoint := os.Getenv("TELEMETRY_ENDPOINT"); endpoint != "" {
+        config.Endpoint = endpoint
+    }
+
+    // Feature flags can control behavior
+    if os.Getenv("TELEMETRY_DEBUG") == "true" {
+        config.SamplingRate = 1.0  // Temporary 100% sampling for debugging
+    }
+
+    return config
+}
+```
+
+## 🐳 Deploying with Docker
+
+Here's how to configure telemetry for containerized applications:
+
+```dockerfile
+# Dockerfile
+FROM golang:1.21 AS builder
+WORKDIR /app
+COPY . .
+RUN go build -o myapp .
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+
+# Copy the binary
+COPY --from=builder /app/myapp .
+
+# Set default environment
+ENV APP_ENV=production
+ENV OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318
+
+CMD ["./myapp"]
+```
 
 ```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  myapp:
+    build: .
+    environment:
+      - APP_ENV=staging
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4318
+      - SERVICE_NAME=my-service
+    depends_on:
+      - otel-collector
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    ports:
+      - "4318:4318"  # HTTP
+      - "4317:4317"  # gRPC
+    volumes:
+      - ./otel-config.yaml:/etc/otel/config.yaml
+    command: ["--config", "/etc/otel/config.yaml"]
+```
+
+## ☸️ Deploying on Kubernetes
+
+For Kubernetes deployments, use ConfigMaps and environment variables:
+
+```yaml
+# configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  APP_ENV: "production"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector.monitoring:4318"
+
+---
 # deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: my-service
 spec:
+  replicas: 3
   template:
     spec:
       containers:
       - name: app
         image: my-service:latest
+        envFrom:
+        - configMapRef:
+            name: app-config
         env:
-        # Set environment profile
-        - name: APP_ENV
-          value: "production"  # or staging, development
-
-        # Optional: Override telemetry endpoint
-        - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: "otel-collector.monitoring:4318"
-
-        # Optional: Override specific profile settings
-        - name: TELEMETRY_PROFILE
-          value: "production"  # Explicit override if needed
+        - name: SERVICE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
 ```
 
-### Docker Example
+## 🔧 Adding Telemetry to Tools and Agents
 
-```dockerfile
-FROM golang:1.21 AS builder
-# ... build steps ...
+Now let's see how telemetry integrates with GoMind's core components - Tools and Agents.
 
-FROM alpine:latest
-# Default to development, override at runtime
-ENV APP_ENV=development
+### Adding Telemetry to a Tool
 
-COPY --from=builder /app/myservice /myservice
-CMD ["/myservice"]
-```
-
-Run with different profiles:
-```bash
-# Development
-docker run -e APP_ENV=development my-service
-
-# Staging
-docker run -e APP_ENV=staging my-service
-
-# Production
-docker run -e APP_ENV=production -e OTEL_EXPORTER_OTLP_ENDPOINT=collector:4318 my-service
-```
-
-## 🎯 What Does This Module Do?
-
-Think of telemetry as the **dashboard of your car**. Just like how your car's dashboard shows speed, fuel, and engine health, this module shows what's happening inside your distributed system in real-time.
-
-It provides three essential observability pillars:
-
-1. **Metrics** - Numbers that matter (request counts, latencies, error rates)
-2. **Traces** - The journey of a request across services (distributed tracing)
-3. **Context Propagation** - Carrying important metadata across service boundaries
-
-### Real-World Analogy: The Package Delivery System
-
-Imagine tracking a package from warehouse to doorstep:
-- **Metrics** - How many packages processed per hour (like monitoring throughput)
-- **Traces** - Following one specific package's journey (like distributed tracing)
-- **Context** - The tracking number that stays with the package (like baggage propagation)
-
-The telemetry module ensures you can:
-1. Monitor system health at a glance
-2. Debug issues by tracing specific requests
-3. Understand performance bottlenecks
-4. Track business metrics that matter
-
-## 🚀 Quick Start
-
-### Installation
+Remember: Tools are passive components that do one thing well. Here's how to add comprehensive telemetry:
 
 ```go
-import "github.com/itsneelabh/gomind/telemetry"
-```
-
-### Zero to Telemetry in 30 Seconds
-
-```go
-// 1. Initialize with environment-aware configuration (PRODUCTION-READY)
-initTelemetry() // Uses APP_ENV to select correct profile
-defer telemetry.Shutdown(context.Background())
-
-// 2. Emit metrics with one line
-telemetry.Emit("user.login", 1.0, "status", "success", "country", "US")
-
-// 3. That's it! Metrics are now flowing to your backend
-```
-
-**The initTelemetry() helper (add to your project):**
-```go
-func initTelemetry() {
-    // Auto-selects profile based on environment
-    profile := telemetry.ProfileDevelopment // Safe default
-
-    switch os.Getenv("APP_ENV") {
-    case "production":
-        profile = telemetry.ProfileProduction
-    case "staging":
-        profile = telemetry.ProfileStaging
-    }
-
-    config := telemetry.UseProfile(profile)
-    config.ServiceName = "my-service"
-
-    if err := telemetry.Initialize(config); err != nil {
-        log.Printf("WARNING: Telemetry init failed: %v (continuing)", err)
-        return
-    }
-    log.Printf("Telemetry initialized [profile=%s]", profile)
-}
-```
-
-## 🤖 Using Telemetry with GoMind Tools and Agents
-
-### ✅ Getting Started Checklist
-
-Follow this checklist to add telemetry to your GoMind tools and agents:
-
-1. **[ ] Initialize telemetry in main.go with environment detection**
-   ```go
-   // ENTERPRISE PATTERN: Environment-aware initialization
-   initTelemetry() // Auto-detects: dev/staging/prod from APP_ENV
-   defer telemetry.Shutdown(context.Background())
-   ```
-
-2. **[ ] Start OpenTelemetry Collector**
-   ```bash
-   docker run -p 4318:4318 otel/opentelemetry-collector:latest
-   ```
-
-3. **[ ] Add metrics to your tool/agent methods**
-   ```go
-   // For Tools (passive components)
-   telemetry.Counter("my_tool.operations")
-   telemetry.Histogram("my_tool.duration_ms", duration)
-   
-   // For Agents (active orchestrators)
-   telemetry.Counter("my_agent.orchestrations")
-   telemetry.Histogram("my_agent.workflow_duration_ms", duration)
-   ```
-
-4. **[ ] Check metrics are flowing**
-   ```go
-   health := telemetry.GetHealth()
-   fmt.Printf("Metrics emitted: %d\n", health.MetricsEmitted)
-   ```
-
-5. **[ ] Deploy to different environments (no code changes needed!)**
-   ```bash
-   # Development (default)
-   APP_ENV=development ./myapp
-
-   # Staging
-   APP_ENV=staging ./myapp
-
-   # Production
-   APP_ENV=production ./myapp
-   ```
-
-6. **[ ] Verify correct profile is loaded**
-   ```go
-   // Your initTelemetry() will log:
-   // "Telemetry initialized [profile=ProfileProduction]"
-   ```
-
-### Complete Examples - From Zero to Production
-
-Here are complete, working examples of how to add telemetry to both GoMind tools and agents:
-
-#### Step 1: Create Your Main Application
-
-```go
-// main.go - Your application entry point
 package main
 
 import (
     "context"
-    "log"
-    "os"
     "time"
 
     "github.com/itsneelabh/gomind/core"
     "github.com/itsneelabh/gomind/telemetry"
 )
 
-// initTelemetry initializes telemetry based on environment
-func initTelemetry(serviceName string) {
-    // ENTERPRISE PATTERN: Select profile based on environment
-    profile := telemetry.ProfileDevelopment // Safe default
-
-    env := os.Getenv("APP_ENV")
-    switch env {
-    case "production", "prod":
-        profile = telemetry.ProfileProduction
-    case "staging", "qa":
-        profile = telemetry.ProfileStaging
-    }
-
-    config := telemetry.UseProfile(profile)
-    config.ServiceName = serviceName
-
-    if err := telemetry.Initialize(config); err != nil {
-        // Don't crash - telemetry should not break the service
-        log.Printf("WARNING: Telemetry init failed: %v (continuing without telemetry)", err)
-        return
-    }
-
-    log.Printf("✅ Telemetry initialized [env=%s, profile=%s, service=%s]",
-        env, profile, serviceName)
+// WeatherTool fetches weather data (passive component)
+type WeatherTool struct {
+    *core.BaseTool
 }
 
-func main() {
-    // STEP 1: Initialize telemetry with environment detection
-    initTelemetry("my-system")
-    
-    // IMPORTANT: Always shutdown telemetry when your app exits
-    defer func() {
-        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-        defer cancel()
-        telemetry.Shutdown(ctx)
-        log.Println("Telemetry shutdown complete")
-    }()
-    
-    // STEP 2: Create your components - they'll automatically use telemetry
-    // Tools (passive components that respond to requests)
-    calculatorTool := NewCalculatorTool()
-    weatherTool := NewWeatherTool()
-    
-    // Agents (active orchestrators that discover and coordinate)
-    orchestratorAgent := NewOrchestratorAgent()
-    
-    // STEP 3: Use your components - metrics flow automatically
-    ctx := context.Background()
-    
-    // Example: Process a request with context
-    ctx = telemetry.WithBaggage(ctx, 
-        "request_id", "req-123",
-        "user_id", "user-456")
-    
-    // Example: Tool usage
-    calcResult, _ := calculatorTool.Add(ctx, 5, 3)
-    
-    // Example: Agent orchestration
-    report, err := orchestratorAgent.GenerateReport(ctx, "AAPL")
-    if err != nil {
-        log.Printf("Error: %v", err)
+func NewWeatherTool() *WeatherTool {
+    tool := &WeatherTool{
+        BaseTool: core.NewTool("weather"),
     }
-    
-    log.Printf("Calculator result: %v", calcResult)
-    log.Printf("Report: %v", report)
-}
-```
 
-#### Step 2: Create a Tool with Built-in Telemetry
-
-```go
-// calculator_tool.go - A passive tool that performs calculations
-package main
-
-import (
-    "context"
-    "time"
-    
-    "github.com/itsneelabh/gomind/core"
-    "github.com/itsneelabh/gomind/telemetry"
-)
-
-type CalculatorTool struct {
-    *core.BaseTool  // Tools are passive components
-}
-
-func NewCalculatorTool() *CalculatorTool {
-    // Create base tool
-    tool := &CalculatorTool{
-        BaseTool: core.NewTool("calculator"),
-    }
-    
-    // Register this tool's metrics (optional but recommended)
-    telemetry.DeclareMetrics("calculator", telemetry.ModuleConfig{
+    // Declare the metrics this tool will emit
+    telemetry.DeclareMetrics("weather", telemetry.ModuleConfig{
         Metrics: []telemetry.MetricDefinition{
             {
-                Name:   "calculator.operation.duration_ms",
-                Type:   "histogram",
-                Help:   "Time to perform calculation in milliseconds",
-                Labels: []string{"operation", "status"},
-                Unit:   "milliseconds",
+                Name:   "weather.api.calls",
+                Type:   "counter",
+                Help:   "Number of weather API calls",
+                Labels: []string{"city", "status"},
             },
             {
-                Name:   "calculator.operations.count",
+                Name:    "weather.api.latency_ms",
+                Type:    "histogram",
+                Help:    "Weather API response time",
+                Labels:  []string{"city"},
+                Unit:    "milliseconds",
+                Buckets: []float64{50, 100, 250, 500, 1000, 2000},
+            },
+            {
+                Name:   "weather.cache.hits",
                 Type:   "counter",
-                Help:   "Number of calculations performed",
-                Labels: []string{"operation", "status"},
+                Help:   "Weather data cache hits",
+            },
+            {
+                Name:   "weather.temperature",
+                Type:   "gauge",
+                Help:   "Current temperature reading",
+                Labels: []string{"city", "unit"},
             },
         },
     })
-    
+
     return tool
 }
 
-// Tools are passive - they only respond to requests
-func (ct *CalculatorTool) Add(ctx context.Context, a, b float64) (float64, error) {
-    // Track the start time for latency measurement
+// Weather represents weather data (example type for demonstration)
+type Weather struct {
+    Temperature float64
+    City        string
+    Conditions  string
+}
+
+// GetWeather demonstrates comprehensive telemetry in a tool
+func (w *WeatherTool) GetWeather(ctx context.Context, city string) (*Weather, error) {
+    // Track the overall operation
     start := time.Now()
-    
-    // Track that we're starting a calculation
-    telemetry.Counter("calculator.operations.count", 
-        "operation", "add",
-        "status", "started")
-    
-    // Perform the calculation (tools just do their job)
-    result := a + b
-    
-    // Track successful completion
-    telemetry.Counter("calculator.operations.count",
-        "operation", "add",
-        "status", "success")
-    
-    // Track the duration
-    duration := time.Since(start).Milliseconds()
-    telemetry.Histogram("calculator.operation.duration_ms", float64(duration),
-        "operation", "add",
-        "status", "success")
-    
-    return result, nil
-}
-```
+    defer func() {
+        telemetry.Histogram("weather.api.latency_ms",
+            float64(time.Since(start).Milliseconds()),
+            "city", city)
+    }()
 
-#### Step 3: Create an Agent with Built-in Telemetry
-
-```go
-// orchestrator_agent.go - An active agent that orchestrates tools
-package main
-
-import (
-    "context"
-    "fmt"
-    "time"
-    
-    "github.com/itsneelabh/gomind/core"
-    "github.com/itsneelabh/gomind/telemetry"
-)
-
-type OrchestratorAgent struct {
-    *core.BaseAgent  // Agents are active orchestrators
-}
-
-func NewOrchestratorAgent() *OrchestratorAgent {
-    // Create base agent
-    agent := &OrchestratorAgent{
-        BaseAgent: core.NewBaseAgent("orchestrator"),
+    // Check cache first
+    if cached := w.checkCache(city); cached != nil {
+        telemetry.Counter("weather.cache.hits")
+        return cached, nil
     }
-    
-    // Register this agent's metrics
-    telemetry.DeclareMetrics("orchestrator", telemetry.ModuleConfig{
-        Metrics: []telemetry.MetricDefinition{
-            {
-                Name:   "orchestrator.workflow.duration_ms",
-                Type:   "histogram",
-                Help:   "Time to complete workflow in milliseconds",
-                Labels: []string{"workflow", "status"},
-            },
-            {
-                Name:   "orchestrator.tools.discovered",
-                Type:   "gauge",
-                Help:   "Number of tools discovered",
-                Labels: []string{"type"},
-            },
-        },
-    })
-    
-    return agent
-}
 
-// Agents can discover and orchestrate tools
-func (oa *OrchestratorAgent) GenerateReport(ctx context.Context, symbol string) (interface{}, error) {
-    // Track the start time for latency measurement
-    start := time.Now()
-    
-    // Track workflow start
-    telemetry.Counter("orchestrator.workflow.count", 
-        "workflow", "generate_report",
+    // Track API call
+    telemetry.Counter("weather.api.calls",
+        "city", city,
         "status", "started")
-    
-    // Add context for distributed tracing
-    ctx = telemetry.WithBaggage(ctx,
-        "operation", "generate_report",
-        "symbol", symbol)
-    
-    // Discover available tools (agents can discover, tools cannot)
-    tools, err := oa.Discover(ctx, core.DiscoveryFilter{
-        Type: core.ComponentTypeTool,
-    })
-    
+
+    // Make the actual API call
+    weather, err := w.callWeatherAPI(city)
+
     if err != nil {
-        telemetry.Counter("orchestrator.errors",
-            "type", "discovery_failed")
+        // Track failures
+        telemetry.Counter("weather.api.calls",
+            "city", city,
+            "status", "error")
+        telemetry.RecordError("weather.api.error", err.Error())
         return nil, err
     }
-    
-    // Track discovered tools
-    telemetry.Gauge("orchestrator.tools.discovered", float64(len(tools)),
-        "type", "all")
-    
-    // Orchestrate multiple tools (example)
-    // ... call calculator tool, weather tool, etc.
-    
-    // Track successful completion
-    telemetry.Counter("orchestrator.workflow.count",
-        "workflow", "generate_report",
+
+    // Track success
+    telemetry.Counter("weather.api.calls",
+        "city", city,
         "status", "success")
-    
-    // Track the duration
-    duration := time.Since(start).Milliseconds()
-    telemetry.Histogram("orchestrator.workflow.duration_ms", float64(duration),
-        "workflow", "generate_report",
-        "status", "success")
-    
-    return map[string]interface{}{
-        "symbol": symbol,
-        "tools_used": len(tools),
-        "timestamp": time.Now(),
-    }, nil
+
+    // Track the actual temperature (business metric)
+    telemetry.Gauge("weather.temperature",
+        weather.Temperature,
+        "city", city,
+        "unit", "fahrenheit")
+
+    // Cache the result
+    w.updateCache(city, weather)
+
+    return weather, nil
+}
+
+// Helper methods (example implementations)
+func (w *WeatherTool) checkCache(city string) *Weather {
+    // Your cache implementation here
+    return nil
+}
+
+func (w *WeatherTool) callWeatherAPI(city string) (*Weather, error) {
+    // Your API call implementation here
+    return &Weather{Temperature: 72, City: city, Conditions: "Sunny"}, nil
+}
+
+func (w *WeatherTool) updateCache(city string, weather *Weather) {
+    // Your cache update implementation here
 }
 ```
 
-#### Step 4: Multi-Component Orchestration with Telemetry
+### Adding Telemetry to an Agent
+
+Agents are active orchestrators that coordinate multiple components. They need different telemetry patterns:
 
 ```go
-// advanced_orchestrator.go - Coordinate multiple tools and agents
 package main
 
 import (
     "context"
     "sync"
     "time"
-    
+
+    "github.com/itsneelabh/gomind/core"
     "github.com/itsneelabh/gomind/telemetry"
 )
 
-type AdvancedOrchestrator struct {
-    // Tools (passive components)
-    calculatorTool *CalculatorTool
-    weatherTool    *WeatherTool
-    
-    // Agents (active orchestrators)
-    analysisAgent  *AnalysisAgent
+// TravelAgent orchestrates travel planning (active component)
+type TravelAgent struct {
+    *core.BaseAgent
 }
 
-func (o *AdvancedOrchestrator) GenerateComplexReport(ctx context.Context, symbol string, city string) error {
-    // Start tracking the overall operation
-    start := time.Now()
-    
-    // Create a trace for the entire operation
-    ctx = telemetry.WithBaggage(ctx,
-        "operation", "generate_report",
-        "report_id", generateReportID())
-    
-    telemetry.Counter("report.generation.started")
-    
-    // Track concurrent operations (mix of tools and agents)
-    telemetry.Gauge("concurrent_operations", 3, "type", "mixed_orchestration")
-    defer telemetry.Gauge("concurrent_operations", -3, "type", "mixed_orchestration")
-    
-    // Run tools and agents in parallel
-    var wg sync.WaitGroup
-    var calcErr, weatherErr, analysisErr error
-    var calcResult, weatherResult, analysisResult interface{}
-    
-    wg.Add(3)
-    
-    // Calculator tool (passive component)
-    go func() {
-        defer wg.Done()
-        telemetry.Counter("component.invocation", "type", "tool", "name", "calculator", "status", "started")
-        calcResult, calcErr = o.calculatorTool.Calculate(ctx, 100, 50)
-        
-        if calcErr != nil {
-            telemetry.Counter("component.invocation", "type", "tool", "name", "calculator", "status", "error")
-        } else {
-            telemetry.Counter("component.invocation", "type", "tool", "name", "calculator", "status", "success")
-        }
-    }()
-    
-    // Weather tool (passive component)
-    go func() {
-        defer wg.Done()
-        telemetry.Counter("component.invocation", "type", "tool", "name", "weather", "status", "started")
-        weatherResult, weatherErr = o.weatherTool.GetWeather(ctx, city)
-        
-        if weatherErr != nil {
-            telemetry.Counter("component.invocation", "type", "tool", "name", "weather", "status", "error")
-        } else {
-            telemetry.Counter("component.invocation", "type", "tool", "name", "weather", "status", "success")
-        }
-    }()
-    
-    // Analysis agent (active orchestrator)
-    go func() {
-        defer wg.Done()
-        telemetry.Counter("component.invocation", "type", "agent", "name", "analysis", "status", "started")
-        analysisResult, analysisErr = o.analysisAgent.Analyze(ctx, symbol)
-        
-        if analysisErr != nil {
-            telemetry.Counter("component.invocation", "type", "agent", "name", "analysis", "status", "error")
-        } else {
-            telemetry.Counter("component.invocation", "type", "agent", "name", "analysis", "status", "success")
-        }
-    }()
-    
-    // Wait for all tools and agents to complete
-    wg.Wait()
-    
-    // Track completion time
-    duration := time.Since(start).Milliseconds()
-    telemetry.Histogram("report.generation.duration_ms", float64(duration))
-    
-    // Check for errors
-    if calcErr != nil || weatherErr != nil || analysisErr != nil {
-        telemetry.Counter("report.generation.completed", "status", "partial_failure")
-        // Handle errors...
-    } else {
-        telemetry.Counter("report.generation.completed", "status", "success")
+// TripPlan represents a travel plan (example type for demonstration)
+type TripPlan struct {
+    Destination string
+    Weather     *Weather
+    Flights     []Flight
+    Hotels      []Hotel
+}
+
+// Flight and Hotel are example types for demonstration
+type Flight struct {
+    Number string
+    Price  float64
+}
+
+type Hotel struct {
+    Name  string
+    Price float64
+}
+
+func NewTravelAgent() *TravelAgent {
+    agent := &TravelAgent{
+        BaseAgent: core.NewBaseAgent("travel-agent"),
     }
-    
-    // Combine results and generate report
-    // ... your business logic here ...
-    
-    return nil
-}
-```
 
-### Where to Add Telemetry in Your Component Code
-
-Here's a visual guide showing exactly where to add telemetry calls:
-
-```go
-// ┌─────────────────────────────────────┐
-// │         INITIALIZATION              │
-// └─────────────────────────────────────┘
-func main() {
-    // ↓ Initialize telemetry FIRST with environment detection
-    initTelemetry("my-service") // Uses APP_ENV variable
-    defer telemetry.Shutdown(context.Background())
-    
-    // ↓ Then create your tools and agents
-    tool := NewMyTool()
-    agent := NewMyAgent()
-}
-
-// ┌─────────────────────────────────────┐
-// │         TOOL CREATION               │
-// └─────────────────────────────────────┘
-func NewMyTool() *MyTool {
-    tool := &MyTool{
-        BaseTool: core.NewTool("my-tool"),  // Tools are passive
-    }
-    
-    // ↓ Declare your tool's metrics
-    telemetry.DeclareMetrics("my-tool", telemetry.ModuleConfig{
+    // Declare metrics for orchestration patterns
+    telemetry.DeclareMetrics("travel-agent", telemetry.ModuleConfig{
         Metrics: []telemetry.MetricDefinition{
             {
-                Name: "my_tool.operations",
-                Type: "counter",
-                Help: "Number of operations performed",
+                Name:   "agent.orchestrations",
+                Type:   "counter",
+                Help:   "Number of orchestrations performed",
+                Labels: []string{"workflow", "status"},
+            },
+            {
+                Name:   "agent.tools.discovered",
+                Type:   "gauge",
+                Help:   "Number of tools discovered",
+                Labels: []string{"type"},
+            },
+            {
+                Name:   "agent.workflow.steps",
+                Type:   "counter",
+                Help:   "Workflow steps executed",
+                Labels: []string{"workflow", "step", "status"},
+            },
+            {
+                Name:    "agent.workflow.duration_ms",
+                Type:    "histogram",
+                Help:    "Total workflow execution time",
+                Labels:  []string{"workflow"},
+                Buckets: []float64{100, 500, 1000, 5000, 10000, 30000},
             },
         },
     })
-    
-    return tool
-}
 
-// ┌─────────────────────────────────────┐
-// │         AGENT CREATION              │
-// └─────────────────────────────────────┘
-func NewMyAgent() *MyAgent {
-    agent := &MyAgent{
-        BaseAgent: core.NewBaseAgent("my-agent"),  // Agents orchestrate
-    }
-    
-    // ↓ Declare your agent's metrics
-    telemetry.DeclareMetrics("my-agent", telemetry.ModuleConfig{
-        Metrics: []telemetry.MetricDefinition{
-            {
-                Name: "my_agent.orchestrations",
-                Type: "counter",
-                Help: "Number of orchestrations performed",
-            },
-        },
-    })
-    
     return agent
 }
 
-// ┌─────────────────────────────────────┐
-// │         COMPONENT METHODS           │
-// └─────────────────────────────────────┘
-// Tool method (passive - just responds)
-func (t *MyTool) Process(ctx context.Context, input string) (string, error) {
+// PlanTrip demonstrates agent orchestration with telemetry
+func (a *TravelAgent) PlanTrip(ctx context.Context, destination string) (*TripPlan, error) {
+    // Track the entire orchestration
     start := time.Now()
-    telemetry.Counter("my_tool.operations", "status", "started")
-    
-    // Tools just process and return
-    result := processInput(input)
-    
-    telemetry.Counter("my_tool.operations", "status", "success")
-    telemetry.Histogram("my_tool.duration_ms", 
-        float64(time.Since(start).Milliseconds()))
-    
-    return result, nil
-}
+    defer func() {
+        telemetry.Histogram("agent.workflow.duration_ms",
+            float64(time.Since(start).Milliseconds()),
+            "workflow", "plan_trip")
+    }()
 
-// Agent method (active - orchestrates)
-func (a *MyAgent) Orchestrate(ctx context.Context, input string) error {
-    // ↓ Track start of orchestration
-    start := time.Now()
-    telemetry.Counter("my_agent.orchestrations", "status", "started")
-    
-    // ↓ Add context for tracing
-    ctx = telemetry.WithBaggage(ctx, "input_type", "text")
-    
-    // ↓ Discover and orchestrate tools
-    tools, _ := a.Discover(ctx, core.DiscoveryFilter{
+    // Add context for distributed tracing
+    ctx = telemetry.WithBaggage(ctx,
+        "workflow", "plan_trip",
+        "destination", destination,
+        "agent_id", a.GetID())
+
+    telemetry.Counter("agent.orchestrations",
+        "workflow", "plan_trip",
+        "status", "started")
+
+    // Step 1: Discover available tools
+    telemetry.Counter("agent.workflow.steps",
+        "workflow", "plan_trip",
+        "step", "discovery",
+        "status", "started")
+
+    tools, err := a.Discover(ctx, core.DiscoveryFilter{
         Type: core.ComponentTypeTool,
     })
-    telemetry.Gauge("my_agent.tools_discovered", float64(len(tools)))
-    
-    // ↓ Orchestrate the tools
-    result, err := orchestrateTools(tools, input)
-    
+
     if err != nil {
-        // ↓ Track errors
-        telemetry.Counter("my_agent.errors", "type", err.Error())
-        return err
+        telemetry.Counter("agent.workflow.steps",
+            "workflow", "plan_trip",
+            "step", "discovery",
+            "status", "error")
+        return nil, err
     }
-    
-    // ↓ Track success and timing
-    telemetry.Counter("my_agent.orchestrations", "status", "success")
-    telemetry.Histogram("my_agent.duration_ms", 
-        float64(time.Since(start).Milliseconds()))
-    
-    // ↓ Track business metrics
-    telemetry.EmitWithContext(ctx, "my_agent.result_size", float64(len(result)))
-    
-    return nil
-}
-```
 
-### Common Telemetry Patterns for Tools and Agents
-
-#### Pattern 1: Track Component Lifecycle
-```go
-// For Tools
-func (t *MyTool) Initialize(ctx context.Context) error {
-    telemetry.Counter("component.lifecycle", "type", "tool", "name", t.Name, "event", "initialize")
-    // ... initialization code ...
-    return nil
-}
-
-// For Agents
-func (a *MyAgent) Initialize(ctx context.Context) error {
-    telemetry.Counter("component.lifecycle", "type", "agent", "name", a.Name, "event", "initialize")
-    // ... initialization code ...
-    return nil
-}
-```
-
-#### Pattern 2: Track Resource Usage
-```go
-// Tools track their processing
-func (t *MyTool) ProcessBatch(items []Item) {
-    telemetry.Histogram("tool.batch_size", float64(len(items)), 
-        "tool", t.Name)
-    // Process items...
-}
-
-// Agents track orchestration complexity
-func (a *MyAgent) OrchestrateWorkflow(ctx context.Context) {
-    // Track number of components being orchestrated
-    tools, _ := a.Discover(ctx, core.DiscoveryFilter{Type: core.ComponentTypeTool})
-    telemetry.Histogram("agent.components_orchestrated", float64(len(tools)), 
-        "agent", a.Name)
-    
-    // Orchestrate...
-}
-```
-
-#### Pattern 3: Track Tool vs Agent Operations
-```go
-// Tools track simple operations
-func (t *MyTool) CallAPI(ctx context.Context, endpoint string) error {
-    start := time.Now()
-    
-    // Track API call from tool
-    telemetry.Counter("external_api.calls", 
-        "component_type", "tool",
-        "component_name", t.Name,
-        "endpoint", endpoint)
-    
-    resp, err := http.Get(endpoint)
-    
-    // ... make the call ...
-    return err
-}
-
-// Agents track orchestration
-func (a *MyAgent) OrchestrateCalls(ctx context.Context) error {
-    start := time.Now()
-    
-    // Track orchestration
-    telemetry.Counter("orchestration.started", 
-        "agent", a.Name)
-    
-    // Discover and use multiple tools
-    tools, _ := a.Discover(ctx, core.DiscoveryFilter{Type: core.ComponentTypeTool})
-    
-    // Track orchestration complexity
-    telemetry.Histogram("orchestration.complexity",
+    telemetry.Gauge("agent.tools.discovered",
         float64(len(tools)),
-        "agent", a.Name)
-    
-    // ... orchestrate tools ...
-    
-    telemetry.Histogram("orchestration.duration_ms",
-        float64(time.Since(start).Milliseconds()),
-        "agent", a.Name)
-    
+        "type", "all")
+
+    // Step 2: Orchestrate tools in parallel
+    telemetry.Counter("agent.workflow.steps",
+        "workflow", "plan_trip",
+        "step", "orchestration",
+        "status", "started")
+
+    var wg sync.WaitGroup
+    results := &TripPlan{}
+
+    // Track concurrent operations
+    telemetry.Gauge("agent.concurrent_operations", 3)
+    defer telemetry.Gauge("agent.concurrent_operations", -3)
+
+    // Get weather (tool invocation)
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        weatherTool := a.findTool(tools, "weather")
+        if weatherTool != nil {
+            telemetry.Counter("agent.tool.invocation",
+                "tool", "weather",
+                "status", "started")
+            // Invoke tool...
+        }
+    }()
+
+    // Get flights (tool invocation)
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        flightTool := a.findTool(tools, "flights")
+        if flightTool != nil {
+            telemetry.Counter("agent.tool.invocation",
+                "tool", "flights",
+                "status", "started")
+            // Invoke tool...
+        }
+    }()
+
+    // Get hotels (tool invocation)
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        hotelTool := a.findTool(tools, "hotels")
+        if hotelTool != nil {
+            telemetry.Counter("agent.tool.invocation",
+                "tool", "hotels",
+                "status", "started")
+            // Invoke tool...
+        }
+    }()
+
+    wg.Wait()
+
+    telemetry.Counter("agent.orchestrations",
+        "workflow", "plan_trip",
+        "status", "success")
+
+    return results, nil
+}
+
+// Helper method to find a tool by name (example implementation)
+func (a *TravelAgent) findTool(tools []*core.ServiceInfo, name string) *core.ServiceInfo {
+    for _, tool := range tools {
+        if tool.Name == name {
+            return tool
+        }
+    }
     return nil
 }
 ```
 
-### Testing Your Component's Telemetry
+## 🏭 The Architecture Under the Hood
 
-```go
-// component_test.go - Test that your tools and agents emit metrics correctly
-package main
+Let me explain how telemetry works internally, using an analogy everyone understands.
 
-import (
-    "context"
-    "testing"
-    "time"
-    
-    "github.com/itsneelabh/gomind/telemetry"
-)
+### The Post Office Analogy
 
-func TestComponentTelemetry(t *testing.T) {
-    // For tests, it's OK to hardcode ProfileDevelopment for consistency
-    // Tests should always use the same profile for reproducibility
-    telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
-    defer telemetry.Shutdown(context.Background())
-    
-    // Test Tool telemetry
-    tool := NewCalculatorTool()
-    
-    // Test Agent telemetry
-    agent := NewOrchestratorAgent()
-    
-    // Get initial metrics
-    healthBefore := telemetry.GetHealth()
-    
-    // Run your components
-    ctx := context.Background()
-    
-    // Test tool
-    _, err := tool.Add(ctx, 5, 3)
-    if err != nil {
-        t.Fatalf("Tool error: %v", err)
-    }
-    
-    // Test agent
-    _, err = agent.GenerateReport(ctx, "AAPL")
-    if err != nil {
-        t.Fatalf("Agent error: %v", err)
-    }
-    
-    // Check metrics were emitted
-    healthAfter := telemetry.GetHealth()
-    if healthAfter.MetricsEmitted <= healthBefore.MetricsEmitted {
-        t.Error("Expected metrics to be emitted")
-    }
-    
-    // Check for specific metrics
-    // In production, you'd use a test exporter to verify exact metrics
-}
+Think of the telemetry system like a post office:
+
+```
+Your Code (Sender) → Envelope (Metric) → Post Office (Registry) → Delivery Truck (Exporter) → Destination (Collector)
 ```
 
-## 🧠 How It Works
+Here's what happens when you emit a metric:
+
+```go
+telemetry.Counter("request.count")  // You drop a letter in the mailbox
+```
+
+1. **The Registry (Post Office)**: Receives your metric and checks if it's valid
+2. **The Circuit Breaker (Safety System)**: Ensures the post office isn't overwhelmed
+3. **The Cardinality Limiter (Size Checker)**: Makes sure you're not sending a package that's too big
+4. **The Exporter (Delivery Truck)**: Batches metrics and sends them to the collector
+5. **The Collector (Destination)**: Receives and stores your metrics
 
 ### The Three-Layer Architecture
 
 ```
 ┌─────────────────────────────────────────┐
-│         Simple API Layer                 │  ← What developers use
+│         Simple API Layer                 │  ← What you use (Counter, Histogram, Gauge)
 │    Emit(), Counter(), Histogram()        │
 ├─────────────────────────────────────────┤
-│        Smart Registry Layer              │  ← Manages lifecycle
-│   Thread-safe, Cardinality limits        │
+│        Smart Registry Layer              │  ← Manages everything
+│   Thread-safe, Cardinality limits        │     (You never see this)
 ├─────────────────────────────────────────┤
-│     OpenTelemetry Provider Layer         │  ← Does the heavy lifting
-│    HTTP export to collectors             │
+│     OpenTelemetry Provider Layer         │  ← Does the actual work
+│    HTTP export to collectors             │     (Handles the complexity)
 └─────────────────────────────────────────┘
-```
-
-### Progressive Disclosure - Start Simple, Go Deep When Needed
-
-#### Level 1: Just Emit Metrics (90% of use cases)
-```go
-// Super simple - just emit and go
-telemetry.Counter("api.requests", "endpoint", "/users")
-telemetry.Histogram("api.latency", 45.2, "endpoint", "/users")
-telemetry.Gauge("queue.size", 150, "queue", "orders")
-```
-
-#### Level 2: Context Propagation (For distributed systems)
-```go
-// Add context for distributed tracing
-ctx := telemetry.WithBaggage(ctx, 
-    "request_id", "abc123",
-    "user_id", "user456")
-
-// Context automatically flows with the metric
-telemetry.EmitWithContext(ctx, "payment.processed", 99.99)
-```
-
-#### Level 3: Advanced Features (When you need control)
-```go
-// Custom configuration
-config := telemetry.Config{
-    ServiceName:      "payment-service",
-    Endpoint:         "localhost:4318",  // HTTP endpoint
-    CardinalityLimit: 5000,
-    CircuitBreaker: telemetry.CircuitConfig{
-        Enabled:      true,
-        MaxFailures:  5,
-        RecoveryTime: 30 * time.Second,
-    },
-}
-telemetry.Initialize(config)
-
-// Declare metrics upfront for validation
-telemetry.DeclareMetrics("payment-service", telemetry.ModuleConfig{
-    Metrics: []telemetry.MetricDefinition{
-        {
-            Name:   "payment.amount",
-            Type:   "histogram",
-            Help:   "Payment amounts in USD",
-            Labels: []string{"method", "currency"},
-            Unit:   "dollars",
-        },
-    },
-})
-```
-
-## 📊 Metric Types Explained
-
-### Counter - Things that only go up
-```go
-// Perfect for: request counts, error counts, bytes processed
-telemetry.Counter("files.processed", "type", "pdf")
-telemetry.Counter("errors.total", "service", "auth")
-```
-
-### Histogram - Distribution of values
-```go
-// Perfect for: latencies, sizes, amounts
-telemetry.Histogram("response.time_ms", 123.5, "endpoint", "/api/users")
-telemetry.Histogram("file.size_mb", 2.4, "type", "image")
-```
-
-### Gauge - Values that go up and down
-```go
-// Perfect for: active connections, queue sizes, memory usage
-telemetry.Gauge("connections.active", 42, "pool", "database")
-telemetry.Gauge("memory.heap_mb", 256, "service", "api")
-```
-
-## 🔄 Context Propagation (Distributed Tracing)
-
-### Following Requests Across Services
-
-```go
-// Service A: Start the journey
-ctx := telemetry.WithBaggage(context.Background(),
-    "trace_id", "xyz789",
-    "user_tier", "premium")
-
-// Make a call to Service B (context flows automatically)
-serviceB.Process(ctx)
-
-// Service B: Continue the journey
-func (b *ServiceB) Process(ctx context.Context) {
-    // Extract context to see the journey
-    baggage := telemetry.GetBaggage(ctx)
-    
-    // Add more context
-    ctx = telemetry.WithBaggage(ctx, 
-        "payment_method", "credit_card")
-    
-    // Emit metrics with full context
-    telemetry.EmitWithContext(ctx, "payment.processed", 99.99)
-    
-    // Context flows to Service C
-    serviceC.Finalize(ctx)
-}
-```
-
-### Baggage Limits (Prevent runaway metadata)
-```go
-// Automatic protection against context explosion
-stats := telemetry.GetBaggageStats()
-fmt.Printf("Items: %d, Dropped: %d\n", stats.ItemsAdded, stats.ItemsDropped)
-```
-
-## 🚦 Configuration Profiles
-
-> ⚠️ **WARNING**: The examples below show what each profile provides. **NEVER hardcode profiles in production code!** Use environment-based selection instead (see Environment-Based Profile Selection below).
-
-### Development - Fast feedback, verbose logging
-```go
-// ❌ DON'T hardcode this! Shown for reference only
-telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
-// ✓ Full sampling (100%)
-// ✓ No circuit breaker (fail fast in dev)
-// ✓ High cardinality limit (50,000)
-// ✓ No PII redaction
-// ✓ Localhost endpoint (localhost:4318)
-```
-
-### Staging - Production-like with safety nets
-```go
-// ❌ DON'T hardcode this! Shown for reference only
-telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileStaging))
-// ✓ 10% sampling rate (balanced cost/visibility)
-// ✓ Circuit breaker enabled (10 failures, 15s recovery)
-// ✓ Medium cardinality limit (20,000)
-// ✓ PII redaction enabled
-// ✓ Staging endpoint (otel-collector.staging:4318)
-```
-
-### Production - Battle-hardened settings
-```go
-// ❌ DON'T hardcode this! Shown for reference only
-telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
-// ✓ 0.1% sampling rate (cost-optimized)
-// ✓ Strict cardinality limits (10,000)
-// ✓ Circuit breaker (10 failures, 30s recovery)
-// ✓ PII redaction enabled
-// ✓ Per-label cardinality limits
-// ✓ Production endpoint (otel-collector.prod:4318)
-```
-
-### Environment-Based Profile Selection
-```go
-// Automatically select profile based on environment variable
-func initTelemetry() {
-    var profile telemetry.Profile
-    switch os.Getenv("APP_ENV") {
-    case "production":
-        profile = telemetry.ProfileProduction
-    case "staging", "qa":
-        profile = telemetry.ProfileStaging
-    default:
-        profile = telemetry.ProfileDevelopment
-    }
-
-    telemetry.Initialize(telemetry.UseProfile(profile))
-}
-```
-
-### Custom Configuration
-```go
-config := telemetry.Config{
-    ServiceName:      "my-service",
-    Endpoint:         "otel-collector.prod:4318",  // HTTP endpoint
-    CardinalityLimit: 10000,
-    SamplingRate:     0.25,  // Sample 25% of traces
-    CircuitBreaker: telemetry.CircuitConfig{
-        Enabled:      true,
-        MaxFailures:  10,
-        RecoveryTime: 30 * time.Second,
-    },
-}
-telemetry.Initialize(config)
 ```
 
 ## 🛡️ Production Safety Features
 
-### 1. Circuit Breaker - Protect against backend failures
+The telemetry module includes several safety features to protect your application in production:
+
+### 1. The Circuit Breaker (Automatic Failure Protection)
+
+Just like a circuit breaker in your house prevents electrical overload, the telemetry circuit breaker prevents a failing metrics backend from affecting your application:
+
 ```go
-// Automatically stops sending metrics if backend is down
-// Prevents cascading failures
-config.CircuitBreaker = telemetry.CircuitConfig{
-    Enabled:      true,
-    MaxFailures:  5,                // 5 failures trigger open circuit
-    RecoveryTime: 30 * time.Second, // Try again after 30s
+// The circuit breaker has three states:
+// CLOSED: Normal operation, metrics flow through
+// OPEN: Backend is down, metrics are dropped (fail fast)
+// HALF-OPEN: Testing if backend recovered
+
+// You don't need to configure this manually, but here's how it works:
+config := telemetry.Config{
+    CircuitBreaker: telemetry.CircuitConfig{
+        Enabled:      true,
+        MaxFailures:  5,              // Open after 5 failures
+        RecoveryTime: 30 * time.Second, // Try again after 30 seconds
+    },
 }
+
+// In your code, you just emit metrics normally
+telemetry.Counter("my.metric")  // If circuit is open, this returns immediately
 ```
 
-### 2. Cardinality Limiter - Prevent metric explosion
-```go
-// Automatically limits unique label combinations
-// Prevents memory/cost explosion
-config.CardinalityLimit = 5000  // Max 5000 unique combinations per metric
+### 2. Cardinality Limits (Memory Protection)
 
-// Per-label limits for fine control
-config.CardinalityLimits = map[string]int{
-    "user_id":    100,
-    "agent_id":   100,
-    "error_type": 50,
+High cardinality can cause memory explosions. The module protects you automatically:
+
+```go
+// BAD: User ID as a label creates millions of metric series
+for _, userID := range users {
+    telemetry.Counter("user.action", "user_id", userID)  // DON'T DO THIS!
 }
+
+// The cardinality limiter will automatically:
+// 1. Detect high cardinality
+// 2. Start dropping new label combinations
+// 3. Log warnings so you know what's happening
+
+// GOOD: Use bounded labels instead
+telemetry.Counter("user.action",
+    "user_type", "premium",  // Only a few types
+    "action", "login")       // Only a few actions
 ```
 
-### 3. Thread-Safe Global Registry
-```go
-// Safe to call from any goroutine
-go func() { telemetry.Emit("goroutine.spawned", 1.0) }()
-go func() { telemetry.Emit("goroutine.spawned", 1.0) }()
-// No race conditions!
-```
+### 3. Graceful Degradation
 
-## 📈 Health Monitoring
-
-### Check telemetry health
-```go
-health := telemetry.GetHealth()
-fmt.Printf("Telemetry Status:\n")
-fmt.Printf("  Initialized: %v\n", health.Initialized)
-fmt.Printf("  Provider: %s\n", health.Provider)
-fmt.Printf("  Metrics Emitted: %d\n", health.MetricsEmitted)
-fmt.Printf("  Errors: %d\n", health.Errors)
-fmt.Printf("  Circuit Breaker: %s\n", health.CircuitBreakerStatus)
-```
-
-### HTTP Health Endpoint
-```go
-http.HandleFunc("/health/telemetry", telemetry.HealthHandler)
-// Returns: {"initialized":true,"provider":"otel","metrics_emitted":1234,...}
-```
-
-## 🔌 Backend Integration
-
-### OpenTelemetry Collector Setup
-```yaml
-# docker-compose.yml
-services:
-  otel-collector:
-    image: otel/opentelemetry-collector:latest
-    ports:
-      - "4318:4318"  # HTTP endpoint
-    volumes:
-      - ./otel-config.yaml:/etc/otel-config.yaml
-    command: ["--config", "/etc/otel-config.yaml"]
-```
-
-### Export to Multiple Backends
-```yaml
-# otel-config.yaml
-receivers:
-  otlp:
-    protocols:
-      http:
-        endpoint: 0.0.0.0:4318
-
-exporters:
-  prometheus:
-    endpoint: "0.0.0.0:9090"
-  jaeger:
-    endpoint: "jaeger:14250"
-
-service:
-  pipelines:
-    metrics:
-      receivers: [otlp]
-      exporters: [prometheus]
-    traces:
-      receivers: [otlp]
-      exporters: [jaeger]
-```
-
-## 🚀 Common Patterns
-
-### Pattern 1: Request Middleware
-```go
-func MetricsMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        start := time.Now()
-        
-        // Track request
-        telemetry.Counter("http.requests", 
-            "method", r.Method,
-            "path", r.URL.Path)
-        
-        // Call next handler
-        next.ServeHTTP(w, r)
-        
-        // Track latency
-        telemetry.Histogram("http.latency_ms", 
-            float64(time.Since(start).Milliseconds()),
-            "method", r.Method,
-            "path", r.URL.Path)
-    })
-}
-```
-
-### Pattern 2: Business Metrics
-```go
-func ProcessPayment(ctx context.Context, amount float64) error {
-    // Track business metric
-    telemetry.EmitWithContext(ctx, "payment.amount", amount,
-        "currency", "USD",
-        "method", "credit_card")
-    
-    // Process payment...
-    
-    telemetry.Counter("payment.success", "method", "credit_card")
-    return nil
-}
-```
-
-### Pattern 3: Background Job Monitoring
-```go
-func RunJob(ctx context.Context) {
-    telemetry.Counter("job.started", "type", "data_sync")
-    defer telemetry.Counter("job.completed", "type", "data_sync")
-    
-    // Track active jobs
-    telemetry.Gauge("jobs.active", 1, "type", "data_sync")
-    defer telemetry.Gauge("jobs.active", -1, "type", "data_sync")
-    
-    // Job logic...
-}
-```
-
-## ❓ FAQ for Junior Developers
-
-### Q: Where do I initialize telemetry?
-**A:** Always initialize telemetry ONCE in your `main()` function, before creating any agents:
+The module is designed to never crash your application:
 
 ```go
 func main() {
-    // ✅ Initialize FIRST with environment detection
-    initTelemetry("my-service") // Uses APP_ENV to select profile
-    defer telemetry.Shutdown(context.Background())
-    
-    // Then create tools and agents
-    tool := NewMyTool()
-    agent := NewMyAgent()
-}
-```
-
-### Q: Do I need to pass telemetry to each tool and agent?
-**A:** No! Once initialized, telemetry is globally available. All tools and agents can call `telemetry.Emit()` directly:
-
-```go
-// Tools can use it
-func (t *MyTool) Process() {
-    telemetry.Counter("tool.processed")  // Works automatically!
-}
-
-// Agents can use it
-func (a *MyAgent) Orchestrate() {
-    telemetry.Counter("agent.orchestrated")  // Works automatically!
-}
-```
-
-### Q: What's the difference between Emit, Counter, Histogram, and Gauge?
-**A:** Think of them like this:
-
-```go
-// Counter - Counts things (always goes up)
-telemetry.Counter("user.logins")  // +1 each time
-
-// Histogram - Measures distributions (like response times)
-telemetry.Histogram("api.latency_ms", 125.5)  // Records the value
-
-// Gauge - Current value (can go up or down)
-telemetry.Gauge("queue.size", 42)  // Current queue size
-
-// Emit - General purpose (framework decides the type)
-telemetry.Emit("custom.metric", 3.14)
-```
-
-### Q: How do I track errors in tools vs agents?
-**A:** Use counters with component type labels:
-
-```go
-// In a Tool
-if err != nil {
-    telemetry.Counter("errors", 
-        "component_type", "tool",
-        "component_name", "calculator",
-        "error_type", "invalid_input")
-    return err
-}
-
-// In an Agent
-if err != nil {
-    telemetry.Counter("errors",
-        "component_type", "agent",
-        "component_name", "orchestrator",
-        "error_type", "discovery_failed")
-    return err
-}
-```
-
-### Q: What labels should I use?
-**A:** Keep labels low-cardinality (few unique values):
-
-```go
-// ✅ GOOD - Limited values
-telemetry.Counter("api.requests", 
-    "method", "GET",        // ~5 values (GET, POST, etc.)
-    "status", "success")    // ~3 values (success, error, timeout)
-
-// ❌ BAD - Unlimited values
-telemetry.Counter("api.requests",
-    "user_id", userID,      // Millions of values!
-    "timestamp", time.Now()) // Infinite values!
-```
-
-### Q: How do I test if my metrics are working?
-**A:** Check the telemetry health:
-
-```go
-health := telemetry.GetHealth()
-fmt.Printf("Metrics emitted: %d\n", health.MetricsEmitted)
-fmt.Printf("Errors: %d\n", health.Errors)
-```
-
-### Q: What's context propagation and when do I need it?
-**A:** Context propagation carries metadata across service calls. Use it for distributed tracing:
-
-```go
-// Service A: Start the trace
-ctx = telemetry.WithBaggage(ctx, "request_id", "abc123")
-
-// Call Service B - context flows automatically
-serviceB.Process(ctx)  
-
-// Service B: Can see the request_id
-baggage := telemetry.GetBaggage(ctx)
-fmt.Println(baggage["request_id"])  // "abc123"
-```
-
-### Q: What if telemetry fails? Will my app crash?
-**A:** No! Telemetry failures are silent and non-blocking:
-
-```go
-// Even if telemetry backend is down, your app continues
-telemetry.Emit("metric", 1.0)  // Won't crash even if backend is down
-```
-
-### Q: How often are metrics sent to the backend?
-**A:** The OpenTelemetry SDK handles batching and export intervals automatically:
-- Metrics are batched and sent periodically (typically every 30 seconds)
-- You can't configure the export interval directly in this module
-- The SDK optimizes for efficiency and reduces network overhead
-
-### Q: Can I use this without Docker/Kubernetes?
-**A:** Yes! For local development, just run the OpenTelemetry Collector:
-
-```bash
-# Download and run collector locally
-docker run -p 4318:4318 otel/opentelemetry-collector:latest
-
-# Your app will send metrics to localhost:4318
-```
-
-## 🎯 Best Practices
-
-### 1. Keep Labels Low-Cardinality
-```go
-// ❌ Bad: High cardinality
-telemetry.Emit("api.request", 1.0, "user_id", userID)  // Millions of values!
-
-// ✅ Good: Low cardinality  
-telemetry.Emit("api.request", 1.0, "user_tier", "premium")  // Few values
-```
-
-### 2. Use Consistent Naming
-```go
-// ✅ Good: Consistent patterns
-telemetry.Counter("http.requests.total")
-telemetry.Histogram("http.request.duration_ms")
-telemetry.Gauge("http.connections.active")
-
-// ❌ Bad: Inconsistent
-telemetry.Counter("RequestCount")
-telemetry.Histogram("http_request_time")
-telemetry.Gauge("active-connections")
-```
-
-### 3. Initialize Once, Use Everywhere
-```go
-// main.go
-func main() {
-    // ENTERPRISE PATTERN: Auto-select profile based on APP_ENV
-    // APP_ENV=development → ProfileDevelopment (100% sampling)
-    // APP_ENV=staging     → ProfileStaging (10% sampling)
-    // APP_ENV=production  → ProfileProduction (0.1% sampling)
-    initTelemetry("my-service")
-    defer telemetry.Shutdown(context.Background())
-
-    // Now any package can emit metrics
-    server.Start()  // server package can call telemetry.Emit()
-}
-```
-
-### 4. Handle Shutdown Gracefully
-```go
-// Always shutdown to flush pending metrics
-defer func() {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    telemetry.Shutdown(ctx)
-}()
-```
-
-## API Reference
-
-### Core Functions
-
-| Function | Description | Example |
-|----------|-------------|------|
-| `Initialize(config)` | Initialize telemetry system | See `initTelemetry()` pattern above for environment-aware init |
-| `Emit(name, value, labels...)` | Emit a metric with labels | `telemetry.Emit("api.requests", 1.0, "method", "GET")` |
-| `EmitWithContext(ctx, name, value, labels...)` | Emit metric with context | `telemetry.EmitWithContext(ctx, "payment", 99.99)` |
-| `Counter(name, labels...)` | Increment a counter | `telemetry.Counter("errors", "type", "timeout")` |
-| `Histogram(name, value, labels...)` | Record a value distribution | `telemetry.Histogram("latency_ms", 123.5)` |
-| `Gauge(name, value, labels...)` | Set a gauge value | `telemetry.Gauge("queue.size", 42)` |
-| `WithBaggage(ctx, labels...)` | Add context propagation | `telemetry.WithBaggage(ctx, "user_id", "123")` |
-| `GetBaggage(ctx)` | Extract baggage from context | `baggage := telemetry.GetBaggage(ctx)` |
-| `Shutdown(ctx)` | Gracefully shutdown telemetry | `telemetry.Shutdown(context.Background())` |
-
-### Logger Functions
-
-The telemetry module now provides a production-grade structured logger that integrates with the framework's observability stack.
-
-| Function | Description | Example |
-|----------|-------------|------|
-| `NewTelemetryLogger(name)` | Create a new logger instance | `logger := telemetry.NewTelemetryLogger("my-service")` |
-| `GetLogger()` | Get the global logger instance | `logger := telemetry.GetLogger()` |
-| `Debug(msg, fields)` | Debug-level logging | `logger.Debug("Processing request", map[string]interface{}{"id": 123})` |
-| `Info(msg, fields)` | Info-level logging | `logger.Info("Service started", nil)` |
-| `Warn(msg, fields)` | Warning-level logging | `logger.Warn("High memory usage", map[string]interface{}{"usage": 90})` |
-| `Error(msg, fields)` | Error-level logging | `logger.Error("Failed to connect", map[string]interface{}{"error": err})` |
-
-
-**Logger Integration Example:**
-```go
-import "github.com/itsneelabh/gomind/telemetry"
-
-// Initialize logger
-logger := telemetry.NewTelemetryLogger("payment-service")
-
-// Use throughout your service
-func ProcessPayment(ctx context.Context, amount float64) error {
-    logger.Info("Processing payment", map[string]interface{}{
-        "amount": amount,
-        "timestamp": time.Now(),
-    })
-
-    // Your business logic here
-
-    if err != nil {
-        logger.Error("Payment failed", map[string]interface{}{
-            "error": err.Error(),
-            "amount": amount,
-        })
-        return err
+    // Even if telemetry fails to initialize, your app keeps running
+    if err := telemetry.Initialize(config); err != nil {
+        log.Printf("Telemetry failed to initialize: %v", err)
+        // Your app continues without telemetry
     }
 
+    // Even if the metrics backend dies, your app keeps running
+    telemetry.Counter("my.metric")  // Never panics, never blocks
+
+    // Even if shutdown fails, your app exits cleanly
+    defer func() {
+        if err := telemetry.Shutdown(context.Background()); err != nil {
+            log.Printf("Telemetry shutdown failed: %v", err)
+            // Your app still exits normally
+        }
+    }()
+}
+```
+
+## 🧪 Testing Your Telemetry
+
+Here's how to test that your components emit metrics correctly:
+
+```go
+package main
+
+import (
+    "context"
+    "testing"
+
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+// MyComponent is an example component for testing
+type MyComponent struct {
+    name string
+}
+
+func NewMyComponent() *MyComponent {
+    return &MyComponent{name: "test-component"}
+}
+
+func (c *MyComponent) DoSomething(ctx context.Context) error {
+    // Emit some metrics
+    telemetry.Counter("component.operation", "name", c.name)
+    return nil
+}
+
+func TestMyComponentTelemetry(t *testing.T) {
+    // In tests, use development profile for predictable behavior
+    config := telemetry.UseProfile(telemetry.ProfileDevelopment)
+    config.ServiceName = "test"
+
+    // Initialize telemetry for the test
+    if err := telemetry.Initialize(config); err != nil {
+        t.Fatalf("Failed to initialize telemetry: %v", err)
+    }
+    defer telemetry.Shutdown(context.Background())
+
+    // Get health before operation
+    healthBefore := telemetry.GetHealth()
+
+    // Run your component
+    component := NewMyComponent()
+    err := component.DoSomething(context.Background())
+
+    if err != nil {
+        t.Fatalf("Component failed: %v", err)
+    }
+
+    // Get health after operation
+    healthAfter := telemetry.GetHealth()
+
+    // Verify metrics were emitted
+    if healthAfter.MetricsEmitted <= healthBefore.MetricsEmitted {
+        t.Error("Expected metrics to be emitted")
+    }
+
+    // For more detailed testing, you can:
+    // 1. Use a test exporter to capture exact metrics
+    // 2. Mock the telemetry system
+    // 3. Use the metrics registry to query specific metrics
+}
+
+// Test with different profiles
+func TestTelemetryProfiles(t *testing.T) {
+    profiles := []telemetry.Profile{
+        telemetry.ProfileDevelopment,
+        telemetry.ProfileStaging,
+        telemetry.ProfileProduction,
+    }
+
+    for _, profile := range profiles {
+        t.Run(string(profile), func(t *testing.T) {
+            config := telemetry.UseProfile(profile)
+
+            // Verify profile-specific settings
+            switch profile {
+            case telemetry.ProfileDevelopment:
+                if config.SamplingRate != 1.0 {
+                    t.Error("Development should have 100% sampling")
+                }
+            case telemetry.ProfileProduction:
+                if config.SamplingRate >= 0.1 {
+                    t.Error("Production should have low sampling rate")
+                }
+            }
+        })
+    }
+}
+```
+
+## 🔍 Debugging Telemetry Issues
+
+When telemetry isn't working as expected, here's how to debug:
+
+```go
+import (
+    "fmt"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func debugTelemetry() {
+    // 1. Check if telemetry is initialized
+    health := telemetry.GetHealth()
+    fmt.Printf("Telemetry Health Check:\n")
+    fmt.Printf("  Initialized: %v\n", health.Initialized)
+    fmt.Printf("  Metrics Emitted: %d\n", health.MetricsEmitted)
+    fmt.Printf("  Circuit State: %s\n", health.CircuitState)
+    fmt.Printf("  Last Error: %s\n", health.LastError)
+
+    // 2. Enable debug logging
+    config := telemetry.Config{
+        ServiceName: "debug-test",
+        Enabled:     true,
+        // In development, you might want to see everything
+    }
+
+    // 3. Test with a simple metric
+    telemetry.Counter("debug.test")
+
+    // 4. Check health again
+    healthAfter := telemetry.GetHealth()
+    if healthAfter.MetricsEmitted == health.MetricsEmitted {
+        fmt.Println("WARNING: Metric was not emitted!")
+        fmt.Printf("Possible reasons:\n")
+        fmt.Printf("- Telemetry not initialized\n")
+        fmt.Printf("- Circuit breaker is open\n")
+        fmt.Printf("- Sampling rate is 0\n")
+    }
+}
+```
+
+## 📈 Advanced Patterns
+
+### Pattern 1: Request Tracing
+```go
+import (
+    "net/http"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func handleRequest(w http.ResponseWriter, r *http.Request) {
+    // Create request context with correlation ID
+    ctx := telemetry.WithBaggage(r.Context(),
+        "request_id", r.Header.Get("X-Request-ID"),
+        "user_id", getUserID(r),
+        "endpoint", r.URL.Path)
+
+    // All metrics in this request will include this context
+    defer telemetry.TimeOperation("request.duration",
+        "endpoint", r.URL.Path,
+        "method", r.Method)()
+
+    // Your handler logic...
+    processHTTPRequest(w, r)
+}
+
+// Helper function (example)
+func getUserID(r *http.Request) string {
+    // Your user ID extraction logic here
+    return "user-123"
+}
+
+func processHTTPRequest(w http.ResponseWriter, r *http.Request) {
+    // Your request processing logic here
+    w.WriteHeader(http.StatusOK)
+}
+```
+
+### Pattern 2: Batch Operations
+```go
+// Item represents a work item (example type)
+type Item struct {
+    ID   string
+    Data interface{}
+}
+
+func processBatch(items []Item) {
+    // Track batch metrics
+    telemetry.Histogram("batch.size", float64(len(items)))
+
+    start := time.Now()
+    successful := 0
+    failed := 0
+
+    for _, item := range items {
+        if err := processItem(item); err != nil {
+            failed++
+            telemetry.Counter("item.processing.failed",
+                "error", err.Error())
+        } else {
+            successful++
+            telemetry.Counter("item.processing.success")
+        }
+    }
+
+    // Summary metrics
+    telemetry.Histogram("batch.duration_ms",
+        float64(time.Since(start).Milliseconds()))
+    telemetry.Gauge("batch.success_rate",
+        float64(successful)/float64(len(items))*100)
+}
+
+// Helper function (example)
+func processItem(item Item) error {
+    // Your item processing logic here
     return nil
 }
 ```
 
-## 🔧 Troubleshooting
-
-### Metrics not showing up?
+### Pattern 3: Resource Monitoring
 ```go
-// 1. Check initialization
+import (
+    "runtime"
+    "time"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func monitorResources() {
+    ticker := time.NewTicker(10 * time.Second)
+    defer ticker.Stop()
+
+    for range ticker.C {
+        var m runtime.MemStats
+        runtime.ReadMemStats(&m)
+
+        // Memory metrics
+        telemetry.Gauge("memory.alloc_mb", float64(m.Alloc/1024/1024))
+        telemetry.Gauge("memory.total_alloc_mb", float64(m.TotalAlloc/1024/1024))
+        telemetry.Gauge("memory.sys_mb", float64(m.Sys/1024/1024))
+        telemetry.Gauge("memory.num_gc", float64(m.NumGC))
+
+        // Goroutine metrics
+        telemetry.Gauge("goroutines.count", float64(runtime.NumGoroutine()))
+    }
+}
+```
+
+## 🎯 Best Practices Summary
+
+### DO ✅
+- **Initialize early**: Set up telemetry at the start of main()
+- **Use profiles**: Leverage pre-configured profiles for different environments
+- **Add context**: Use labels to make metrics meaningful
+- **Handle failures gracefully**: Don't let telemetry crash your app
+- **Test your metrics**: Verify components emit expected metrics
+- **Monitor cardinality**: Use bounded label values
+
+### DON'T ❌
+- **Don't use high-cardinality labels**: No user IDs, timestamps, or UUIDs
+- **Don't block on telemetry**: Always use timeouts for shutdown
+- **Don't emit sensitive data**: No passwords, tokens, or PII in metrics
+- **Don't over-instrument**: Start simple, add more as needed
+- **Don't ignore errors**: Log telemetry failures for debugging
+
+## 🏁 Quick Reference
+
+### Initialization
+```go
+// Simplest
+telemetry.Initialize(telemetry.Config{ServiceName: "my-app"})
+
+// With environment detection
+config := telemetry.UseProfile(profile)
+telemetry.Initialize(config)
+
+// Always shutdown
+defer telemetry.Shutdown(context.Background())
+```
+
+### Basic Metrics
+```go
+telemetry.Counter("metric.name", "label", "value")
+telemetry.Histogram("metric.name", 123.45, "label", "value")
+telemetry.Gauge("metric.name", 67.89, "label", "value")
+telemetry.Duration("metric.name", startTime, "label", "value")
+```
+
+### With Context
+```go
+ctx = telemetry.WithBaggage(ctx, "key", "value")
+telemetry.EmitWithContext(ctx, "metric.name", 123.45)
+```
+
+### Health Check
+```go
 health := telemetry.GetHealth()
 if !health.Initialized {
-    log.Fatal("Telemetry not initialized!")
-}
-
-// 2. Check for errors
-if health.Errors > 0 {
-    log.Printf("Telemetry errors: %d", health.Errors)
-}
-
-// 3. Check circuit breaker
-if health.CircuitBreakerStatus == "open" {
-    log.Println("Circuit breaker is open - backend might be down")
+    // Telemetry not working
 }
 ```
 
-### High memory usage?
-```go
-// Check metrics emitted
-internal := telemetry.GetInternalMetrics()
-if internal.Emitted > 1000000 {
-    log.Printf("High metric volume: %d emitted, %d dropped\n", 
-        internal.Emitted, internal.Dropped)
-}
+## 🎉 Summary
 
-// Solution: Reduce label cardinality or increase limits
-config.CardinalityLimit = 20000
+The telemetry module is your application's dashboard, giving you visibility into what's happening in production. It's designed to be:
 
-// Or use per-label limits
-config.CardinalityLimits = map[string]int{
-    "user_id": 100,  // Limit unique user_id values
-}
-```
+- **Simple to start with** - One line to initialize, one line to emit metrics
+- **Safe in production** - Circuit breakers, cardinality limits, graceful degradation
+- **Flexible when needed** - Profiles, contexts, advanced options
 
-### Debugging context propagation?
-```go
-// See what's in the context
-ctx = telemetry.WithBaggage(ctx, "debug", "true")
-baggage := telemetry.GetBaggage(ctx)
-for k, v := range baggage {
-    fmt.Printf("Baggage: %s=%s\n", k, v)
-}
-```
+Remember: Good telemetry is like good insurance - you hope you never need it, but when you do, you're incredibly glad it's there.
 
-## 📦 What's Included
-
-- ✅ **OpenTelemetry Integration** - Industry standard observability
-- ✅ **HTTP/OTLP Export** - Efficient, lightweight protocol
-- ✅ **W3C Baggage Propagation** - Standard context propagation
-- ✅ **Circuit Breaker** - Protect against backend failures
-- ✅ **Cardinality Limiting** - Prevent metric explosion
-- ✅ **Thread-Safe Operations** - Safe concurrent access
-- ✅ **Zero Dependencies** - Only standard Go + OpenTelemetry
-- ✅ **Progressive Disclosure** - Simple API with advanced options
-- ✅ **Production Profiles** - Battle-tested configurations
-
-## 🎓 Learn More
-
-- [OpenTelemetry Documentation](https://opentelemetry.io/docs/)
-- [W3C Baggage Specification](https://www.w3.org/TR/baggage/)
-- [Prometheus Best Practices](https://prometheus.io/docs/practices/naming/)
-- [Distributed Tracing Guide](https://opentelemetry.io/docs/concepts/observability-primer/#distributed-tracing)
-
-## 💡 Pro Tips
-
-1. **Start with profiles** - Use `ProfileDevelopment` locally, `ProfileStaging` for QA/testing, `ProfileProduction` in prod
-2. **Emit early, emit often** - Better to have metrics than to wish you had them
-3. **Keep labels consistent** - Use the same label names across metrics
-4. **Monitor the monitor** - Use health endpoints to monitor telemetry itself
-5. **Test with failures** - Verify circuit breaker behavior before production
-
-Remember: Good telemetry is like insurance - you hope you never need it, but when you do, you're glad it's there!
-
-## 🎯 Summary
-
-The GoMind telemetry module provides:
-- **Simple API** - Start with one-line metric emission
-- **Progressive Disclosure** - Advanced features when you need them
-- **Production Safety** - Circuit breakers, cardinality limits, thread-safety
-- **Standard Compliance** - OpenTelemetry and W3C baggage standards
-- **Multiple Backends** - Export to Prometheus, Jaeger, or any OTLP collector
-
-Get started in seconds, scale to millions of metrics.
+Start simple, add complexity as needed, and always prioritize your application's stability over perfect metrics. Happy monitoring! 📊
