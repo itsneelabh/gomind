@@ -2,6 +2,24 @@
 
 Welcome to the foundation of intelligent agent systems! This guide will walk you through everything step-by-step, like a friendly mentor sitting right next to you. ☕
 
+## 📚 Table of Contents
+
+- [What Is This Module and Why Should You Care?](#-what-is-this-module-and-why-should-you-care)
+- [What's Included (and What's Not)](#-whats-included-and-whats-not)
+- [The Framework: Bringing It All Together](#️-the-framework-bringing-it-all-together)
+- [Quick Start: Your First Components](#-quick-start-your-first-components)
+- [Registering Capabilities: Making Your Components Useful](#-registering-capabilities-making-your-components-useful)
+- [Advanced Features: The Power Tools](#️-advanced-features-the-power-tools)
+- [Understanding Component Registration and Discovery](#-understanding-component-registration-and-discovery)
+- [Architecture Patterns](#️-architecture-patterns)
+- [Advanced Features](#-advanced-features)
+- [Best Practices](#-best-practices)
+- [Common Patterns and Solutions](#-common-patterns-and-solutions)
+- [Debugging and Monitoring](#-debugging-and-monitoring)
+- [Performance Considerations](#-performance-considerations)
+- [Summary](#-summary)
+- [Next Steps](#-next-steps)
+
 ## 🎯 What Is This Module and Why Should You Care?
 
 Let me explain this in the simplest way possible.
@@ -177,17 +195,19 @@ package main
 
 import (
     "context"
+    "os"
     "github.com/itsneelabh/gomind/core"
 )
 
 func main() {
     // Create your component (Tool or Agent)
     tool := core.NewTool("my-tool")
-    
+
     // Wrap it with Framework and configure
+    // Set environment: export REDIS_URL="redis://localhost:6379"
     framework, err := core.NewFramework(tool,
         core.WithPort(8080),
-        core.WithRedisURL("redis://localhost:6379"),
+        core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
         core.WithDiscovery(true),
         core.WithCORS([]string{"https://app.example.com"}, true),
     )
@@ -214,7 +234,8 @@ core.WithPort(8080)                  // HTTP port
 core.WithNamespace("production")     // Namespace for grouping
 
 // Discovery options
-core.WithRedisURL("redis://localhost:6379")  // Redis connection
+// Set environment: export REDIS_URL="redis://localhost:6379"
+core.WithRedisURL(os.Getenv("REDIS_URL"))    // e.g., "redis://localhost:6379"
 core.WithDiscovery(true, "redis")            // Enable service discovery with provider
 core.WithDiscoveryCacheEnabled(true)         // Enable discovery caching
 
@@ -262,7 +283,8 @@ framework, _ := core.NewFramework(agent,
 ```go
 // Manual setup still works (for custom scenarios)
 tool := core.NewTool("custom-tool")
-registry, _ := core.NewRedisRegistry("redis://localhost:6379")
+// Set environment: export REDIS_URL="redis://localhost:6379"
+registry, _ := core.NewRedisRegistry(os.Getenv("REDIS_URL"))  // e.g., "redis://localhost:6379"
 tool.Registry = registry  // Manual assignment works
 
 // Framework respects manual setup and won't override it

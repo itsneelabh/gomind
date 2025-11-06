@@ -1,66 +1,99 @@
 # Multi-Provider AI with Fallback Example
 
-A comprehensive demonstration of **multi-provider AI configuration** with **automatic fallback patterns** for both tools and agents. This example shows how to build resilient AI-powered systems that can gracefully handle provider failures and optimize performance by routing tasks to the most suitable AI provider.
+A comprehensive demonstration of **GoMind's Universal AI Provider Architecture** with **automatic fallback patterns** for both tools and agents. This example showcases how GoMind's AI module enables seamless switching between 20+ AI providers while maintaining code simplicity and reliability.
 
 ## 🎯 What This Example Demonstrates
 
+### GoMind's Universal Provider Strategy
+
+This example leverages **GoMind's revolutionary approach** to AI provider management:
+
+- **Universal OpenAI-Compatible Provider**: One implementation works with OpenAI, Groq, DeepSeek, xAI, Ollama, and 15+ other services
+- **Native Provider Support**: Dedicated implementations for Anthropic Claude, Google Gemini, and AWS Bedrock
+- **Automatic Detection**: The AI module automatically discovers available providers from environment variables
+- **Zero Configuration**: Works out-of-the-box with simple environment variable setup
+- **Provider Priority System**: Intelligently selects the best available provider based on configured priority
+
 ### Multi-Provider Architecture Patterns
 
-| Pattern | Description | Benefits |
-|---------|-------------|----------|
-| **🔄 Automatic Fallback** | Primary → Fallback → Secondary provider chain | High availability, fault tolerance |
-| **⚖️ Provider Comparison** | Execute same task on multiple providers | Quality comparison, best result selection |
-| **🎯 Task-Aware Routing** | Route tasks based on provider strengths | Optimal performance, cost efficiency |
-| **📊 Health Monitoring** | Real-time provider health checking | Proactive failure detection |
+| Pattern | Description | Benefits | Implementation |
+|---------|-------------|----------|--------------|
+| **🔄 Automatic Fallback** | Primary → Fallback → Secondary provider chain | High availability, fault tolerance | Tool & Agent modes |
+| **⚖️ Provider Comparison** | Execute same task on multiple providers simultaneously | Quality comparison, best result selection | Tool mode |
+| **🎯 Intelligent Routing** | Route requests to first available provider | Fast response, automatic failover | Agent mode |
+| **🎼 Provider Orchestration** | Use different providers for different aspects of complex tasks | Optimize for each provider's strengths | Agent mode |
+| **📊 Health Monitoring** | Real-time provider availability and performance testing | Proactive failure detection | Tool mode |
 
 ### Two Implementation Examples
 
 This example includes **both tool and agent implementations**:
 
 #### 🔧 **Multi-Provider Tool** (Port 8085)
-- **Passive component** with AI fallback capabilities
-- **4 capabilities** demonstrating different fallback patterns
-- **Provider health monitoring** and comparison features
-- **Automatic failover** on provider errors
+- **Passive component** with multi-provider capabilities
+- **2 core capabilities**: provider comparison and health monitoring
+- **Parallel processing** for provider comparison
+- **Real-time health checks** with performance metrics
 
-#### 🤖 **Multi-Provider Agent** (Port 8086)  
-- **Active orchestration** with discovery and AI fallback
-- **4 capabilities** showing agent-specific patterns
-- **Intelligent task routing** based on provider strengths
-- **Service discovery** with AI-powered planning
+#### 🤖 **Multi-Provider Agent** (Port 8086)
+- **Active orchestration** with intelligent routing
+- **2 core capabilities**: intelligent routing and provider orchestration
+- **Automatic failover** with provider priority
+- **Complex task distribution** across multiple providers
 
 ## 🏗️ Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                Multi-Provider AI System                 │
-├─────────────────────────────────────────────────────────┤
-│  🔧 Tool (Port 8085)        🤖 Agent (Port 8086)       │
-│  ┌─────────────────────┐    ┌─────────────────────────┐ │
-│  │ • Fallback Processing│    │ • Discovery + Planning │ │
-│  │ • Provider Comparison│    │ • Multi-Provider Orch  │ │
-│  │ • Best Response     │    │ • Adaptive Problem Solv│ │
-│  │ • Health Monitoring │    │ • Task-Aware Routing   │ │
-│  └─────────────────────┘    └─────────────────────────┘ │
-├─────────────────────────────────────────────────────────┤
-│                    Fallback Chain                       │
-│   Primary Provider → Fallback Provider → Secondary      │
-├─────────────────────────────────────────────────────────┤
-│                  Supported Providers                    │
-│  OpenAI • Groq • Anthropic • DeepSeek • Gemini         │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│              GoMind Multi-Provider AI Architecture                  │
+├─────────────────────────────────────────────────────────────────────┤
+│  🔧 Tool (Port 8085)              🤖 Agent (Port 8086)             │
+│  ┌──────────────────────────┐    ┌─────────────────────────────────┐ │
+│  │ • compare_providers      │    │ • intelligent_routing           │ │
+│  │ • provider_health        │    │ • provider_orchestration        │ │
+│  └──────────────────────────┘    └─────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────────┤
+│                       GoMind AI Module (Universal Layer)            │
+│         ┌──────────────────┬──────────────────┬─────────────────┐   │
+│         │  Universal       │    Native        │    Native       │   │
+│         │  OpenAI Provider │  Anthropic       │   Gemini        │   │
+│         │                  │  Provider        │   Provider      │   │
+│         │ • OpenAI         │ • Claude-3       │ • Gemini-Pro    │   │
+│         │ • Groq           │ • Claude-3.5     │ • Gemini-1.5    │   │
+│         │ • DeepSeek       │                  │                 │   │
+│         │ • xAI Grok       │                  │                 │   │
+│         │ • Ollama         │                  │                 │   │
+│         │ • 15+ Others     │                  │                 │   │
+│         └──────────────────┴──────────────────┴─────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Fallback Logic Flow
+### Multi-Provider Configuration Logic
 
 ```
-Request → Primary Provider
-            ↓ (on failure)
-          Fallback Provider  
-            ↓ (on failure)
-          Secondary Provider
-            ↓ (on failure)
-            Error Response
+Environment Scanning:
+┌─────────────────────┐
+│ OPENAI_API_KEY?     │ ──► Primary Provider (OpenAI)
+├─────────────────────┤
+│ ANTHROPIC_API_KEY?  │ ──► Fallback Provider (Claude)
+├─────────────────────┤
+│ GEMINI_API_KEY?     │ ──► Secondary Provider (Gemini)
+└─────────────────────┘
+         │
+         ▼
+Auto-Detection: ai.NewClient() picks best available provider
+```
+
+### Provider Fallback Flow
+
+```
+Tool Mode: compare_providers (parallel execution)
+Primary ┐
+        ├─► Aggregate Results ──► Best Response
+Fallback┘
+Secondary
+
+Agent Mode: intelligent_routing (sequential fallback)
+Primary → (fail) → Fallback → (fail) → Secondary → (fail) → Error
 ```
 
 ## 🚀 Quick Start
@@ -69,23 +102,38 @@ Request → Primary Provider
 
 **Minimum Requirements:**
 - Go 1.25 or later
-- **At least 2 AI provider API keys** (for fallback functionality)
+- **At least 1 AI provider API key** (for basic functionality)
+- **At least 2 AI provider API keys** (for multi-provider fallback demonstration)
 
-**Recommended Setup** (3+ providers for full functionality):
+**This Example's Manual Provider Configuration:**
+Unlike the AI module's automatic provider detection, this example demonstrates **manual multi-provider setup** by explicitly configuring three specific providers:
+
 ```bash
-export OPENAI_API_KEY="sk-your-openai-key"        # Primary (most capable)
-export GROQ_API_KEY="gsk-your-groq-key"           # Fallback (ultra-fast)
-export ANTHROPIC_API_KEY="sk-ant-your-claude-key" # Secondary (analysis)
+# Manual configuration - this example explicitly sets up these providers:
+export OPENAI_API_KEY="sk-your-openai-key"        # Primary → OpenAI GPT-4
+export ANTHROPIC_API_KEY="sk-ant-your-claude-key" # Fallback → Claude-3.5 Sonnet
+export GEMINI_API_KEY="your-google-gemini-key"    # Secondary → Gemini-1.5-Pro
 ```
 
-**Optional Additional Providers:**
+**Key Difference from AI Module Auto-Detection:**
+- **AI Module Auto-Detection**: Uses priority system (OpenAI→Groq→DeepSeek→xAI→Qwen→Anthropic→Gemini)
+- **This Example**: Uses manual fallback chain (OpenAI→Anthropic→Gemini) regardless of priority
+
+**Minimum Configuration** (at least one provider required):
 ```bash
-export DEEPSEEK_API_KEY="sk-your-deepseek-key"    # Advanced reasoning  
-export GEMINI_API_KEY="your-google-gemini-key"    # Google AI
+# At minimum, set one of these:
+export OPENAI_API_KEY="sk-your-key"           # Will be primary provider
+export ANTHROPIC_API_KEY="sk-ant-your-key"    # Will be fallback provider
+export GEMINI_API_KEY="your-google-key"       # Will be secondary provider
 ```
 
-### 1. Run Multi-Provider Tool
+**Auto-Detection Fallback:** If no explicit providers are configured, the example falls back to `ai.NewClient()` auto-detection.
 
+### 📋 Step-by-Step Setup & Validation
+
+#### Step 1: Validate Your Provider Configuration
+
+**Check which providers are detected:**
 ```bash
 # Navigate to the example
 cd examples/ai-multi-provider
@@ -93,7 +141,25 @@ cd examples/ai-multi-provider
 # Install dependencies
 go mod tidy
 
-# Deploy the tool with fallback capabilities
+# Test GoMind's provider auto-detection
+go run -c 'import "github.com/itsneelabh/gomind/ai"; providers := ai.GetProviderInfo(); for _, p := range providers { fmt.Printf("%s: available=%v, priority=%d\n", p.Name, p.Available, p.Priority) }'
+```
+
+**Verify your specific API keys:**
+```bash
+# Check what providers this example will use
+echo "Checking provider configuration..."
+echo "OPENAI_API_KEY: ${OPENAI_API_KEY:+SET}"
+echo "ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:+SET}"
+echo "GEMINI_API_KEY: ${GEMINI_API_KEY:+SET}"
+echo "GROQ_API_KEY: ${GROQ_API_KEY:+SET}"
+echo "DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:+SET}"
+```
+
+#### Step 2: Start the Multi-Provider Services
+
+**Option A: Tool Mode Only** (Port 8085)
+```bash
 export DEPLOYMENT_MODE="tool"
 export TOOL_PORT="8085"
 go run main.go
@@ -101,282 +167,558 @@ go run main.go
 
 **Expected Output:**
 ```
-🎯 Multi-provider configuration:
-   Primary: OpenAI GPT (openai)
-   Fallback: Groq (openai)
-   Secondary: Anthropic Claude (anthropic)
-✅ Multi-provider AI tool created successfully
-🔧 Multi-provider AI Tool starting on port 8085...
+✅ Primary AI provider (OpenAI) configured
+✅ Fallback AI provider (Anthropic) configured
+✅ Secondary AI provider (Gemini) configured
+🔧 Starting in Tool mode...
+🚀 Multi-Provider AI Tool starting on port 8085
 ```
 
-### 2. Run Multi-Provider Agent  
-
+**Option B: Agent Mode Only** (Port 8086)
 ```bash
-# Deploy the agent with discovery and AI fallback
-export DEPLOYMENT_MODE="agent"  
+export DEPLOYMENT_MODE="agent"
 export AGENT_PORT="8086"
 go run main.go
 ```
 
-### 3. Run Both Simultaneously
-
+**Option C: Both Modes Simultaneously**
 ```bash
-# Deploy both tool and agent together
 export DEPLOYMENT_MODE="both"
 export TOOL_PORT="8085"
 export AGENT_PORT="8086"
 go run main.go
 ```
 
-## 📖 Usage Examples
+## 🧪 Comprehensive Testing Strategy
 
-### Tool Examples (Port 8085)
+This section provides step-by-step testing to validate all multi-provider functionality and ensure the example works correctly with your provider configuration.
 
-#### 1. **Automatic Fallback Processing**
+### Phase 1: Provider Health Validation
 
-Demonstrates automatic failover when primary provider fails:
+#### Test 1: Verify Provider Detection and Health
 
+**Start the tool service** (if not already running):
 ```bash
-curl -X POST http://localhost:8085/api/capabilities/process_with_fallback \
+export DEPLOYMENT_MODE="tool"
+export TOOL_PORT="8085"
+go run main.go &
+sleep 5  # Wait for startup
+```
+
+**Check all providers' health:**
+```bash
+curl -X POST http://localhost:8085/api/capabilities/provider_health \
   -H "Content-Type: application/json" \
-  -d '{
-    "text": "Explain the concept of machine learning in simple terms",
-    "task": "analyze",
-    "max_retry": 3
-  }'
+  -d '{}'
 ```
 
-**Response:**
+**Expected Response Structure:**
 ```json
 {
-  "text": "Explain the concept of machine learning...",
-  "task": "analyze",
-  "result": "Machine learning is a way for computers to learn patterns...",
-  "provider_used": "OpenAI GPT",
-  "attempt_number": 1,
-  "fallback_applied": false,
-  "processing_time": "2.3s",
-  "model": "gpt-4",
-  "multi_provider": true
+  "results": {
+    "primary": {
+      "available": true,
+      "response_time": "1.234s",
+      "error": null
+    },
+    "fallback": {
+      "available": true,
+      "response_time": "2.567s",
+      "error": null
+    },
+    "secondary": {
+      "available": false,
+      "response_time": "0s",
+      "error": "API key not provided"
+    }
+  },
+  "success": true,
+  "timestamp": "2025-01-XX..."
 }
 ```
 
-**Fallback Response** (when primary fails):
-```json
-{
-  "provider_used": "Groq (fallback)",
-  "attempt_number": 2,
-  "fallback_applied": true,
-  "processing_time": "0.8s"
-}
+**What this tells you:**
+- `available: true` = Provider is working correctly
+- `available: false` + `error` = Provider configuration issue
+- `response_time` = Performance comparison between providers
+
+#### Test 2: Single Provider Failover Testing
+
+**Test what happens when providers fail:**
+```bash
+# Temporarily rename your primary API key to simulate failure
+export OPENAI_API_KEY_BACKUP="$OPENAI_API_KEY"
+export OPENAI_API_KEY=""
+
+# Restart the service to pick up the change
+pkill -f "go run main.go" || true
+sleep 2
+go run main.go &
+sleep 5
+
+# Test health again - should show primary as unavailable
+curl -X POST http://localhost:8085/api/capabilities/provider_health -d '{}'
+
+# Restore the API key
+export OPENAI_API_KEY="$OPENAI_API_KEY_BACKUP"
 ```
 
-#### 2. **Provider Comparison**
+### Phase 2: Multi-Provider Tool Testing
 
-Execute the same task on all available providers:
+#### Test 3: Provider Comparison (Core Tool Capability)
 
+**Restart with all providers** (restore your configuration):
+```bash
+pkill -f "go run main.go" || true
+sleep 2
+export DEPLOYMENT_MODE="tool"
+go run main.go &
+sleep 5
+```
+
+**Test parallel provider comparison:**
 ```bash
 curl -X POST http://localhost:8085/api/capabilities/compare_providers \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Write a professional email declining a job offer",
-    "task": "creative",
-    "parallel": true
+    "prompt": "Write a haiku about programming"
   }'
 ```
 
-**Response:**
+**Expected Response Structure:**
 ```json
 {
-  "text": "Write a professional email declining a job offer",
-  "comparison": [
-    {
-      "provider_used": "OpenAI GPT",
-      "content": "Dear [Hiring Manager], Thank you for offering me the position...",
-      "quality_score": 0.92,
-      "processing_time": "2.1s"
-    },
-    {
-      "provider_used": "Groq",  
-      "content": "Hi there, Thanks for the job offer...",
-      "quality_score": 0.78,
-      "processing_time": "0.6s"
-    },
-    {
-      "provider_used": "Anthropic Claude",
-      "content": "Dear Hiring Team, I am writing to express my gratitude...",
-      "quality_score": 0.95,
-      "processing_time": "3.2s"
-    }
-  ],
-  "providers": 3,
-  "best_result": {
-    "provider_used": "Anthropic Claude",
-    "quality_score": 0.95
-  }
-}
-```
-
-#### 3. **Best Response Selection**
-
-Try all providers and automatically select the highest quality response:
-
-```bash
-curl -X POST http://localhost:8085/api/capabilities/best_response \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "function calculateTax(income) { return income * 0.25; }",
-    "task": "code_review",
-    "quality_criteria": "accuracy"
-  }'
-```
-
-#### 4. **Provider Health Check**
-
-Monitor the health and availability of all configured providers:
-
-```bash
-curl -X POST http://localhost:8085/api/capabilities/provider_health
-```
-
-**Response:**
-```json
-{
-  "provider_health": {
+  "results": {
     "primary": {
-      "provider": "OpenAI GPT",
-      "healthy": true,
-      "response_time": "1.2s",
-      "response": "OK",
-      "model": "gpt-4"
+      "content": "Code flows like a stream\nLogic branches through the mind\nBugs hide, then are found",
+      "model": "gpt-4",
+      "usage": {"total_tokens": 45}
     },
     "fallback": {
-      "provider": "Groq",
-      "healthy": true,
-      "response_time": "0.3s",
-      "response": "OK"
+      "content": "Variables dance free\nIn loops and functions they play\nSoftware comes to life",
+      "model": "claude-3-5-sonnet-20241022",
+      "usage": {"total_tokens": 42}
     },
     "secondary": {
-      "provider": "Anthropic Claude", 
-      "healthy": false,
-      "error": "API quota exceeded"
+      "content": "Syntax guides the way\nLogic unfolds line by line\nMachine understands",
+      "model": "gemini-1.5-pro",
+      "usage": {"total_tokens": 38}
     }
-  }
+  },
+  "providers": ["primary", "fallback", "secondary"],
+  "success": true,
+  "timestamp": "..."
 }
 ```
 
-### Agent Examples (Port 8086)
+**Validation Questions:**
+- ✅ Did all configured providers respond?
+- ✅ Are the response formats different but valid?
+- ✅ Do you see different `model` names for each provider?
 
-#### 1. **Discovery and Planning with Fallback**
+#### Test 4: Performance and Response Time Comparison
 
-Agent discovers services and creates execution plans using AI with fallback:
-
+**Test with a more complex prompt:**
 ```bash
-curl -X POST http://localhost:8086/api/capabilities/discover_and_plan \
+curl -X POST http://localhost:8085/api/capabilities/compare_providers \
   -H "Content-Type: application/json" \
   -d '{
-    "goal": "Analyze customer feedback and generate improvement recommendations",
-    "constraints": ["real-time processing", "privacy compliance"],
-    "max_services": 5
+    "prompt": "Explain the differences between microservices and monolithic architecture, including pros and cons of each approach."
   }'
 ```
 
-**Response:**
+**Analysis:** Check the response times and content quality differences between providers. Look for:
+- Which provider responds fastest?
+- Which provides the most comprehensive answer?
+- Are there clear differences in writing style?
+
+**Expected Response Structure:**
 ```json
 {
-  "goal": "Analyze customer feedback and generate improvement recommendations",
-  "services_discovered": 3,
-  "execution_plan": "1. Use sentiment analysis service for emotion detection...",
-  "planner_provider": "OpenAI GPT",
-  "planning_attempt": 1,
-  "available_services": [...],
-  "multi_provider": true
-}
-```
-
-#### 2. **Multi-Provider Orchestration**
-
-Uses different providers for different orchestration tasks:
-
-```bash
-curl -X POST http://localhost:8086/api/capabilities/orchestrate_multi_provider \
-  -H "Content-Type: application/json" \
-  -d '{
-    "task": "Create a comprehensive marketing campaign strategy",
-    "complexity": "complex",
-    "priority": "high"
-  }'
-```
-
-#### 3. **Adaptive Problem Solving**
-
-Solves problems using multiple providers with learning:
-
-```bash
-curl -X POST http://localhost:8086/api/capabilities/solve_with_fallback \
-  -H "Content-Type: application/json" \
-  -d '{
-    "problem": "Our API response times have increased by 200% in the last week",
-    "context": "E-commerce platform with microservices architecture",
-    "constraints": ["no downtime allowed", "limited budget"],
-    "max_attempts": 3
-  }'
-```
-
-**Response:**
-```json
-{
-  "problem": "Our API response times have increased by 200%...",
-  "solution_found": true,
-  "final_solution": "Based on the symptoms, this appears to be a database bottleneck...",
-  "successful_provider": "Anthropic Claude",
-  "total_attempts": 2,
-  "all_attempts": [
-    {
-      "attempt": 1,
-      "provider": "OpenAI GPT",
-      "success": false,
-      "error": "API timeout"
+  "results": {
+    "primary": {
+      "content": "Microservices architecture breaks applications into...",
+      "model": "gpt-4",
+      "usage": {"total_tokens": 245}
     },
-    {
-      "attempt": 2,
-      "provider": "Anthropic Claude",
-      "success": true,
-      "selected": true,
-      "solution": "Based on the symptoms..."
+    "fallback": {
+      "content": "Monolithic vs microservices represents a fundamental...",
+      "model": "claude-3-5-sonnet-20241022",
+      "usage": {"total_tokens": 267}
+    },
+    "secondary": {
+      "content": "The choice between microservices and monolithic...",
+      "model": "gemini-1.5-pro",
+      "usage": {"total_tokens": 198}
     }
-  ],
-  "fallback_applied": true
+  },
+  "providers": ["primary", "fallback", "secondary"],
+  "success": true,
+  "timestamp": "2025-01-XX..."
 }
 ```
 
-#### 4. **Task-Aware Provider Routing**
+### Phase 3: Multi-Provider Agent Testing
 
-Routes tasks to the most suitable provider based on task type and provider strengths:
+#### Test 5: Intelligent Routing (Core Agent Capability)
 
+**Switch to agent mode:**
 ```bash
-curl -X POST http://localhost:8086/api/capabilities/route_by_provider_strength \
+pkill -f "go run main.go" || true
+sleep 2
+export DEPLOYMENT_MODE="agent"
+export AGENT_PORT="8086"
+go run main.go &
+sleep 5
+```
+
+**Test intelligent routing with automatic failover:**
+```bash
+curl -X POST http://localhost:8086/api/capabilities/intelligent_routing \
   -H "Content-Type: application/json" \
   -d '{
-    "task_type": "creative",
-    "content": "Write a compelling product description for a new smartwatch",
-    "preferences": {
-      "creativity": true,
-      "speed": false
-    }
+    "prompt": "What are the key principles of clean code?"
   }'
 ```
 
-## 🔧 Configuration & Deployment
+**Expected Response Structure:**
+```json
+{
+  "results": {
+    "content": "Clean code principles include: 1. Meaningful names...",
+    "model": "gpt-4",
+    "usage": {"total_tokens": 234}
+  },
+  "provider": "primary",
+  "success": true,
+  "timestamp": "..."
+}
+```
+
+**Key Validation:**
+- ✅ Did it route to the first available provider?
+- ✅ Does the `provider` field show which one was used?
+- ✅ Is the response coherent and complete?
+
+#### Test 6: Provider Orchestration
+
+**Test complex task distribution across multiple providers:**
+```bash
+curl -X POST http://localhost:8086/api/capabilities/provider_orchestration \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Design a scalable web application architecture"
+  }'
+```
+
+**Expected Response Structure:**
+```json
+{
+  "results": {
+    "analysis": "Technical analysis from primary provider...",
+    "creative": "Creative perspective from fallback provider...",
+    "summary": "Summary from secondary provider..."
+  },
+  "providers": ["primary", "fallback", "secondary"],
+  "success": true,
+  "timestamp": "..."
+}
+```
+
+**What this demonstrates:**
+- Each provider handles a different aspect of the complex task
+- Primary: Technical analysis (lower temperature = more focused)
+- Fallback: Creative perspective (higher temperature = more creative)
+- Secondary: Summarization (balanced approach)
+
+### Phase 4: Edge Case and Failure Testing
+
+#### Test 7: Sequential Provider Failure
+
+**Simulate primary provider failure:**
+```bash
+# Temporarily disable primary provider
+export OPENAI_API_KEY_BACKUP="$OPENAI_API_KEY"
+export OPENAI_API_KEY=""
+
+# Restart agent to pick up change
+pkill -f "go run main.go" || true
+sleep 2
+export DEPLOYMENT_MODE="agent"
+go run main.go &
+sleep 5
+
+# Test intelligent routing - should automatically use fallback
+curl -X POST http://localhost:8086/api/capabilities/intelligent_routing \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "This should use the fallback provider"
+  }'
+```
+
+**Expected Response:**
+```json
+{
+  "results": {
+    "content": "I can respond using the fallback provider...",
+    "model": "claude-3-5-sonnet-20241022",
+    "usage": {"total_tokens": 87}
+  },
+  "provider": "fallback",
+  "success": true,
+  "timestamp": "..."
+}
+```
+
+**Expected behavior:**
+- Should automatically route to fallback provider (Anthropic)
+- Response should show `"provider": "fallback"`
+- No error messages for the user
+
+#### Test 8: All Providers Failure Scenario
+
+**Simulate all providers failing:**
+```bash
+# Temporarily disable all providers
+export ANTHROPIC_API_KEY_BACKUP="$ANTHROPIC_API_KEY"
+export GEMINI_API_KEY_BACKUP="$GEMINI_API_KEY"
+export OPENAI_API_KEY=""
+export ANTHROPIC_API_KEY=""
+export GEMINI_API_KEY=""
+
+# Restart service
+pkill -f "go run main.go" || true
+sleep 2
+go run main.go &
+sleep 5
+
+# This should fail gracefully
+curl -X POST http://localhost:8086/api/capabilities/intelligent_routing \
+  -d '{"prompt": "This should fail gracefully"}'
+```
+
+**Expected Response:**
+```json
+{
+  "success": false,
+  "error": "All AI providers unavailable",
+  "timestamp": "..."
+}
+```
+
+**Restore providers:**
+```bash
+export OPENAI_API_KEY="$OPENAI_API_KEY_BACKUP"
+export ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY_BACKUP"
+export GEMINI_API_KEY="$GEMINI_API_KEY_BACKUP"
+```
+
+#### Test 9: Both Modes Simultaneously
+
+**Test running both tool and agent together:**
+```bash
+pkill -f "go run main.go" || true
+sleep 2
+export DEPLOYMENT_MODE="both"
+export TOOL_PORT="8085"
+export AGENT_PORT="8086"
+go run main.go &
+sleep 10  # Extra time for both services to start
+
+# Test tool service
+curl -X POST http://localhost:8085/api/capabilities/provider_health -d '{}'
+
+# Test agent service
+curl -X POST http://localhost:8086/api/capabilities/intelligent_routing \
+  -d '{"prompt": "Both services should work simultaneously"}'
+```
+
+**Expected:** Both services should respond successfully on their respective ports.
+
+### Phase 5: Testing Summary and Validation Checklist
+
+#### ✅ Complete Testing Checklist
+
+After running all tests, validate these key behaviors:
+
+**Basic Functionality:**
+- [ ] Provider health check shows all configured providers
+- [ ] Provider comparison returns responses from all available providers
+- [ ] Intelligent routing successfully routes to first available provider
+- [ ] Provider orchestration distributes tasks across multiple providers
+
+**Failure Handling:**
+- [ ] Service continues working when primary provider fails
+- [ ] Graceful error handling when all providers fail
+- [ ] Automatic failover without user-visible errors
+- [ ] Services restart properly after provider configuration changes
+
+**Performance & Reliability:**
+- [ ] Response times are reasonable for your providers
+- [ ] Both tool and agent modes can run simultaneously
+- [ ] Provider comparison shows clear differences in responses
+- [ ] Health checks accurately reflect provider availability
+
+#### 🛠️ Automated Testing Script
+
+**Create a comprehensive test script:**
+```bash
+#!/bin/bash
+# Save as: test-multi-provider.sh
+
+echo "🧪 Starting Multi-Provider AI Testing Suite"
+echo "============================================"
+
+# Check prerequisites
+echo "📋 Checking prerequisites..."
+echo "OPENAI_API_KEY: ${OPENAI_API_KEY:+SET}"
+echo "ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:+SET}"
+echo "GEMINI_API_KEY: ${GEMINI_API_KEY:+SET}"
+
+# Start tool service
+echo "🔧 Starting tool service..."
+export DEPLOYMENT_MODE="tool"
+export TOOL_PORT="8085"
+go run main.go &
+TOOL_PID=$!
+sleep 8
+
+# Test 1: Provider health
+echo "🏥 Testing provider health..."
+curl -s -X POST http://localhost:8085/api/capabilities/provider_health -d '{}' | jq '.results | keys'
+
+# Test 2: Provider comparison
+echo "⚖️ Testing provider comparison..."
+curl -s -X POST http://localhost:8085/api/capabilities/compare_providers \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Hello AI"}' | jq '.providers'
+
+# Switch to agent mode
+echo "🤖 Switching to agent mode..."
+kill $TOOL_PID 2>/dev/null
+sleep 3
+export DEPLOYMENT_MODE="agent"
+export AGENT_PORT="8086"
+go run main.go &
+AGENT_PID=$!
+sleep 8
+
+# Test 3: Intelligent routing
+echo "🎯 Testing intelligent routing..."
+curl -s -X POST http://localhost:8086/api/capabilities/intelligent_routing \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Route this request"}' | jq '.provider'
+
+# Test 4: Provider orchestration
+echo "🎼 Testing provider orchestration..."
+curl -s -X POST http://localhost:8086/api/capabilities/provider_orchestration \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Orchestrate this task"}' | jq '.results | keys'
+
+# Cleanup
+echo "🧹 Cleaning up..."
+kill $AGENT_PID 2>/dev/null
+kill $TOOL_PID 2>/dev/null
+
+echo "✅ Multi-Provider AI testing complete!"
+```
+
+**Run the automated test:**
+```bash
+chmod +x test-multi-provider.sh
+./test-multi-provider.sh
+```
+
+## 🚨 Troubleshooting Guide
+
+### Common Issues and Solutions
+
+#### ❌ Issue: "No AI providers available"
+**Cause:** No valid API keys found
+```bash
+# Check your environment variables
+env | grep -E "(OPENAI|ANTHROPIC|GEMINI|GROQ|DEEPSEEK)_API_KEY"
+```
+**Solution:** Set at least one valid API key and restart the service
+
+#### ❌ Issue: Provider health shows "available: false"
+**Possible causes and solutions:**
+```bash
+# 1. Invalid API key format
+echo "Check API key format:"
+echo "OpenAI: sk-proj-... or sk-..."
+echo "Anthropic: sk-ant-..."
+echo "Gemini: Any alphanumeric string"
+
+# 2. API quota exceeded
+curl -s -X POST http://localhost:8085/api/capabilities/provider_health -d '{}' | jq '.results'
+
+# 3. Network connectivity
+curl -I https://api.openai.com/v1/models
+curl -I https://api.anthropic.com/v1/messages
+```
+
+#### ❌ Issue: Only one provider responding in comparison tests
+**Diagnosis:**
+```bash
+# Check which providers are actually configured
+curl -s -X POST http://localhost:8085/api/capabilities/provider_health -d '{}' | \
+  jq '.results | to_entries[] | select(.value.available == true) | .key'
+```
+**Solution:** Configure additional providers or verify existing API keys
+
+#### ❌ Issue: "Connection refused" errors
+```bash
+# Check if service is running
+ps aux | grep "go run main.go"
+
+# Check port availability
+lsof -ti:8085
+lsof -ti:8086
+
+# Restart with logging
+go run main.go 2>&1 | tee multi-provider.log
+```
+
+#### ❌ Issue: Inconsistent responses between test runs
+**Expected behavior:** Different providers will give different responses to the same prompt
+**Validation:** Check that the `provider` field in responses shows different values
+
+### Performance Optimization
+
+#### Slow Response Times
+```bash
+# Check individual provider performance
+time curl -s -X POST http://localhost:8085/api/capabilities/provider_health -d '{}'
+
+# Monitor which providers are fastest
+curl -s -X POST http://localhost:8085/api/capabilities/compare_providers \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Quick test"}' | jq '.results | to_entries[] | {provider: .key, content_length: (.value.content | length)}'
+```
+
+#### Memory Usage
+```bash
+# Monitor memory usage during testing
+ps aux | grep "go run main.go" | awk '{print $4 " " $6 " " $11}'
+
+# For production deployment, build binary instead of using go run
+go build -o multi-provider-ai main.go
+./multi-provider-ai
+```
+
+## 🔧 Configuration Reference
 
 ### Environment Variables
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `DEPLOYMENT_MODE` | Deployment mode: `tool`, `agent`, or `both` | `tool` | No |
+| `DEPLOYMENT_MODE` | Service mode: `tool`, `agent`, or `both` | `tool` | No |
 | `TOOL_PORT` | Tool service port | 8085 | No |
 | `AGENT_PORT` | Agent service port | 8086 | No |
-| `REDIS_URL` | Redis connection for service discovery | redis://localhost:6379 | No |
+| `OPENAI_API_KEY` | OpenAI API key (Primary provider) | - | Recommended |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API key (Fallback) | - | Recommended |
+| `GEMINI_API_KEY` | Google Gemini API key (Secondary) | - | Optional |
 
 ### AI Provider Configuration
 
@@ -459,10 +801,10 @@ This example is **completely self-sufficient** for Kind cluster deployment, incl
 kind create cluster --name gomind-multi-provider
 
 # 2. Build Docker image
-docker build -t ai-multi-provider:latest .
+docker build -t multi-provider-ai:latest .
 
 # 3. Load image into Kind cluster
-kind load docker-image ai-multi-provider:latest --name gomind-multi-provider
+kind load docker-image multi-provider-ai:latest --name gomind-multi-provider
 
 # 4. Create secrets with your AI API keys (REQUIRED - at least 2 for fallback)
 kubectl create secret generic multi-provider-secrets \
@@ -655,25 +997,38 @@ done
 ### Basic Functionality Tests
 
 ```bash
-# Test tool fallback
-curl -X POST http://localhost:8085/api/capabilities/process_with_fallback \
-  -d '{"text":"Test message","task":"analyze"}'
+# Test tool provider comparison
+curl -X POST http://localhost:8085/api/capabilities/compare_providers \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Test message for comparison"}'
 
-# Test agent discovery  
-curl -X POST http://localhost:8086/api/capabilities/discover_and_plan \
-  -d '{"goal":"Test goal"}'
+# Test agent intelligent routing
+curl -X POST http://localhost:8086/api/capabilities/intelligent_routing \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Test message for routing"}'
 
 # Test provider health
-curl -X POST http://localhost:8085/api/capabilities/provider_health
+curl -X POST http://localhost:8085/api/capabilities/provider_health \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
 ### Load Testing
 
 ```bash
-# Concurrent requests to test fallback under load
+# Concurrent requests to test provider comparison under load
 for i in {1..50}; do
-  curl -X POST http://localhost:8085/api/capabilities/process_with_fallback \
-    -d "{\"text\":\"Load test $i\",\"task\":\"analyze\"}" &
+  curl -X POST http://localhost:8085/api/capabilities/compare_providers \
+    -H "Content-Type: application/json" \
+    -d "{\"prompt\":\"Load test message $i\"}" &
+done
+wait
+
+# Test agent routing under load
+for i in {1..20}; do
+  curl -X POST http://localhost:8086/api/capabilities/intelligent_routing \
+    -H "Content-Type: application/json" \
+    -d "{\"prompt\":\"Routing test $i\"}" &
 done
 wait
 ```
@@ -681,11 +1036,23 @@ wait
 ### Failover Testing
 
 ```bash
-# Temporarily disable primary provider (revoke API key) to test fallback
+# Temporarily disable primary provider to test agent routing fallback
+export OPENAI_API_KEY_TEMP="$OPENAI_API_KEY"
 export OPENAI_API_KEY=""
-curl -X POST http://localhost:8085/api/capabilities/process_with_fallback \
-  -d '{"text":"Failover test","task":"analyze"}'
-# Should automatically use fallback provider
+
+# Restart agent service to pick up the change
+pkill -f "go run main.go" || true
+export DEPLOYMENT_MODE="agent"
+go run main.go &
+sleep 5
+
+# Test intelligent routing - should use fallback provider
+curl -X POST http://localhost:8086/api/capabilities/intelligent_routing \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Failover test - should use fallback provider"}'
+
+# Restore API key
+export OPENAI_API_KEY="$OPENAI_API_KEY_TEMP"
 ```
 
 ## 🎯 Best Practices
@@ -715,13 +1082,15 @@ export ANTHROPIC_API_KEY="analysis" # Best for reasoning tasks
 ### 3. **Performance Optimization**
 
 ```bash
-# Use parallel processing for provider comparison
+# Use provider comparison to identify fastest provider
 curl -X POST http://localhost:8085/api/capabilities/compare_providers \
-  -d '{"text":"content","parallel":true}'
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Quick response test"}'
 
-# Route speed-sensitive tasks to Groq
-curl -X POST http://localhost:8086/api/capabilities/route_by_provider_strength \
-  -d '{"task_type":"fast","preferences":{"speed":true}}'
+# Use intelligent routing for automatic provider selection
+curl -X POST http://localhost:8086/api/capabilities/intelligent_routing \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Route to best available provider"}'
 ```
 
 ### 4. **Cost Management**

@@ -82,6 +82,40 @@ env:
   value: "redis://redis:6379"           # Service discovery
 ```
 
+#### Automatic Telemetry Activation
+
+**Important**: Setting `OTEL_EXPORTER_OTLP_ENDPOINT` automatically enables telemetry in the framework.
+
+**How it works** (from [core/config.go:579-581](../../core/config.go#L579-L581)):
+```go
+if v := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); v != "" {
+    c.Telemetry.Endpoint = v
+    c.Telemetry.Enabled = true  // Auto-enabled
+}
+```
+
+**Default telemetry settings** (from [core/config.go:297-304](../../core/config.go#L297-L304)):
+```go
+TelemetryConfig{
+    Enabled:        false,  // Changed to true when endpoint is set
+    Provider:       "otel",
+    MetricsEnabled: true,   // Metrics collection enabled by default
+    TracingEnabled: true,   // Distributed tracing enabled by default
+    SamplingRate:   1.0,    // 100% trace sampling
+    Insecure:       true,   // No TLS (for dev/local environments)
+}
+```
+
+**What gets collected automatically:**
+- ✅ **Metrics**: Request counts, latencies, error rates, resource usage
+- ✅ **Traces**: Distributed request traces with full span context
+- ✅ **Context Propagation**: W3C Trace Context headers for correlation
+
+**You do NOT need to set:**
+- ❌ `GOMIND_TELEMETRY_ENABLED=true` (auto-enabled by endpoint)
+- ❌ `GOMIND_TELEMETRY_METRICS=true` (enabled by default)
+- ❌ `GOMIND_TELEMETRY_TRACING=true` (enabled by default)
+
 ## 📈 What You Get
 
 ### Prometheus Metrics (localhost:9090)

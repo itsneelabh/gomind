@@ -1,6 +1,6 @@
 # GoMind UI Module
 
-Build chat-based user interfaces with pluggable transports, distributed sessions, and enterprise-grade security.
+Build chat-based user interfaces with pluggable transports, distributed sessions, and production-ready security.
 
 ## 📚 Table of Contents
 
@@ -275,15 +275,16 @@ type Transport interface {
     Initialize(config TransportConfig) error
     Start(ctx context.Context) error
     Stop(ctx context.Context) error
-    
+
     // Core functionality
     CreateHandler(agent ChatAgent) http.Handler
-    
+
     // Metadata
     Name() string
-    Priority() int
+    Description() string
+    Priority() int  // Higher priority = preferred when multiple transports available
     Capabilities() []TransportCapability
-    
+
     // Health
     HealthCheck(ctx context.Context) error
     Available() bool
@@ -301,13 +302,16 @@ type SessionManager interface {
     Get(ctx context.Context, sessionID string) (*Session, error)
     Update(ctx context.Context, session *Session) error
     Delete(ctx context.Context, sessionID string) error
-    
+
     // Message management
     AddMessage(ctx context.Context, sessionID string, msg Message) error
     GetMessages(ctx context.Context, sessionID string, limit int) ([]Message, error)
-    
+
     // Rate limiting
     CheckRateLimit(ctx context.Context, sessionID string) (allowed bool, resetAt time.Time, err error)
+
+    // Analytics
+    GetActiveSessionCount(ctx context.Context) (int64, error)
 }
 ```
 
@@ -317,14 +321,19 @@ The orchestrator that brings everything together:
 
 ```go
 type ChatAgent interface {
+    core.Agent // Extends core.Agent with discovery capabilities
+
     // Transport management
     RegisterTransport(transport Transport) error
     ListTransports() []TransportInfo
-    
+    GetTransport(name string) (Transport, bool)
+
     // Session management
+    GetSessionManager() SessionManager
     CreateSession(ctx context.Context) (*Session, error)
     GetSession(ctx context.Context, sessionID string) (*Session, error)
-    
+    CheckRateLimit(ctx context.Context, sessionID string) (bool, error)
+
     // Message processing
     ProcessMessage(ctx context.Context, sessionID string, message string) (<-chan ChatEvent, error)
     StreamResponse(ctx context.Context, sessionID string, message string) (<-chan ChatEvent, error)
@@ -353,8 +362,9 @@ For production deployments with multiple servers:
 
 ```go
 // Sessions shared across all your servers
+// Set environment: export REDIS_URL="redis://localhost:6379"
 sessions, _ := ui.NewRedisSessionManager(
-    "redis://localhost:6379",
+    os.Getenv("REDIS_URL"),  // e.g., "redis://localhost:6379"
     ui.DefaultSessionConfig(),
 )
 agent := ui.NewChatAgent(config, aiClient, sessions)
@@ -363,7 +373,7 @@ agent := ui.NewChatAgent(config, aiClient, sessions)
 // Cons: Requires Redis
 ```
 
-### Method 3: Dependency Injection (Enterprise)
+### Method 3: Dependency Injection (Advanced)
 
 For complex systems with specific requirements:
 
@@ -436,7 +446,7 @@ for event := range events {
 
 ### Optional Security Layer
 
-The UI module includes an optional security layer that adds enterprise-grade protection:
+The UI module includes an optional security layer that adds production-ready protection:
 
 ```bash
 # Build with security features
@@ -861,7 +871,7 @@ transport.Priority = 150  // Higher priority = preferred
 3. **Distributed Sessions** - Redis-backed sessions work across multiple servers
 4. **Built-in Security** - Rate limiting, security headers, and infrastructure detection
 5. **Circuit Breakers** - Automatic protection against cascading failures
-6. **Zero to Production** - Works out of the box, scales to enterprise
+6. **Zero to Production** - Works out of the box, scales to any size deployment
 7. **Dependency Injection** - Integrate with your existing infrastructure
 8. **Auto-Configuration** - Sensible defaults with fine-grained control
 9. **Client Discovery** - Clients can discover and use the best transport
@@ -881,7 +891,7 @@ agent.Start(8080)
 // - Redis for distributed sessions
 // - In-memory for development
 // - Circuit breakers for resilience
-// - Security layers for enterprise
+// - Security layers for production
 ```
 
 ### Quick Reference Card

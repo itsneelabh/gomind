@@ -335,22 +335,25 @@ Start simple with just `core`, add modules as you grow. No bloat, no unused feat
 package main
 
 import (
+    "context"
     "log"
     "github.com/itsneelabh/gomind/core"
 )
 
 func main() {
+    ctx := context.Background()
+
     // 1. Create an agent
     agent := core.NewBaseAgent("hello-agent")
-    
+
     // 2. Tell it what it can do
-    agent.AddCapability(core.Capability{
+    agent.RegisterCapability(core.Capability{
         Name: "greet",
         Description: "Says hello",
     })
-    
+
     // 3. Run it
-    if err := agent.Start(8080); err != nil {
+    if err := agent.Start(ctx, 8080); err != nil {
         log.Fatal(err)
     }
 }
@@ -361,6 +364,56 @@ That's it! Your agent is running at `http://localhost:8080` with:
 - ✅ Automatic service discovery (if Redis is configured)
 - ✅ Graceful shutdown handling
 - ✅ Built-in error handling
+
+### Using the Framework (Production-Ready)
+
+For production deployments, use the Framework wrapper that handles configuration, dependency injection, and lifecycle management:
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    "github.com/itsneelabh/gomind/core"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // Create your component
+    agent := core.NewBaseAgent("my-agent")
+    agent.RegisterCapability(core.Capability{
+        Name: "process",
+        Description: "Processes data",
+    })
+
+    // Wrap with Framework for production features
+    // Set environment: export REDIS_URL="redis://localhost:6379"
+    framework, err := core.NewFramework(agent,
+        core.WithPort(8080),
+        core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
+        core.WithDiscovery(true, "redis"),
+        core.WithCORS([]string{"https://app.example.com"}, true),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Run (handles initialization, registration, and graceful shutdown)
+    if err := framework.Run(ctx); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+The Framework automatically handles:
+- ✅ Dependency injection (Registry for Tools, Discovery for Agents)
+- ✅ Redis connection and service registration
+- ✅ HTTP server with health checks and CORS
+- ✅ Graceful shutdown on SIGINT/SIGTERM
+- ✅ Configuration from environment variables
 
 ## Core Capabilities
 
@@ -374,18 +427,20 @@ That's it! Your agent is running at `http://localhost:8080` with:
 import (
     "context"
     "log"
+    "os"
     "github.com/itsneelabh/gomind/core"
 )
 
 // Step 1: Your agent introduces itself to the network
+// Set environment: export REDIS_URL="redis://localhost:6379"
 agent := core.NewBaseAgent("weather-agent")
-discovery, err := core.NewRedisDiscovery("redis://redis:6379")
+discovery, err := core.NewRedisDiscovery(os.Getenv("REDIS_URL"))  // e.g., "redis://localhost:6379"
 if err != nil {
     log.Fatalf("Failed to connect to Redis: %v", err)
 }
 agent.Discovery = discovery
 
-agent.AddCapability(core.Capability{
+agent.RegisterCapability(core.Capability{
     Name: "get_weather",
     Description: "Fetches current weather for any city",
 })
@@ -421,7 +476,13 @@ import (
 
 // Setup once
 ctx := context.Background()
-aiClient := ai.NewOpenAIClient(apiKey)
+aiClient, err := ai.NewClient(
+    ai.WithProvider("openai"),
+    ai.WithAPIKey(apiKey),
+)
+if err != nil {
+    log.Fatalf("Failed to create AI client: %v", err)
+}
 orchestrator := orchestration.NewAIOrchestrator(
     orchestration.DefaultConfig(),
     discovery,  // Finds available agents
@@ -537,7 +598,10 @@ import (
 // Setup protection for your agent's external calls
 ctx := context.Background()
 config := resilience.DefaultConfig()
-circuitBreaker := resilience.NewCircuitBreaker(config)
+circuitBreaker, err := resilience.NewCircuitBreaker(config)
+if err != nil {
+    log.Fatalf("Failed to create circuit breaker: %v", err)
+}
 
 // Wrap any risky operation
 err := circuitBreaker.Execute(ctx, func() error {
@@ -733,18 +797,27 @@ func main() {
 
     // 3. Create your components (tools and agents)
     // Tools are passive - they just register themselves
-    dataTool := &DataTool{BaseTool: core.NewTool("data-tool")}
+    dataTool := core.NewTool("data-tool")
     dataTool.Registry = discovery  // Tools only register
-    
+
     // Agents are active - they can discover and orchestrate
-    coordinatorAgent := ai.NewAIAgent("coordinator", os.Getenv("OPENAI_KEY"))
+    coordinatorAgent := core.NewBaseAgent("coordinator")
     coordinatorAgent.Discovery = discovery  // Agents get full discovery
 
-    // 4. Add orchestration
+    // 4. Create AI client for orchestration
+    aiClient, err := ai.NewClient(
+        ai.WithProvider("openai"),
+        ai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
+    )
+    if err != nil {
+        log.Fatalf("Failed to create AI client: %v", err)
+    }
+
+    // 5. Add orchestration
     orchestrator := orchestration.NewAIOrchestrator(
         orchestration.DefaultConfig(),
         discovery,
-        aiAgent.AI,
+        aiClient,
     )
     
     if err := orchestrator.Start(ctx); err != nil {
@@ -752,16 +825,16 @@ func main() {
     }
     defer orchestrator.Stop()
 
-    // 5. Start agents
+    // 6. Start components
     go func() {
-        if err := dataAgent.Start(8081); err != nil {
-            log.Printf("Data agent failed: %v", err)
+        if err := dataTool.Start(ctx, 8081); err != nil {
+            log.Printf("Data tool failed: %v", err)
         }
     }()
-    
+
     go func() {
-        if err := aiAgent.Start(8082); err != nil {
-            log.Printf("AI agent failed: %v", err)
+        if err := coordinatorAgent.Start(ctx, 8082); err != nil {
+            log.Printf("Coordinator agent failed: %v", err)
         }
     }()
     
@@ -868,7 +941,7 @@ spec:
 ## Module Documentation
 
 - [Core Module](core/README.md) - Base agent implementation, discovery, capabilities
-- [AI Module](ai/README.md) - LLM integration, intelligent agent patterns  
+- [AI Module](ai/README.md) - Multi-provider LLM integration with automatic failover, OpenAI-compatible providers (DeepSeek, Groq, Together AI), model aliases  
 - [Orchestration Module](orchestration/README.md) - Multi-agent coordination and workflows
 - [Resilience Module](resilience/README.md) - Fault tolerance for agent operations
 - [Telemetry Module](telemetry/README.md) - Agent metrics, tracing, and observability
@@ -893,7 +966,23 @@ spec:
 **Need LLM-powered agents?**
 ```go
 import "github.com/itsneelabh/gomind/ai"
-agent := ai.NewIntelligentAgent("my-ai", apiKey)
+
+// Simple: auto-detect provider from environment
+client, _ := ai.NewClient()
+
+// Advanced: use alternative providers with automatic failover
+client, _ := ai.NewClient(
+    ai.WithProviderAlias("openai.groq"),  // Use Groq for fast inference
+    ai.WithModel("fast"),                  // Model alias for portability
+)
+
+// Production: chain multiple providers for high availability
+chain, _ := ai.NewChainClient(
+    ai.WithProviderChain([]ai.ChainProvider{
+        {ProviderAlias: "openai.groq", Model: "fast", Priority: 1},
+        {Provider: "openai", Model: "gpt-4", Priority: 2},
+    }),
+)
 ```
 
 **Need resilient external calls?**

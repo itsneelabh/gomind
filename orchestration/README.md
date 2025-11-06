@@ -2,6 +2,29 @@
 
 Multi-agent coordination with AI-driven orchestration and declarative workflows.
 
+## 📚 Table of Contents
+
+- [🎯 What Does This Module Do?](#-what-does-this-module-do)
+- [🚀 Quick Start](#-quick-start)
+- [🧠 How It Works](#-how-it-works)
+- [🤖 AI Orchestration in Detail](#-ai-orchestration-in-detail)
+- [🔧 Workflow Engine in Detail](#-workflow-engine-in-detail)
+- [🎭 When to Use Each Mode](#-when-to-use-each-mode)
+- [🏗️ Architecture & Design Decisions](#️-architecture--design-decisions)
+- [🏗️ How Everything Fits Together](#️-how-everything-fits-together)
+- [📊 Performance & Caching](#-performance--caching-explained)
+- [🔍 Monitoring & Metrics](#-monitoring--metrics---know-whats-happening)
+- [🛠️ Configuration](#️-configuration)
+- [📝 Usage Patterns](#-usage-patterns)
+- [🚦 Requirements](#-requirements)
+- [🚀 Scaling to Hundreds of Agents](#-scaling-to-hundreds-of-agents---capability-provider-architecture)
+- [⚡ Performance Considerations](#-performance-considerations)
+- [🔮 Potential Enhancements](#-potential-enhancements)
+- [📖 API Reference](#-api-reference)
+- [💡 Best Practices & Tips](#-best-practices--tips)
+- [🆕 Production-Ready Enhancements](#-production-ready-enhancements)
+- [🎓 Summary](#-summary---what-youve-learned)
+
 ## 🎯 What Does This Module Do?
 
 Think of this module as the **conductor of an orchestra**. Just like a conductor coordinates musicians to create beautiful music, this module coordinates multiple agents to accomplish complex tasks.
@@ -186,10 +209,14 @@ Recommendation: Strong Buy"
 
 ```go
 // Step 1: Set up discovery (the registry for tools and agents)
-discovery := core.NewRedisDiscovery("redis://localhost:6379")
+// Set environment: export REDIS_URL="redis://localhost:6379"
+discovery := core.NewRedisDiscovery(os.Getenv("REDIS_URL"))  // e.g., "redis://localhost:6379"
 
 // Step 2: Set up AI (the brain)
-aiClient := ai.NewOpenAIClient(apiKey)
+aiClient, _ := ai.NewClient(
+    ai.WithProvider("openai"),
+    ai.WithAPIKey(apiKey),
+)
 
 // Step 3: Create orchestrator with dependencies
 deps := orchestration.OrchestratorDependencies{
@@ -1017,6 +1044,52 @@ steps:
 4. **📊 Monitor Everything**: If you can't measure it, you can't improve it
 5. **🔄 Handle Failures**: Always configure retries and timeouts
 6. **🚀 Think Parallel**: Design workflows to maximize parallelism
+
+## 🆕 Production-Ready Enhancements
+
+### Comprehensive Logging System
+The orchestration module now includes production-grade logging for all operations:
+
+- **Workflow Execution Logging**: Track every step of workflow execution with structured logs
+- **AI Decision Logging**: Capture AI orchestrator decisions and reasoning
+- **Component Interaction Logging**: Log all tool and agent interactions
+- **Error Context Logging**: Detailed error information with full context
+
+#### Logging Examples:
+```go
+// Workflow step execution
+logger.InfoWithContext(ctx, "Executing workflow step", map[string]interface{}{
+    "workflow": "data-analysis",
+    "step": "fetch-data",
+    "attempt": 1,
+})
+
+// AI orchestration decision
+logger.DebugWithContext(ctx, "AI selected components", map[string]interface{}{
+    "query": "analyze Tesla stock",
+    "selected_tools": []string{"stock-fetcher", "analyzer"},
+    "confidence": 0.95,
+})
+
+// Error with context
+logger.ErrorWithContext(ctx, "Workflow step failed", map[string]interface{}{
+    "workflow": "report-generation",
+    "step": "pdf-export",
+    "error": err.Error(),
+    "retry_count": 3,
+})
+```
+
+### Enhanced Service Discovery
+- **Improved Registry Performance**: Optimized component lookup and caching
+- **Better Error Recovery**: Automatic retry on transient discovery failures
+- **Detailed Metrics**: Track discovery latency and success rates
+
+### Workflow Engine Improvements
+- **Parallel Step Execution**: Execute independent steps concurrently
+- **Step Timeout Configuration**: Set timeouts per workflow step
+- **Conditional Branching**: Support for if/else logic in workflows
+- **Error Handling Strategies**: Configure retry, skip, or fail strategies per step
 
 ## 🎓 Summary - What You've Learned
 

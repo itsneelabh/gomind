@@ -19,6 +19,212 @@ Production-grade observability with zero-friction integration and progressive di
 9. [FAQ for Junior Developers](#-faq-for-junior-developers)
 10. [API Reference](#api-reference)
 
+## ⚠️ IMPORTANT: Enterprise Best Practice
+
+**Never hardcode environment profiles!** Your code should work unchanged across all environments:
+
+```go
+// ✅ CORRECT - Environment-aware initialization
+func initTelemetry(serviceName string) {
+    profile := telemetry.ProfileDevelopment // safe default
+
+    switch os.Getenv("APP_ENV") {
+    case "production": profile = telemetry.ProfileProduction
+    case "staging": profile = telemetry.ProfileStaging
+    }
+
+    config := telemetry.UseProfile(profile)
+    config.ServiceName = serviceName
+    telemetry.Initialize(config)
+}
+
+// ❌ WRONG - Hardcoded profile
+telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
+```
+
+### Enterprise Configuration Pattern
+
+```go
+// config/telemetry.go - Add this to your project
+package config
+
+import (
+    "context"
+    "log"
+    "os"
+    "time"
+
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+// InitTelemetry initializes telemetry based on environment
+// This follows 12-factor app principles
+func InitTelemetry(serviceName string) {
+    profile := getProfile()
+
+    config := telemetry.UseProfile(profile)
+    config.ServiceName = serviceName
+
+    // Allow endpoint override via environment
+    if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+        config.Endpoint = endpoint
+    }
+
+    if err := telemetry.Initialize(config); err != nil {
+        // Don't crash - telemetry should not break the service
+        log.Printf("WARNING: Telemetry init failed: %v (continuing without telemetry)", err)
+        return
+    }
+
+    log.Printf("✅ Telemetry initialized [env=%s, profile=%s, service=%s]",
+        os.Getenv("APP_ENV"), profile, serviceName)
+}
+
+func getProfile() telemetry.Profile {
+    // Priority: TELEMETRY_PROFILE > APP_ENV > default
+    if profile := os.Getenv("TELEMETRY_PROFILE"); profile != "" {
+        switch profile {
+        case "production":
+            return telemetry.ProfileProduction
+        case "staging":
+            return telemetry.ProfileStaging
+        case "development":
+            return telemetry.ProfileDevelopment
+        }
+    }
+
+    switch os.Getenv("APP_ENV") {
+    case "production", "prod":
+        return telemetry.ProfileProduction
+    case "staging", "qa":
+        return telemetry.ProfileStaging
+    default:
+        return telemetry.ProfileDevelopment // Safe default
+    }
+}
+```
+
+**Deployment without code changes:**
+```bash
+# Development (default)
+APP_ENV=development ./myapp
+
+# Staging
+APP_ENV=staging ./myapp
+
+# Production
+APP_ENV=production ./myapp
+```
+
+### Verifying Your Configuration
+
+Use this code to verify telemetry is properly initialized with the correct profile:
+
+```go
+// verification.go - Add to your project for testing
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    "time"
+
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func verifyTelemetry() {
+    // Initialize based on environment
+    profile := telemetry.ProfileDevelopment
+    switch os.Getenv("APP_ENV") {
+    case "production":
+        profile = telemetry.ProfileProduction
+    case "staging":
+        profile = telemetry.ProfileStaging
+    }
+
+    config := telemetry.UseProfile(profile)
+    config.ServiceName = "verification-test"
+
+    if err := telemetry.Initialize(config); err != nil {
+        log.Fatalf("Failed to initialize: %v", err)
+    }
+    defer telemetry.Shutdown(context.Background())
+
+    // Verify it's working
+    health := telemetry.GetHealth()
+    fmt.Printf("✅ Telemetry initialized\n")
+    fmt.Printf("   Profile: %s\n", profile)
+    fmt.Printf("   Environment: %s\n", os.Getenv("APP_ENV"))
+    fmt.Printf("   Initialized: %v\n", health.Initialized)
+    fmt.Printf("   Circuit Breaker: %s\n", health.CircuitBreakerStatus)
+
+    // Test metric emission
+    telemetry.Counter("test.verification", "status", "success")
+    telemetry.Emit("test.metric", 1.0, "env", string(profile))
+
+    // Check metrics were recorded
+    time.Sleep(100 * time.Millisecond)
+    health = telemetry.GetHealth()
+    fmt.Printf("   Metrics Emitted: %d\n", health.MetricsEmitted)
+}
+```
+
+### Kubernetes Deployment Example
+
+```yaml
+# deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-service
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: my-service:latest
+        env:
+        # Set environment profile
+        - name: APP_ENV
+          value: "production"  # or staging, development
+
+        # Optional: Override telemetry endpoint
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "otel-collector.monitoring:4318"
+
+        # Optional: Override specific profile settings
+        - name: TELEMETRY_PROFILE
+          value: "production"  # Explicit override if needed
+```
+
+### Docker Example
+
+```dockerfile
+FROM golang:1.21 AS builder
+# ... build steps ...
+
+FROM alpine:latest
+# Default to development, override at runtime
+ENV APP_ENV=development
+
+COPY --from=builder /app/myservice /myservice
+CMD ["/myservice"]
+```
+
+Run with different profiles:
+```bash
+# Development
+docker run -e APP_ENV=development my-service
+
+# Staging
+docker run -e APP_ENV=staging my-service
+
+# Production
+docker run -e APP_ENV=production -e OTEL_EXPORTER_OTLP_ENDPOINT=collector:4318 my-service
+```
+
 ## 🎯 What Does This Module Do?
 
 Think of telemetry as the **dashboard of your car**. Just like how your car's dashboard shows speed, fuel, and engine health, this module shows what's happening inside your distributed system in real-time.
@@ -53,8 +259,8 @@ import "github.com/itsneelabh/gomind/telemetry"
 ### Zero to Telemetry in 30 Seconds
 
 ```go
-// 1. Initialize with smart defaults
-telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
+// 1. Initialize with environment-aware configuration (PRODUCTION-READY)
+initTelemetry() // Uses APP_ENV to select correct profile
 defer telemetry.Shutdown(context.Background())
 
 // 2. Emit metrics with one line
@@ -63,15 +269,40 @@ telemetry.Emit("user.login", 1.0, "status", "success", "country", "US")
 // 3. That's it! Metrics are now flowing to your backend
 ```
 
+**The initTelemetry() helper (add to your project):**
+```go
+func initTelemetry() {
+    // Auto-selects profile based on environment
+    profile := telemetry.ProfileDevelopment // Safe default
+
+    switch os.Getenv("APP_ENV") {
+    case "production":
+        profile = telemetry.ProfileProduction
+    case "staging":
+        profile = telemetry.ProfileStaging
+    }
+
+    config := telemetry.UseProfile(profile)
+    config.ServiceName = "my-service"
+
+    if err := telemetry.Initialize(config); err != nil {
+        log.Printf("WARNING: Telemetry init failed: %v (continuing)", err)
+        return
+    }
+    log.Printf("Telemetry initialized [profile=%s]", profile)
+}
+```
+
 ## 🤖 Using Telemetry with GoMind Tools and Agents
 
 ### ✅ Getting Started Checklist
 
 Follow this checklist to add telemetry to your GoMind tools and agents:
 
-1. **[ ] Initialize telemetry in main.go**
+1. **[ ] Initialize telemetry in main.go with environment detection**
    ```go
-   telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
+   // ENTERPRISE PATTERN: Environment-aware initialization
+   initTelemetry() // Auto-detects: dev/staging/prod from APP_ENV
    defer telemetry.Shutdown(context.Background())
    ```
 
@@ -97,9 +328,22 @@ Follow this checklist to add telemetry to your GoMind tools and agents:
    fmt.Printf("Metrics emitted: %d\n", health.MetricsEmitted)
    ```
 
-5. **[ ] Switch to production profile when deploying**
+5. **[ ] Deploy to different environments (no code changes needed!)**
+   ```bash
+   # Development (default)
+   APP_ENV=development ./myapp
+
+   # Staging
+   APP_ENV=staging ./myapp
+
+   # Production
+   APP_ENV=production ./myapp
+   ```
+
+6. **[ ] Verify correct profile is loaded**
    ```go
-   telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
+   // Your initTelemetry() will log:
+   // "Telemetry initialized [profile=ProfileProduction]"
    ```
 
 ### Complete Examples - From Zero to Production
@@ -115,22 +359,42 @@ package main
 import (
     "context"
     "log"
+    "os"
     "time"
-    
+
     "github.com/itsneelabh/gomind/core"
     "github.com/itsneelabh/gomind/telemetry"
 )
 
-func main() {
-    // STEP 1: Initialize telemetry ONCE in your main function
-    // This sets up the global telemetry system for ALL tools and agents
-    config := telemetry.UseProfile(telemetry.ProfileDevelopment)
-    config.ServiceName = "my-system"  // Name your overall system
-    
-    err := telemetry.Initialize(config)
-    if err != nil {
-        log.Fatalf("Failed to initialize telemetry: %v", err)
+// initTelemetry initializes telemetry based on environment
+func initTelemetry(serviceName string) {
+    // ENTERPRISE PATTERN: Select profile based on environment
+    profile := telemetry.ProfileDevelopment // Safe default
+
+    env := os.Getenv("APP_ENV")
+    switch env {
+    case "production", "prod":
+        profile = telemetry.ProfileProduction
+    case "staging", "qa":
+        profile = telemetry.ProfileStaging
     }
+
+    config := telemetry.UseProfile(profile)
+    config.ServiceName = serviceName
+
+    if err := telemetry.Initialize(config); err != nil {
+        // Don't crash - telemetry should not break the service
+        log.Printf("WARNING: Telemetry init failed: %v (continuing without telemetry)", err)
+        return
+    }
+
+    log.Printf("✅ Telemetry initialized [env=%s, profile=%s, service=%s]",
+        env, profile, serviceName)
+}
+
+func main() {
+    // STEP 1: Initialize telemetry with environment detection
+    initTelemetry("my-system")
     
     // IMPORTANT: Always shutdown telemetry when your app exits
     defer func() {
@@ -457,8 +721,8 @@ Here's a visual guide showing exactly where to add telemetry calls:
 // │         INITIALIZATION              │
 // └─────────────────────────────────────┘
 func main() {
-    // ↓ Initialize telemetry FIRST, before creating any components
-    telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
+    // ↓ Initialize telemetry FIRST with environment detection
+    initTelemetry("my-service") // Uses APP_ENV variable
     defer telemetry.Shutdown(context.Background())
     
     // ↓ Then create your tools and agents
@@ -662,7 +926,8 @@ import (
 )
 
 func TestComponentTelemetry(t *testing.T) {
-    // Initialize telemetry for testing
+    // For tests, it's OK to hardcode ProfileDevelopment for consistency
+    // Tests should always use the same profile for reproducibility
     telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
     defer telemetry.Shutdown(context.Background())
     
@@ -830,32 +1095,58 @@ fmt.Printf("Items: %d, Dropped: %d\n", stats.ItemsAdded, stats.ItemsDropped)
 
 ## 🚦 Configuration Profiles
 
+> ⚠️ **WARNING**: The examples below show what each profile provides. **NEVER hardcode profiles in production code!** Use environment-based selection instead (see Environment-Based Profile Selection below).
+
 ### Development - Fast feedback, verbose logging
 ```go
+// ❌ DON'T hardcode this! Shown for reference only
 telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
 // ✓ Full sampling (100%)
 // ✓ No circuit breaker (fail fast in dev)
 // ✓ High cardinality limit (50,000)
 // ✓ No PII redaction
+// ✓ Localhost endpoint (localhost:4318)
 ```
 
 ### Staging - Production-like with safety nets
 ```go
+// ❌ DON'T hardcode this! Shown for reference only
 telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileStaging))
-// ✓ 10% sampling rate
+// ✓ 10% sampling rate (balanced cost/visibility)
 // ✓ Circuit breaker enabled (10 failures, 15s recovery)
 // ✓ Medium cardinality limit (20,000)
 // ✓ PII redaction enabled
+// ✓ Staging endpoint (otel-collector.staging:4318)
 ```
 
 ### Production - Battle-hardened settings
 ```go
+// ❌ DON'T hardcode this! Shown for reference only
 telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
-// ✓ 0.1% sampling rate (reduce costs)
+// ✓ 0.1% sampling rate (cost-optimized)
 // ✓ Strict cardinality limits (10,000)
 // ✓ Circuit breaker (10 failures, 30s recovery)
 // ✓ PII redaction enabled
 // ✓ Per-label cardinality limits
+// ✓ Production endpoint (otel-collector.prod:4318)
+```
+
+### Environment-Based Profile Selection
+```go
+// Automatically select profile based on environment variable
+func initTelemetry() {
+    var profile telemetry.Profile
+    switch os.Getenv("APP_ENV") {
+    case "production":
+        profile = telemetry.ProfileProduction
+    case "staging", "qa":
+        profile = telemetry.ProfileStaging
+    default:
+        profile = telemetry.ProfileDevelopment
+    }
+
+    telemetry.Initialize(telemetry.UseProfile(profile))
+}
 ```
 
 ### Custom Configuration
@@ -1029,8 +1320,8 @@ func RunJob(ctx context.Context) {
 
 ```go
 func main() {
-    // ✅ Initialize FIRST
-    telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))
+    // ✅ Initialize FIRST with environment detection
+    initTelemetry("my-service") // Uses APP_ENV to select profile
     defer telemetry.Shutdown(context.Background())
     
     // Then create tools and agents
@@ -1185,9 +1476,13 @@ telemetry.Gauge("active-connections")
 ```go
 // main.go
 func main() {
-    telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
+    // ENTERPRISE PATTERN: Auto-select profile based on APP_ENV
+    // APP_ENV=development → ProfileDevelopment (100% sampling)
+    // APP_ENV=staging     → ProfileStaging (10% sampling)
+    // APP_ENV=production  → ProfileProduction (0.1% sampling)
+    initTelemetry("my-service")
     defer telemetry.Shutdown(context.Background())
-    
+
     // Now any package can emit metrics
     server.Start()  // server package can call telemetry.Emit()
 }
@@ -1209,7 +1504,7 @@ defer func() {
 
 | Function | Description | Example |
 |----------|-------------|------|
-| `Initialize(config)` | Initialize telemetry system | `telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileDevelopment))` |
+| `Initialize(config)` | Initialize telemetry system | See `initTelemetry()` pattern above for environment-aware init |
 | `Emit(name, value, labels...)` | Emit a metric with labels | `telemetry.Emit("api.requests", 1.0, "method", "GET")` |
 | `EmitWithContext(ctx, name, value, labels...)` | Emit metric with context | `telemetry.EmitWithContext(ctx, "payment", 99.99)` |
 | `Counter(name, labels...)` | Increment a counter | `telemetry.Counter("errors", "type", "timeout")` |
@@ -1218,6 +1513,48 @@ defer func() {
 | `WithBaggage(ctx, labels...)` | Add context propagation | `telemetry.WithBaggage(ctx, "user_id", "123")` |
 | `GetBaggage(ctx)` | Extract baggage from context | `baggage := telemetry.GetBaggage(ctx)` |
 | `Shutdown(ctx)` | Gracefully shutdown telemetry | `telemetry.Shutdown(context.Background())` |
+
+### Logger Functions
+
+The telemetry module now provides a production-grade structured logger that integrates with the framework's observability stack.
+
+| Function | Description | Example |
+|----------|-------------|------|
+| `NewTelemetryLogger(name)` | Create a new logger instance | `logger := telemetry.NewTelemetryLogger("my-service")` |
+| `GetLogger()` | Get the global logger instance | `logger := telemetry.GetLogger()` |
+| `Debug(msg, fields)` | Debug-level logging | `logger.Debug("Processing request", map[string]interface{}{"id": 123})` |
+| `Info(msg, fields)` | Info-level logging | `logger.Info("Service started", nil)` |
+| `Warn(msg, fields)` | Warning-level logging | `logger.Warn("High memory usage", map[string]interface{}{"usage": 90})` |
+| `Error(msg, fields)` | Error-level logging | `logger.Error("Failed to connect", map[string]interface{}{"error": err})` |
+
+
+**Logger Integration Example:**
+```go
+import "github.com/itsneelabh/gomind/telemetry"
+
+// Initialize logger
+logger := telemetry.NewTelemetryLogger("payment-service")
+
+// Use throughout your service
+func ProcessPayment(ctx context.Context, amount float64) error {
+    logger.Info("Processing payment", map[string]interface{}{
+        "amount": amount,
+        "timestamp": time.Now(),
+    })
+
+    // Your business logic here
+
+    if err != nil {
+        logger.Error("Payment failed", map[string]interface{}{
+            "error": err.Error(),
+            "amount": amount,
+        })
+        return err
+    }
+
+    return nil
+}
+```
 
 ## 🔧 Troubleshooting
 
@@ -1289,7 +1626,7 @@ for k, v := range baggage {
 
 ## 💡 Pro Tips
 
-1. **Start with profiles** - Use `ProfileDevelopment` locally, `ProfileProduction` in prod
+1. **Start with profiles** - Use `ProfileDevelopment` locally, `ProfileStaging` for QA/testing, `ProfileProduction` in prod
 2. **Emit early, emit often** - Better to have metrics than to wish you had them
 3. **Keep labels consistent** - Use the same label names across metrics
 4. **Monitor the monitor** - Use health endpoints to monitor telemetry itself
