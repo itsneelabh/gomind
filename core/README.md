@@ -195,7 +195,9 @@ package main
 
 import (
     "context"
+    "log"
     "os"
+    "strconv"
     "github.com/itsneelabh/gomind/core"
 )
 
@@ -205,8 +207,17 @@ func main() {
 
     // Wrap it with Framework and configure
     // Set environment: export REDIS_URL="redis://localhost:6379"
+    // Set environment: export PORT=8080
+    portStr := os.Getenv("PORT")
+    port := 8080 // default
+    if portStr != "" {
+        if p, err := strconv.Atoi(portStr); err == nil {
+            port = p
+        }
+    }
+
     framework, err := core.NewFramework(tool,
-        core.WithPort(8080),
+        core.WithPort(port),
         core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
         core.WithDiscovery(true),
         core.WithCORS([]string{"https://app.example.com"}, true),
@@ -256,23 +267,25 @@ The Framework automatically handles dependency injection for your components:
 // Tools get Registry automatically when discovery is enabled
 tool := core.NewTool("calculator")
 
+// Set environment: export REDIS_URL="redis://localhost:6379"
 framework, _ := core.NewFramework(tool,
     core.WithDiscovery(true, "redis"),
-    core.WithRedisURL("redis://localhost:6379"),
+    core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
 )
 
 // After framework.Run(), tool.Registry is automatically set!
 // No manual setup required - the framework handles it
 ```
 
-#### For Agents (Discovery Auto-Injection) 
+#### For Agents (Discovery Auto-Injection)
 ```go
 // Agents get Discovery automatically when discovery is enabled
 agent := core.NewBaseAgent("orchestrator")
 
+// Set environment: export REDIS_URL="redis://localhost:6379"
 framework, _ := core.NewFramework(agent,
     core.WithDiscovery(true, "redis"),
-    core.WithRedisURL("redis://localhost:6379"),
+    core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
 )
 
 // After framework.Run(), agent.Discovery is automatically set!
@@ -331,7 +344,9 @@ import (
     "context"
     "encoding/json"
     "net/http"
-    
+    "os"
+    "strconv"
+
     "github.com/itsneelabh/gomind/core"
 )
 
@@ -365,9 +380,19 @@ func main() {
     // Initialize and start
     ctx := context.Background()
     calculator.Initialize(ctx)
-    calculator.Start(ctx, 8080)
-    
-    // Tool is now running at http://localhost:8080
+
+    // Get port from environment or use default
+    // Set environment: export PORT=8080
+    portStr := os.Getenv("PORT")
+    port := 8080 // default
+    if portStr != "" {
+        if p, err := strconv.Atoi(portStr); err == nil {
+            port = p
+        }
+    }
+    calculator.Start(ctx, port)
+
+    // Tool is now running at http://localhost:8080 (or configured port)
     // It CANNOT discover or call other components
     select {} // Keep running
 }
@@ -382,17 +407,19 @@ import (
     "context"
     "encoding/json"
     "net/http"
-    
+    "os"
+
     "github.com/itsneelabh/gomind/core"
 )
 
 func main() {
     // Create an agent (active orchestrator)
     orchestrator := core.NewBaseAgent("orchestrator")
-    
+
     // Configure with discovery capability
+    // Set environment: export REDIS_URL="redis://localhost:6379"
     framework, _ := core.NewFramework(orchestrator,
-        core.WithRedisURL("redis://localhost:6379"),
+        core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
         core.WithDiscovery(true),
     )
     
@@ -684,8 +711,9 @@ import (
     "context"
     "encoding/json"
     "net/http"
+    "os"
     "strings"
-    
+
     "github.com/itsneelabh/gomind/core"
 )
 
@@ -788,10 +816,11 @@ func (t *TranslationTool) translate(text, from, to string) string {
 func main() {
     // Create and configure the tool
     translator := NewTranslationTool()
-    
+
     // Initialize with framework
+    // Set environment: export REDIS_URL="redis://localhost:6379"
     framework, _ := core.NewFramework(translator,
-        core.WithRedisURL("redis://localhost:6379"),
+        core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
         core.WithDiscovery(true),
     )
     
@@ -939,8 +968,9 @@ func main() {
 
 ```go
 // When using Redis, memory is automatically shared across instances
+// Set environment: export REDIS_URL="redis://localhost:6379"
 framework, _ := core.NewFramework(tool,
-    core.WithRedisURL("redis://localhost:6379"),
+    core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
     // Memory automatically uses Redis when available
 )
 ```
@@ -1282,29 +1312,50 @@ framework, _ := core.NewFramework(tool, core.WithPort(7070))
 #### Complete Configuration Example
 
 ```go
+package main
+
+import (
+    "log"
+    "os"
+    "strconv"
+
+    "github.com/itsneelabh/gomind/core"
+)
+
 func main() {
     // Configure with functional options
+    // Set environment: export REDIS_URL="redis://localhost:6379"
+    // Set environment: export PORT=8080
+    portStr := os.Getenv("PORT")
+    port := 8080 // default
+    if portStr != "" {
+        if p, err := strconv.Atoi(portStr); err == nil {
+            port = p
+        }
+    }
+
     cfg, err := core.NewConfig(
         core.WithName("my-agent"),
-        core.WithPort(8080),
-        
+        core.WithPort(port),
+
         // CORS configuration
         core.WithCORS([]string{"https://app.example.com"}, true),
-        
+
         // Discovery configuration
-        core.WithRedisURL("redis://localhost:6379"),
+        core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
         core.WithDiscoveryCacheEnabled(true),
-        
+
         // Development mode
         core.WithDevelopmentMode(true),
     )
-    
+
     if err != nil {
         log.Fatal(err)
     }
-    
+
     // Create agent with config
     agent := core.NewBaseAgentWithConfig(cfg)
+    _ = agent // Use the agent...
 }
 ```
 
@@ -1480,9 +1531,10 @@ func (a *Agent) callExternalService(ctx context.Context) error {
    // Framework automatically starts heartbeat every 15 seconds to keep registration alive
    
    // ✅ GOOD: Framework-managed components (automatic heartbeat)
-   framework, _ := core.NewFramework(tool, 
+   // Set environment: export REDIS_URL="redis://localhost:6379"
+   framework, _ := core.NewFramework(tool,
        core.WithDiscovery(true, "redis"),
-       core.WithRedisURL("redis://localhost:6379"),
+       core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
    )
    framework.Run(ctx) // Auto-starts heartbeat, keeps component alive
    
@@ -1503,8 +1555,9 @@ Tools announce their existence but can't look for others:
 tool := core.NewTool("weather-tool")
 
 // Framework automatically initializes Registry for tools when discovery is enabled
+// Set environment: export REDIS_URL="redis://localhost:6379"
 framework, _ := core.NewFramework(tool,
-    core.WithRedisURL("redis://localhost:6379"),
+    core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
     core.WithDiscovery(true, "redis"), // Enables registration
 )
 
@@ -1513,7 +1566,7 @@ framework, _ := core.NewFramework(tool,
 // Other agents can find it, but it can't find others
 
 // Manual setup still works (for advanced use cases)
-// registry, _ := core.NewRedisRegistry("redis://localhost:6379")
+// registry, _ := core.NewRedisRegistry(os.Getenv("REDIS_URL"))  // e.g., "redis://localhost:6379"
 // tool.Registry = registry // Manual assignment (framework respects this)
 ```
 
@@ -1525,8 +1578,9 @@ Agents can find both tools and other agents:
 agent := core.NewBaseAgent("coordinator")
 
 // Framework automatically initializes Discovery for agents when discovery is enabled
+// Set environment: export REDIS_URL="redis://localhost:6379"
 framework, _ := core.NewFramework(agent,
-    core.WithRedisURL("redis://localhost:6379"),
+    core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
     core.WithDiscovery(true, "redis"), // Enables discovery
 )
 
@@ -1546,7 +1600,7 @@ aiAgents, _ := agent.Discover(ctx, core.DiscoveryFilter{
 })
 
 // Manual setup still works (for advanced use cases)
-// discovery, _ := core.NewRedisDiscovery("redis://localhost:6379")
+// discovery, _ := core.NewRedisDiscovery(os.Getenv("REDIS_URL"))  // e.g., "redis://localhost:6379"
 // agent.Discovery = discovery // Manual assignment (framework respects this)
 ```
 

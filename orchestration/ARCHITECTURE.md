@@ -673,8 +673,241 @@ func (c *OrchestratorConfig) AutoConfigure() {
 
 ## Resilience & Fault Tolerance
 
-### Circuit Breaker Integration
+### Design Philosophy & Goals
 
+The resilience architecture for the orchestration module's capability provider system is designed to handle external service failures gracefully while maintaining framework architectural principles.
+
+#### Design Goals
+
+1. **Framework Compliance**: Respect module dependency rules (orchestration → core + telemetry only)
+2. **Extensibility**: Allow sophisticated resilience patterns without hard dependencies
+3. **Progressive Enhancement**: Work with zero configuration, enhance when needed
+4. **Production Ready**: Support best-practice resilience requirements
+5. **Pattern Consistency**: Follow established patterns from other modules (UI)
+
+### Three-Layer Resilience Architecture
+
+The design provides three layers of resilience, each building on the previous:
+
+#### Layer 1: Simple Built-in Resilience (Always Active)
+- 3 retries with exponential backoff
+- Simple failure tracking (5 failures → 30s cooldown)
+- Timeout protection (30s default)
+- No external dependencies
+- Works out of the box with zero configuration
+
+#### Layer 2: Circuit Breaker (Optional, Injected)
+- Full circuit breaker pattern (closed/open/half-open states)
+- Sliding window metrics
+- Configurable thresholds and recovery
+- Provided by application, not framework
+- Injected via dependency injection
+
+#### Layer 3: Fallback Provider (Configurable)
+- Falls back to DefaultCapabilityProvider on failure
+- Ensures system continues working
+- Enabled by default with service provider
+- Graceful degradation under failures
+
+### Dependency Injection Pattern for Resilience
+
+Following the UI module's proven pattern, we use dependency injection for optional resilience features:
+
+```go
+// ServiceCapabilityConfig accepts optional dependencies
+type ServiceCapabilityConfig struct {
+    // Required configuration
+    Endpoint  string
+    TopK      int
+    Threshold float64
+    Timeout   time.Duration
+
+    // Optional dependencies (injected)
+    CircuitBreaker   core.CircuitBreaker  `json:"-"`
+    Logger           core.Logger          `json:"-"`
+    Telemetry        core.Telemetry       `json:"-"`
+    FallbackProvider CapabilityProvider   `json:"-"`
+}
+```
+
+### Application Usage Patterns
+
+#### Pattern 1: Simple Usage (Development)
+```go
+// Zero configuration - uses built-in Layer 1 resilience
+deps := orchestration.OrchestratorDependencies{
+    Discovery: discovery,
+    AIClient:  aiClient,
+}
+orchestrator, _ := orchestration.CreateOrchestrator(nil, deps)
+```
+
+#### Pattern 2: Production Usage (With Circuit Breaker)
+```go
+// Application creates and injects circuit breaker
+cb, _ := resilience.NewCircuitBreaker(&resilience.CircuitBreakerConfig{
+    Name:             "capability-service",
+    ErrorThreshold:   0.5,
+    VolumeThreshold:  10,
+    SleepWindow:      30 * time.Second,
+})
+
+deps := orchestration.OrchestratorDependencies{
+    Discovery:      discovery,
+    AIClient:       aiClient,
+    CircuitBreaker: cb,  // Inject sophisticated circuit breaker
+    Logger:         logger,  // Optional: Structured logging
+}
+
+orchestrator, _ := orchestration.CreateOrchestrator(config, deps)
+```
+
+#### Pattern 3: Service Mesh (Kubernetes)
+```yaml
+# Let Istio handle circuit breaking at network level
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: capability-service
+spec:
+  host: capability-service
+  trafficPolicy:
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+```
+
+### Module Dependencies for Resilience
+
+#### What Orchestration Module Provides
+- CapabilityProvider interface
+- ServiceCapabilityProvider with simple resilience (Layer 1)
+- Injection points for optional dependencies
+- Fallback mechanisms (Layer 3)
+
+#### What Application Provides
+- Circuit breaker implementation (using resilience module)
+- Logger implementation
+- Telemetry implementation
+- Configuration and tuning parameters
+
+#### Dependency Flow for Resilience
+```
+Application Code
+    ├── imports orchestration (for orchestrator)
+    ├── imports resilience (for circuit breaker)
+    └── injects circuit breaker into orchestrator
+
+Orchestration Module
+    ├── imports core (for interfaces)
+    ├── imports telemetry (for observability)
+    └── accepts core.CircuitBreaker (no resilience import!)
+
+Core Module
+    └── defines CircuitBreaker interface
+
+Resilience Module
+    ├── imports core
+    └── implements CircuitBreaker interface
+```
+
+### Benefits of This Design
+
+#### For Framework Maintainers
+- **Clean Architecture**: No dependency violations
+- **Consistent Patterns**: Same as UI module
+- **Testable**: All dependencies mockable
+- **Extensible**: Clear injection points
+
+#### For Application Developers
+- **Progressive Enhancement**: Start simple, add resilience as needed
+- **Flexibility**: Choose any circuit breaker implementation
+- **Production Ready**: Inject sophisticated patterns
+- **Service Mesh Compatible**: Works with Istio/Linkerd
+
+#### For Operations
+- **Observable**: Metrics through telemetry interface
+- **Configurable**: All parameters tunable
+- **Graceful Degradation**: Multiple fallback layers
+- **Fast Recovery**: Automatic recovery testing
+
+### Migration Path
+
+#### From Current Implementation
+1. Current simple resilience remains as Layer 1
+2. Add injection points for optional dependencies
+3. No breaking changes to existing code
+
+#### For Applications
+```go
+// Stage 1: Use as-is (current implementation works)
+orchestrator := orchestration.CreateSimpleOrchestrator(discovery, aiClient)
+
+// Stage 2: Add logging and telemetry
+deps := orchestration.OrchestratorDependencies{
+    Discovery: discovery,
+    AIClient:  aiClient,
+    Logger:    logger,
+    Telemetry: telemetry,
+}
+orchestrator, _ := orchestration.CreateOrchestrator(nil, deps)
+
+// Stage 3: Add circuit breaker for production
+deps.CircuitBreaker = resilience.NewCircuitBreaker(config)
+orchestrator, _ = orchestration.CreateOrchestrator(config, deps)
+```
+
+### Design Rationale
+
+#### Why Not Import Resilience Directly?
+- **Framework Rule**: Orchestration can only import core + telemetry
+- **Separation of Concerns**: Framework provides capability, apps choose implementation
+- **Flexibility**: Apps might use different circuit breaker libraries
+- **Testability**: Can test orchestration without resilience module
+
+#### Why Follow UI Module Pattern?
+- **Proven Pattern**: Already working successfully in production
+- **Consistency**: Same pattern across framework
+- **Developer Familiarity**: Learn once, apply everywhere
+- **Maintenance**: Single pattern to maintain and document
+
+#### Why Three Layers of Resilience?
+- **Defense in Depth**: Multiple failure handling strategies
+- **Progressive Enhancement**: Each layer adds protection
+- **Flexibility**: Choose appropriate level for use case
+- **No Vendor Lock-in**: Can use framework, custom, or service mesh resilience
+
+### Implementation Examples
+
+#### Service Provider with Three-Layer Resilience
+```go
+func (s *ServiceCapabilityProvider) GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (string, error) {
+    // Layer 2: Use injected circuit breaker if provided
+    if s.circuitBreaker != nil {
+        var result string
+        err := s.circuitBreaker.Execute(ctx, func() error {
+            var err error
+            result, err = s.queryExternalService(ctx, request, metadata)
+            return err
+        })
+
+        if err != nil {
+            // Layer 3: Try fallback
+            if s.fallback != nil {
+                return s.fallback.GetCapabilities(ctx, request, metadata)
+            }
+            return "", err
+        }
+        return result, nil
+    }
+
+    // Layer 1: Use simple built-in resilience
+    return s.getCapabilitiesWithSimpleResilience(ctx, request, metadata)
+}
+```
+
+#### Circuit Breaker Integration
 ```go
 type ResilientOrchestrator struct {
     *AIOrchestrator
@@ -694,8 +927,7 @@ func (o *ResilientOrchestrator) callComponent(ctx context.Context, component str
 }
 ```
 
-### Retry Mechanisms
-
+#### Retry Mechanisms
 ```go
 type RetryConfig struct {
     MaxAttempts int
@@ -728,8 +960,7 @@ func (e *SmartExecutor) executeWithRetry(ctx context.Context, step PlanStep, con
 }
 ```
 
-### Timeout Management
-
+#### Timeout Management
 ```go
 func (e *SmartExecutor) executeWithTimeout(ctx context.Context, step PlanStep, timeout time.Duration) (interface{}, error) {
     ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -758,8 +989,7 @@ func (e *SmartExecutor) executeWithTimeout(ctx context.Context, step PlanStep, t
 }
 ```
 
-### Graceful Degradation
-
+#### Graceful Degradation
 ```go
 func (o *AIOrchestrator) ProcessRequestWithDegradation(ctx context.Context, request string) (*Response, error) {
     // Try AI routing
@@ -785,6 +1015,23 @@ func (o *AIOrchestrator) ProcessRequestWithDegradation(ctx context.Context, requ
     }, nil
 }
 ```
+
+### Implementation Checklist
+
+When implementing resilience patterns:
+
+- [ ] Update ServiceCapabilityConfig with optional dependencies
+- [ ] Refactor ServiceCapabilityProvider to use injected circuit breaker
+- [ ] Create OrchestratorDependencies struct
+- [ ] Update factory functions to accept dependencies
+- [ ] Add WithCircuitBreaker option function
+- [ ] Write unit tests with mock circuit breaker
+- [ ] Write integration tests with real circuit breaker
+- [ ] Update documentation with usage examples
+- [ ] Create migration guide for existing users
+- [ ] Add telemetry metrics for resilience monitoring
+- [ ] Configure health checks to report degraded state
+- [ ] Document service mesh integration patterns
 
 ---
 
