@@ -664,18 +664,30 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 	case *BaseAgent:
 		base.Config = config
 		base.Name = config.Name
+		// Apply service-based ID for Kubernetes deployments to ensure
+		// multiple pod replicas share the same service discovery entry
 		if config.ID != "" {
 			base.ID = config.ID
+		} else if config.Kubernetes.Enabled && config.Kubernetes.ServiceName != "" {
+			// In Kubernetes with service mesh, use stable service-based ID
+			// This ensures all pod replicas register as one service entry
+			base.ID = config.Name
 		}
+		// else: keep the UUID-based ID from NewBaseAgent (for non-K8s deployments)
 		base.Logger = config.logger
 		return
 
 	case *BaseTool:
 		base.Config = config
 		base.Name = config.Name
+		// Apply service-based ID for Kubernetes deployments
 		if config.ID != "" {
 			base.ID = config.ID
+		} else if config.Kubernetes.Enabled && config.Kubernetes.ServiceName != "" {
+			// In Kubernetes with service mesh, use stable service-based ID
+			base.ID = config.Name
 		}
+		// else: keep the UUID-based ID from NewBaseTool (for non-K8s deployments)
 		base.Logger = config.logger
 		return
 	}
@@ -701,9 +713,14 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 			if base, ok := field.Interface().(*BaseAgent); ok && base != nil {
 				base.Config = config
 				base.Name = config.Name
+				// Apply service-based ID for Kubernetes deployments
 				if config.ID != "" {
 					base.ID = config.ID
+				} else if config.Kubernetes.Enabled && config.Kubernetes.ServiceName != "" {
+					// In Kubernetes with service mesh, use stable service-based ID
+					base.ID = config.Name
 				}
+				// else: keep the UUID-based ID from NewBaseAgent
 				base.Logger = config.logger
 				return
 			}
@@ -714,9 +731,14 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 			if base, ok := field.Interface().(*BaseTool); ok && base != nil {
 				base.Config = config
 				base.Name = config.Name
+				// Apply service-based ID for Kubernetes deployments
 				if config.ID != "" {
 					base.ID = config.ID
+				} else if config.Kubernetes.Enabled && config.Kubernetes.ServiceName != "" {
+					// In Kubernetes with service mesh, use stable service-based ID
+					base.ID = config.Name
 				}
+				// else: keep the UUID-based ID from NewBaseTool
 				base.Logger = config.logger
 				return
 			}
