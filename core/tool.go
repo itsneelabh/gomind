@@ -410,10 +410,25 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 			"capabilities":   len(t.Capabilities),
 		})
 	}
-	
+
+	// Create handler with middleware stack
+	// Order: CORS -> Logging -> Recovery -> Handler
+	var handler http.Handler = t.mux
+
+	// Always wrap with panic recovery middleware (innermost - catches panics from handler)
+	handler = RecoveryMiddleware(t.Logger)(handler)
+
+	// Add request/response logging middleware
+	handler = LoggingMiddleware(t.Logger, t.Config.Development.Enabled)(handler)
+
+	// Add CORS middleware if enabled (outermost - handles preflight requests)
+	if t.Config.HTTP.CORS.Enabled {
+		handler = CORSMiddleware(&t.Config.HTTP.CORS)(handler)
+	}
+
 	t.server = &http.Server{
 		Addr:              addr,
-		Handler:           t.mux,
+		Handler:           handler,
 		ReadTimeout:       t.Config.HTTP.ReadTimeout,
 		ReadHeaderTimeout: t.Config.HTTP.ReadHeaderTimeout,
 		WriteTimeout:      t.Config.HTTP.WriteTimeout,

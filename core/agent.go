@@ -527,14 +527,20 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 		})
 	}
 
-	// Create handler with CORS middleware if enabled
+	// Create handler with middleware stack
+	// Order: CORS -> Logging -> Recovery -> Handler
 	var handler http.Handler = b.mux
+
+	// Always wrap with panic recovery middleware (innermost - catches panics from handler)
+	handler = RecoveryMiddleware(b.Logger)(handler)
+
+	// Add request/response logging middleware
+	handler = LoggingMiddleware(b.Logger, b.Config.Development.Enabled)(handler)
+
+	// Add CORS middleware if enabled (outermost - handles preflight requests)
 	if b.Config.HTTP.CORS.Enabled {
 		handler = CORSMiddleware(&b.Config.HTTP.CORS)(handler)
 	}
-
-	// Always wrap with panic recovery middleware
-	handler = RecoveryMiddleware(b.Logger)(handler)
 
 	b.server = &http.Server{
 		Addr:              addr,

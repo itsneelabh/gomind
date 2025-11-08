@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
       - name: research-agent
-        image: research-agent-example:latest
+        image: research-agent:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8090
@@ -36,16 +36,52 @@ spec:
         env:
         - name: GOMIND_AGENT_NAME
           value: "research-assistant"
-        - name: GOMIND_PORT
+        - name: PORT
           value: "8090"
-        - name: GOMIND_NAMESPACE
+        - name: GOMIND_PORT  # For backward compatibility
+          value: "8090"
+        - name: NAMESPACE
+          value: "gomind-examples"
+        - name: GOMIND_NAMESPACE  # For backward compatibility
           value: "gomind-examples"
         - name: REDIS_URL
-          value: "redis://redis:6379"
-        - name: GOMIND_REDIS_URL
-          value: "redis://redis:6379"
-        - name: GOMIND_DEV_MODE
-          value: "false"
+          valueFrom:
+            configMapKeyRef:
+              name: research-agent-config
+              key: redis_url
+              optional: false
+        - name: GOMIND_REDIS_URL  # For backward compatibility
+          valueFrom:
+            configMapKeyRef:
+              name: research-agent-config
+              key: redis_url
+              optional: false
+        - name: DEV_MODE
+          value: "true"  # Enable for Kind cluster testing (set to "false" in production)
+        - name: GOMIND_DEV_MODE  # For backward compatibility
+          value: "true"  # Enable for Kind cluster testing (set to "false" in production)
+        # Logging Configuration (change to debug for troubleshooting)
+        - name: GOMIND_LOG_LEVEL
+          value: "info"
+        - name: GOMIND_LOG_FORMAT
+          value: "json"
+        # 🔧 KUBERNETES SERVICE DISCOVERY CONFIGURATION
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "research-agent-service"
+        - name: GOMIND_K8S_SERVICE_PORT
+          value: "80"
+        - name: GOMIND_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: GOMIND_K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: GOMIND_K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         # Telemetry Configuration
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: "http://otel-collector:4318"
@@ -165,6 +201,9 @@ metadata:
     app: research-agent
     component: agent
 data:
+  # Direct key for environment variable reference
+  redis_url: "redis://redis.default.svc.cluster.local:6379"
+  # Full configuration file
   config.yaml: |
     service:
       name: research-assistant
@@ -173,7 +212,7 @@ data:
     discovery:
       enabled: true
       provider: redis
-      redis_url: redis://redis:6379
+      redis_url: redis://redis.default.svc.cluster.local:6379
       cache_enabled: true
     ai:
       auto_detect: true
