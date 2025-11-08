@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -655,6 +656,74 @@ type Framework struct {
 	config    *Config
 }
 
+// applyConfigToComponent applies configuration to a component.
+// It handles both direct BaseAgent/BaseTool instances and types that embed them.
+func applyConfigToComponent(component HTTPComponent, config *Config) {
+	// First try direct type assertion
+	switch base := component.(type) {
+	case *BaseAgent:
+		base.Config = config
+		base.Name = config.Name
+		if config.ID != "" {
+			base.ID = config.ID
+		}
+		base.Logger = config.logger
+		return
+
+	case *BaseTool:
+		base.Config = config
+		base.Name = config.Name
+		if config.ID != "" {
+			base.ID = config.ID
+		}
+		base.Logger = config.logger
+		return
+	}
+
+	// If direct assertion failed, use reflection to find embedded BaseAgent or BaseTool
+	v := reflect.ValueOf(component)
+	if v.Kind() != reflect.Ptr {
+		return // Component must be a pointer
+	}
+
+	v = v.Elem()
+	if v.Kind() != reflect.Struct {
+		return // Must be a struct
+	}
+
+	// Iterate through fields to find embedded BaseAgent or BaseTool
+	for i := 0; i < v.NumField(); i++ {
+		field := v.Field(i)
+		fieldType := field.Type()
+
+		// Check if this field is *BaseAgent
+		if fieldType == reflect.TypeOf((*BaseAgent)(nil)) && field.CanInterface() {
+			if base, ok := field.Interface().(*BaseAgent); ok && base != nil {
+				base.Config = config
+				base.Name = config.Name
+				if config.ID != "" {
+					base.ID = config.ID
+				}
+				base.Logger = config.logger
+				return
+			}
+		}
+
+		// Check if this field is *BaseTool
+		if fieldType == reflect.TypeOf((*BaseTool)(nil)) && field.CanInterface() {
+			if base, ok := field.Interface().(*BaseTool); ok && base != nil {
+				base.Config = config
+				base.Name = config.Name
+				if config.ID != "" {
+					base.ID = config.ID
+				}
+				base.Logger = config.logger
+				return
+			}
+		}
+	}
+}
+
 // NewFramework creates a new framework instance with options.
 // It accepts any HTTPComponent (Tool or Agent) and provides uniform initialization and execution.
 func NewFramework(component HTTPComponent, opts ...Option) (*Framework, error) {
@@ -665,23 +734,8 @@ func NewFramework(component HTTPComponent, opts ...Option) (*Framework, error) {
 	}
 
 	// Update config for BaseAgent or BaseTool
-	switch base := component.(type) {
-	case *BaseAgent:
-		base.Config = config
-		base.Name = config.Name
-		if config.ID != "" {
-			base.ID = config.ID
-		}
-		base.Logger = config.logger
-
-	case *BaseTool:
-		base.Config = config
-		base.Name = config.Name
-		if config.ID != "" {
-			base.ID = config.ID
-		}
-		base.Logger = config.logger
-	}
+	// This supports both direct instances and types that embed BaseAgent/BaseTool
+	applyConfigToComponent(component, config)
 
 	return &Framework{
 		component: component,
