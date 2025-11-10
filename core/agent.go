@@ -30,7 +30,28 @@ type HTTPComponent interface {
 	RegisterCapability(cap Capability)
 }
 
-// Capability represents a capability that an agent provides
+// FieldHint provides basic field information for AI-powered payload generation.
+// Part of Phase 2: Field-Hint-Based generation in the 3-tier schema architecture.
+type FieldHint struct {
+	Name        string `json:"name"`                  // Field name (e.g., "location")
+	Type        string `json:"type"`                  // JSON type: "string", "number", "boolean", "object", "array"
+	Example     string `json:"example,omitempty"`     // Example value (e.g., "London")
+	Description string `json:"description,omitempty"` // Human-readable description
+}
+
+// SchemaSummary provides compact schema hints for the registry.
+// Part of Phase 2: Field-Hint-Based generation in the 3-tier schema architecture.
+// This summary is included in discovery responses to help AI generate accurate payloads.
+type SchemaSummary struct {
+	RequiredFields []FieldHint `json:"required,omitempty"` // Fields that must be provided
+	OptionalFields []FieldHint `json:"optional,omitempty"` // Fields that are optional
+}
+
+// Capability represents a capability that an agent provides.
+// Supports 3-tier schema architecture:
+// - Tier 1 (Phase 1): Description field for AI-based payload generation
+// - Tier 2 (Phase 2): InputSummary/OutputSummary for field-hint-based generation
+// - Tier 3 (Phase 3): Full JSON Schema available at SchemaEndpoint for validation
 type Capability struct {
 	Name        string           `json:"name"`
 	Description string           `json:"description"`
@@ -38,6 +59,16 @@ type Capability struct {
 	InputTypes  []string         `json:"input_types"`
 	OutputTypes []string         `json:"output_types"`
 	Handler     http.HandlerFunc `json:"-"` // Optional custom handler, excluded from JSON
+
+	// Phase 2: Compact schema summaries (optional, ~200-300 bytes overhead)
+	// These provide structured hints to AI for better payload generation accuracy
+	InputSummary  *SchemaSummary `json:"input_summary,omitempty"`  // Field hints for input payloads
+	OutputSummary *SchemaSummary `json:"output_summary,omitempty"` // Field hints for output responses
+
+	// Phase 3: Full schema endpoint (auto-generated if InputSummary provided)
+	// Format: /api/capabilities/{name}/schema
+	// Returns complete JSON Schema v7 for validation
+	SchemaEndpoint string `json:"schema_endpoint,omitempty"`
 }
 
 // BaseAgent provides the core agent functionality
@@ -53,8 +84,9 @@ type BaseAgent struct {
 	Memory       Memory
 
 	// Optional fields (set by modules)
-	Telemetry Telemetry
-	AI        AIClient
+	Telemetry   Telemetry
+	AI          AIClient
+	SchemaCache SchemaCache // Optional - for Phase 3 schema validation caching
 
 	// Configuration
 	Config *Config
@@ -333,6 +365,22 @@ func (b *BaseAgent) RegisterCapability(cap Capability) {
 	// Update the capability's endpoint for consistency
 	cap.Endpoint = endpoint
 
+	// Phase 3: Auto-generate schema endpoint if InputSummary is provided
+	// This enables on-demand schema fetching for validation
+	if cap.InputSummary != nil {
+		schemaEndpoint := fmt.Sprintf("%s/schema", endpoint)
+		cap.SchemaEndpoint = schemaEndpoint
+
+		// Register schema endpoint handler
+		b.mux.HandleFunc(schemaEndpoint, b.handleSchemaRequest(cap))
+		b.registeredPatterns[schemaEndpoint] = true
+
+		b.Logger.Debug("Registered schema endpoint", map[string]interface{}{
+			"capability":      cap.Name,
+			"schema_endpoint": schemaEndpoint,
+		})
+	}
+
 	// Append to capabilities list
 	b.Capabilities = append(b.Capabilities, cap)
 
@@ -352,6 +400,7 @@ func (b *BaseAgent) RegisterCapability(cap Capability) {
 		"name":           cap.Name,
 		"endpoint":       endpoint,
 		"custom_handler": cap.Handler != nil,
+		"has_schema":     cap.InputSummary != nil,
 	})
 }
 
@@ -415,6 +464,94 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 			}
 		}
 	}
+}
+
+// handleSchemaRequest creates an HTTP handler for schema endpoints.
+// Part of Phase 3: Returns full JSON Schema v7 generated from InputSummary.
+// This enables agents to fetch schemas on-demand for payload validation.
+func (b *BaseAgent) handleSchemaRequest(cap Capability) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Only support GET requests for schemas
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Generate JSON Schema from InputSummary
+		schema := b.generateJSONSchema(cap)
+
+		// Return schema as JSON
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(schema); err != nil {
+			b.Logger.Error("Failed to encode schema", map[string]interface{}{
+				"error":      err,
+				"capability": cap.Name,
+			})
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		b.Logger.Debug("Schema request served", map[string]interface{}{
+			"capability": cap.Name,
+			"client":     r.RemoteAddr,
+		})
+	}
+}
+
+// generateJSONSchema generates a JSON Schema v7 document from a Capability's InputSummary.
+// Part of Phase 3: Converts compact field hints into full JSON Schema for validation.
+func (b *BaseAgent) generateJSONSchema(cap Capability) map[string]interface{} {
+	schema := map[string]interface{}{
+		"$schema":     "http://json-schema.org/draft-07/schema#",
+		"type":        "object",
+		"title":       cap.Name,
+		"description": cap.Description,
+	}
+
+	// If no InputSummary, return minimal schema
+	if cap.InputSummary == nil {
+		return schema
+	}
+
+	// Build properties from field hints
+	properties := make(map[string]interface{})
+	required := []string{}
+
+	// Add required fields
+	for _, field := range cap.InputSummary.RequiredFields {
+		properties[field.Name] = b.fieldHintToJSONSchema(field)
+		required = append(required, field.Name)
+	}
+
+	// Add optional fields
+	for _, field := range cap.InputSummary.OptionalFields {
+		properties[field.Name] = b.fieldHintToJSONSchema(field)
+	}
+
+	schema["properties"] = properties
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	schema["additionalProperties"] = false
+
+	return schema
+}
+
+// fieldHintToJSONSchema converts a FieldHint to a JSON Schema property definition.
+func (b *BaseAgent) fieldHintToJSONSchema(field FieldHint) map[string]interface{} {
+	prop := map[string]interface{}{
+		"type": field.Type,
+	}
+
+	if field.Description != "" {
+		prop["description"] = field.Description
+	}
+
+	if field.Example != "" {
+		prop["examples"] = []string{field.Example}
+	}
+
+	return prop
 }
 
 // Start starts the HTTP server for the agent

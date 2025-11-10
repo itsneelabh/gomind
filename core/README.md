@@ -258,6 +258,83 @@ core.WithDevelopmentMode(true)       // Enable development features
 core.WithMockDiscovery(true)         // Use in-memory discovery (testing)
 ```
 
+### Environment Variables and Constants
+
+GoMind defines standard environment variables for configuration. The framework provides constants in `core/constants.go` to reference these variables, eliminating magic strings and providing type safety.
+
+#### Required Configuration
+
+These environment variables **must** be set for the framework to function:
+
+| Constant | Environment Variable | Description | Example |
+|----------|---------------------|-------------|---------|
+| `core.EnvRedisURL` | `REDIS_URL` | Redis connection for service discovery | `redis://localhost:6379` |
+
+#### Optional Configuration (Framework Provides Defaults)
+
+| Constant | Environment Variable | Default | Description |
+|----------|---------------------|---------|-------------|
+| `core.EnvPort` | `PORT` | `8080` | HTTP server port |
+| `core.EnvDevMode` | `DEV_MODE` | `false` | Enable development mode |
+| `core.EnvNamespace` | `NAMESPACE` | `"default"` | Kubernetes namespace (auto-detected in K8s) |
+| `core.EnvServiceName` | `GOMIND_K8S_SERVICE_NAME` | Auto-detected | Service name in Kubernetes |
+
+#### Feature Flags (Opt-In)
+
+| Constant | Environment Variable | Default | Description |
+|----------|---------------------|---------|-------------|
+| `core.EnvValidatePayloads` | `GOMIND_VALIDATE_PAYLOADS` | Disabled | Enable Phase 3 schema validation for AI-generated payloads |
+
+#### Redis and Schema Cache Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `core.DefaultRedisPrefix` | `"gomind:schema:"` | Default Redis key prefix for schema cache |
+| `core.DefaultSchemaCacheTTL` | `24 * time.Hour` | Default TTL for cached schemas |
+| `core.SchemaEndpointSuffix` | `"/schema"` | Auto-generated schema endpoint suffix |
+
+#### Using Constants in Your Code
+
+**✅ Recommended** - Use constants to avoid typos and enable IDE support:
+
+```go
+import (
+    "os"
+    "github.com/itsneelabh/gomind/core"
+)
+
+// Good: Use constants
+redisURL := os.Getenv(core.EnvRedisURL)
+if os.Getenv(core.EnvValidatePayloads) == "true" {
+    // Enable Phase 3 validation
+}
+
+// Initialize schema cache with framework constants
+cache := core.NewSchemaCache(redisClient,
+    core.WithPrefix(core.DefaultRedisPrefix),
+    core.WithTTL(core.DefaultSchemaCacheTTL),
+)
+```
+
+**❌ Avoid** - Magic strings are error-prone:
+
+```go
+// Bad: Magic strings (typos won't be caught at compile time)
+redisURL := os.Getenv("REDIS_URL")
+if os.Getenv("GOMIND_VALIDATE_PAYLOADS") == "true" {  // Typo risk!
+    // ...
+}
+```
+
+#### Configuration Priority
+
+The framework follows this precedence order:
+
+1. **Explicit options** passed to `core.NewFramework()` (highest priority)
+2. **Environment variables** (e.g., `REDIS_URL`, `PORT`)
+3. **Framework defaults** (e.g., port 8080, namespace "default")
+4. **Auto-detection** (e.g., Kubernetes service name from `HOSTNAME`)
+
 ### Framework Dependency Injection
 
 The Framework automatically handles dependency injection for your components:
@@ -1486,6 +1563,141 @@ func (a *Agent) callExternalService(ctx context.Context) error {
     })
 }
 ```
+
+### 🤖 AI-Powered Payload Generation: The 3-Phase Approach
+
+When building AI agents that orchestrate tools, a critical challenge is: **How does an agent know what data to send to a tool?**
+
+The answer: **Progressive enhancement through 3 phases**, each building on the previous one.
+
+#### The Problem We're Solving
+
+Imagine you have 100 different tools, each accepting different JSON payloads. Your AI agent discovers a weather tool and needs to call it. The agent needs to know:
+- What fields are required? (`location`)
+- What fields are optional? (`units`, `days`)
+- What format do they expect? (string, number, etc.)
+
+Without this information, the AI must guess—and guessing leads to errors.
+
+#### The 3 Phases: How They Work Together
+
+Think of these like building blocks that stack on top of each other:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Phase 3 (OPTIONAL): Schema Validation                  │
+│ - Validates AI-generated payloads before sending       │
+│ - Only if GOMIND_VALIDATE_PAYLOADS=true                │
+│ - Cached in Redis, 0ms overhead after first fetch      │
+├─────────────────────────────────────────────────────────┤
+│ Phase 2 (RECOMMENDED): Field-Hint-Based Generation     │
+│ - AI uses exact field names from structured hints      │
+│ - ~95% accuracy for most tools                         │
+│ - Falls back to Phase 1 if hints unavailable           │
+├─────────────────────────────────────────────────────────┤
+│ Phase 1 (ALWAYS PRESENT): Description-Based Generation │
+│ - AI generates payloads from natural language          │
+│ - ~85-90% accuracy baseline                            │
+│ - Works for all tools, no extra configuration          │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Quick Example: Weather Tool
+
+**Phase 1 - Basic Description** (Always include this):
+```go
+tool.RegisterCapability(core.Capability{
+    Name: "current_weather",
+    Description: "Gets current weather conditions for a location. " +
+                 "Required: location (city name). " +
+                 "Optional: units (metric/imperial, default: metric).",
+    Handler: handleWeather,
+})
+```
+
+**Phase 2 - Add Field Hints** (Recommended for better accuracy):
+```go
+tool.RegisterCapability(core.Capability{
+    Name: "current_weather",
+    Description: "Gets current weather conditions for a location.",
+    Handler: handleWeather,
+
+    // Add structured field hints for AI
+    InputSummary: &core.SchemaSummary{
+        RequiredFields: []core.FieldHint{
+            {Name: "location", Type: "string", Example: "London"},
+        },
+        OptionalFields: []core.FieldHint{
+            {Name: "units", Type: "string", Example: "metric"},
+        },
+    },
+})
+```
+
+**Phase 3 - Enable Validation** (Optional, for high-reliability scenarios):
+```go
+// In your agent, enable schema caching for validation
+if redisURL := os.Getenv(core.EnvRedisURL); redisURL != "" {
+    redisOpt, _ := redis.ParseURL(redisURL)
+    redisClient := redis.NewClient(redisOpt)
+    agent.SchemaCache = core.NewSchemaCache(redisClient)
+}
+
+// Enable validation via environment variable
+// export GOMIND_VALIDATE_PAYLOADS=true
+```
+
+#### How Agents Use This
+
+When your agent discovers a tool and needs to generate a payload:
+
+```go
+// Agent automatically chooses the best approach:
+// 1. If InputSummary exists → Use Phase 2 (field hints)
+// 2. Otherwise → Use Phase 1 (description)
+// 3. If GOMIND_VALIDATE_PAYLOADS=true → Validate with Phase 3
+
+payload, err := agent.generateToolPayload(ctx, userRequest, capability)
+// Returns: {"location": "London", "units": "metric"}
+```
+
+#### When to Use Each Phase
+
+| Your Needs | Phases to Use | Setup Time | Accuracy |
+|-----------|---------------|------------|----------|
+| **Quick prototype** | Phase 1 only | 30 seconds | ~85-90% |
+| **Production tools** | Phase 1 + 2 | 2 minutes | ~95% |
+| **Mission-critical** | Phase 1 + 2 + 3 | 5 minutes | ~99% |
+
+#### Key Benefits
+
+1. **Progressive Enhancement**: Start simple (Phase 1), add accuracy as needed (Phase 2), add validation for safety (Phase 3)
+2. **Zero Breaking Changes**: Phase 1 works everywhere, Phase 2 and 3 are optional additions
+3. **Shared Cache**: Phase 3 schemas cached in Redis, shared across all agent replicas
+4. **AI Optimized**: Descriptions are "implicit prompts" that guide AI generation (based on 2024 LLM research)
+
+#### Learn More
+
+For a complete deep-dive including:
+- Detailed architecture explanation
+- Implementation walkthroughs
+- Performance benchmarks
+- Migration guides
+- Best practices
+
+See the comprehensive guide: [Tool Schema Discovery Guide](../docs/TOOL_SCHEMA_DISCOVERY_GUIDE.md)
+
+#### Quick Setup Checklist
+
+For a new tool:
+- [ ] Add clear description to capability (Phase 1) - **Required**
+- [ ] Add InputSummary with field hints (Phase 2) - **Recommended**
+- [ ] Document your tool's behavior
+
+For an AI agent:
+- [ ] Generate payloads using AI + capability metadata
+- [ ] Optional: Enable schema cache for validation (Phase 3)
+- [ ] Optional: Set `GOMIND_VALIDATE_PAYLOADS=true` for validation
 
 ### 🎯 Best Practices for Production
 

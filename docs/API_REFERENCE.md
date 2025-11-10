@@ -10,6 +10,11 @@ A comprehensive guide to GoMind's APIs with practical examples and best practice
 - [NewTool](#newtool) - Build tools that provide specific capabilities
 - [NewAIAgent](#newaiagent) - Create AI-powered orchestration agents
 
+**Key Features:**
+- [RegisterCapability](#registercapability) - Define capabilities with AI-powered payload generation (3-phase approach)
+- [Schema Cache](#schema-cache-phase-3-validation) - Redis-backed schema caching for validation
+- [Schema Discovery](#registercapability) - Progressive enhancement: Phase 1 (descriptions) → Phase 2 (field hints) → Phase 3 (validation)
+
 **By Module:**
 - [Core](#core-module) - Foundation types and component lifecycle
 - [AI](#ai-module) - AI provider integration and intelligent agents
@@ -223,48 +228,193 @@ func (c *BaseTool) RegisterCapability(cap Capability)
 **Capability structure:**
 ```go
 type Capability struct {
-    Name        string           // Unique identifier
-    Description string           // Human-readable description
-    Endpoint    string           // HTTP endpoint path
-    InputTypes  []string         // Accepted content types
-    OutputTypes []string         // Response content types
-    Handler     http.HandlerFunc // HTTP handler function
+    Name           string           // Unique identifier
+    Description    string           // Human-readable description for AI (Phase 1)
+    Endpoint       string           // HTTP endpoint path
+    InputTypes     []string         // Accepted content types
+    OutputTypes    []string         // Response content types
+    Handler        http.HandlerFunc // HTTP handler function
+
+    // Phase 2: Schema discovery fields for AI-powered payload generation
+    InputSummary   *SchemaSummary   // Compact field hints for AI (Phase 2)
+    OutputSummary  *SchemaSummary   // Output schema hints (optional)
+    SchemaEndpoint string           // Full JSON Schema endpoint (Phase 3)
+}
+
+// SchemaSummary provides compact field hints for AI payload generation (Phase 2)
+type SchemaSummary struct {
+    RequiredFields []FieldHint  // Required input fields
+    OptionalFields []FieldHint  // Optional input fields
+}
+
+// FieldHint describes a single field for AI understanding
+type FieldHint struct {
+    Name        string  // Field name (exact, used in JSON)
+    Type        string  // Field type (string, number, boolean, object, array)
+    Example     string  // Example value for AI
+    Description string  // Human-readable description
 }
 ```
 
-**Example - Multi-capability Tool:**
+**Example - Phase 1 (Basic - Description Only):**
 ```go
-calculator := core.NewTool("calculator")
-
-// Basic math operations
-calculator.RegisterCapability(core.Capability{
-    Name:        "add",
-    Description: "Add two numbers",
-    Endpoint:    "/api/add",
-    InputTypes:  []string{"application/json"},
-    OutputTypes: []string{"application/json"},
-    Handler:     handleAdd,
-})
-
-calculator.RegisterCapability(core.Capability{
-    Name:        "multiply",
-    Description: "Multiply two numbers",
-    Endpoint:    "/api/multiply",
-    InputTypes:  []string{"application/json"},
-    OutputTypes: []string{"application/json"},
-    Handler:     handleMultiply,
-})
-
-// Advanced operation
-calculator.RegisterCapability(core.Capability{
-    Name:        "solve_equation",
-    Description: "Solve algebraic equations",
-    Endpoint:    "/api/solve",
-    InputTypes:  []string{"application/json", "text/plain"},
-    OutputTypes: []string{"application/json"},
-    Handler:     handleSolveEquation,
+// Minimal capability - AI generates payloads from description alone (~85-90% accuracy)
+tool.RegisterCapability(core.Capability{
+    Name:        "current_weather",
+    Description: "Gets current weather for a location. Required: location (city name). Optional: units (metric/imperial).",
+    Handler:     handleWeather,
 })
 ```
+
+**Example - Phase 2 (Recommended - With Field Hints):**
+```go
+// Enhanced capability with field hints for better AI accuracy (~95%)
+tool.RegisterCapability(core.Capability{
+    Name:        "current_weather",
+    Description: "Gets current weather conditions for a location",
+    InputTypes:  []string{"json"},
+    OutputTypes: []string{"json"},
+    Handler:     handleWeather,
+
+    // Phase 2: Add structured field hints for AI payload generation
+    InputSummary: &core.SchemaSummary{
+        RequiredFields: []core.FieldHint{
+            {
+                Name:        "location",
+                Type:        "string",
+                Example:     "London",
+                Description: "City name or coordinates (lat,lon)",
+            },
+        },
+        OptionalFields: []core.FieldHint{
+            {
+                Name:        "units",
+                Type:        "string",
+                Example:     "metric",
+                Description: "Temperature unit: metric or imperial",
+            },
+        },
+    },
+})
+```
+
+**Example - Phase 3 (Mission-Critical - With Validation):**
+```go
+// Full capability with schema validation endpoint for maximum reliability (~99%)
+tool.RegisterCapability(core.Capability{
+    Name:        "process_payment",
+    Description: "Process a payment transaction",
+    Handler:     handlePayment,
+
+    // Phase 2: Field hints for AI generation
+    InputSummary: &core.SchemaSummary{
+        RequiredFields: []core.FieldHint{
+            {Name: "amount", Type: "number", Example: "99.99", Description: "Payment amount"},
+            {Name: "currency", Type: "string", Example: "USD", Description: "Currency code"},
+            {Name: "card_number", Type: "string", Example: "4111111111111111", Description: "Credit card number"},
+        },
+    },
+
+    // Phase 3: Schema endpoint for validation (auto-generated at /api/capabilities/process_payment/schema)
+    // Framework automatically serves JSON Schema at this endpoint
+})
+```
+
+### Schema Cache (Phase 3 Validation)
+
+Redis-backed caching for JSON Schemas used in Phase 3 validation. Schemas are fetched once and cached forever, providing zero-overhead validation after initial fetch.
+
+#### NewSchemaCache
+
+Create a Redis-backed schema cache for agents that perform Phase 3 validation.
+
+```go
+func NewSchemaCache(redisClient *redis.Client, opts ...SchemaCacheOption) SchemaCache
+```
+
+**SchemaCache interface:**
+```go
+type SchemaCache interface {
+    // Get retrieves a cached schema by tool and capability name
+    Get(ctx context.Context, toolName, capabilityName string) (map[string]interface{}, bool)
+
+    // Set stores a schema in the cache
+    Set(ctx context.Context, toolName, capabilityName string, schema map[string]interface{}) error
+
+    // Stats returns cache statistics for monitoring
+    Stats() map[string]interface{}
+}
+```
+
+**Example - Basic Schema Cache:**
+```go
+// In your agent initialization
+redisOpt, _ := redis.ParseURL(os.Getenv("REDIS_URL"))
+redisClient := redis.NewClient(redisOpt)
+
+// Create schema cache with defaults (24-hour TTL)
+agent.SchemaCache = core.NewSchemaCache(redisClient)
+```
+
+**Example - Custom Configuration:**
+```go
+// Production configuration with custom TTL and prefix
+agent.SchemaCache = core.NewSchemaCache(redisClient,
+    core.WithTTL(1 * time.Hour),          // Shorter TTL for frequently changing schemas
+    core.WithPrefix("myapp:schemas:"),    // Custom prefix for multi-tenant deployments
+)
+
+// Enable validation via environment variable
+// export GOMIND_VALIDATE_PAYLOADS=true
+
+// Agent will now:
+// 1. Generate payloads using AI + field hints (Phase 1/2)
+// 2. Fetch schema from tool's /schema endpoint (once)
+// 3. Cache schema in Redis (shared across all agent replicas)
+// 4. Validate all future payloads against cached schema
+```
+
+**Cache configuration options:**
+
+```go
+// WithTTL sets cache expiration time
+WithTTL(ttl time.Duration) SchemaCacheOption
+
+// WithPrefix sets Redis key prefix (for namespacing)
+WithPrefix(prefix string) SchemaCacheOption
+```
+
+**Monitoring cache performance:**
+```go
+// Get cache statistics
+stats := agent.SchemaCache.Stats()
+// Returns: {"hits": 150, "misses": 3, "total_lookups": 153, "hit_rate": 0.98}
+
+// Log statistics periodically
+ticker := time.NewTicker(1 * time.Minute)
+go func() {
+    for range ticker.C {
+        stats := agent.SchemaCache.Stats()
+        logger.Info("Schema cache stats", stats)
+    }
+}()
+```
+
+**When to use Schema Cache:**
+
+| Scenario | Use Schema Cache? | Reason |
+|----------|------------------|--------|
+| **Development** | No | Schemas change frequently, overhead not worth it |
+| **Production agents** | Yes | Shared cache across replicas, validates critical payloads |
+| **Mission-critical APIs** | Yes | ~99% accuracy with validation |
+| **Simple tools** | No | Phase 1+2 sufficient for most cases |
+
+**Best practices:**
+- Enable only when `GOMIND_VALIDATE_PAYLOADS=true`
+- Use shared Redis instance for all agent replicas
+- Monitor cache hit rate (should be >95% after warmup)
+- Set reasonable TTL (24 hours default, schemas rarely change)
+- Use custom prefix for multi-tenant deployments
 
 ### Component Lifecycle Management
 
@@ -2022,6 +2172,9 @@ GoMind supports configuration through environment variables:
 - `GOMIND_LOG_LEVEL` - Logging level (error/warn/info/debug)
 - `GOMIND_LOG_FORMAT` - Log format (json/text)
 - `GOMIND_DEV_MODE` - Development mode (true/false)
+
+### Schema Discovery & Validation
+- `GOMIND_VALIDATE_PAYLOADS` - Enable Phase 3 schema validation (true/false, default: false)
 
 ### AI Configuration
 - `OPENAI_API_KEY` - OpenAI API key

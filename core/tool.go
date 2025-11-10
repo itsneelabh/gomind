@@ -225,14 +225,30 @@ func (t *BaseTool) GetType() ComponentType {
 func (t *BaseTool) RegisterCapability(cap Capability) {
 	t.capMutex.Lock()
 	defer t.capMutex.Unlock()
-	
+
 	// Auto-generate endpoint if not provided (same as Agent)
 	if cap.Endpoint == "" {
 		cap.Endpoint = fmt.Sprintf("/api/capabilities/%s", cap.Name)
 	}
-	
+
+	// Phase 3: Auto-generate schema endpoint if InputSummary is provided
+	// This enables on-demand schema fetching for validation
+	if cap.InputSummary != nil {
+		schemaEndpoint := fmt.Sprintf("%s/schema", cap.Endpoint)
+		cap.SchemaEndpoint = schemaEndpoint
+
+		// Register schema endpoint handler
+		t.mux.HandleFunc(schemaEndpoint, t.handleSchemaRequest(cap))
+		t.registeredPatterns[schemaEndpoint] = true
+
+		t.Logger.Debug("Registered schema endpoint", map[string]interface{}{
+			"capability":      cap.Name,
+			"schema_endpoint": schemaEndpoint,
+		})
+	}
+
 	t.Capabilities = append(t.Capabilities, cap)
-	
+
 	// Register HTTP endpoint (same pattern as Agent)
 	if cap.Handler != nil {
 		// Use custom handler if provided
@@ -244,11 +260,12 @@ func (t *BaseTool) RegisterCapability(cap Capability) {
 
 	// Track this pattern to prevent duplicates
 	t.registeredPatterns[cap.Endpoint] = true
-	
+
 	t.Logger.Info("Registered capability", map[string]interface{}{
 		"name":           cap.Name,
 		"endpoint":       cap.Endpoint,
 		"custom_handler": cap.Handler != nil,
+		"has_schema":     cap.InputSummary != nil,
 	})
 }
 
@@ -301,6 +318,94 @@ func (t *BaseTool) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 			})
 		}
 	}
+}
+
+// handleSchemaRequest creates an HTTP handler for schema endpoints.
+// Part of Phase 3: Returns full JSON Schema v7 generated from InputSummary.
+// This enables agents to fetch schemas on-demand for payload validation.
+func (t *BaseTool) handleSchemaRequest(cap Capability) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Only support GET requests for schemas
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Generate JSON Schema from InputSummary
+		schema := t.generateJSONSchema(cap)
+
+		// Return schema as JSON
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(schema); err != nil {
+			t.Logger.Error("Failed to encode schema", map[string]interface{}{
+				"error":      err,
+				"capability": cap.Name,
+			})
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		t.Logger.Debug("Schema request served", map[string]interface{}{
+			"capability": cap.Name,
+			"client":     r.RemoteAddr,
+		})
+	}
+}
+
+// generateJSONSchema generates a JSON Schema v7 document from a Capability's InputSummary.
+// Part of Phase 3: Converts compact field hints into full JSON Schema for validation.
+func (t *BaseTool) generateJSONSchema(cap Capability) map[string]interface{} {
+	schema := map[string]interface{}{
+		"$schema":     "http://json-schema.org/draft-07/schema#",
+		"type":        "object",
+		"title":       cap.Name,
+		"description": cap.Description,
+	}
+
+	// If no InputSummary, return minimal schema
+	if cap.InputSummary == nil {
+		return schema
+	}
+
+	// Build properties from field hints
+	properties := make(map[string]interface{})
+	required := []string{}
+
+	// Add required fields
+	for _, field := range cap.InputSummary.RequiredFields {
+		properties[field.Name] = t.fieldHintToJSONSchema(field)
+		required = append(required, field.Name)
+	}
+
+	// Add optional fields
+	for _, field := range cap.InputSummary.OptionalFields {
+		properties[field.Name] = t.fieldHintToJSONSchema(field)
+	}
+
+	schema["properties"] = properties
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	schema["additionalProperties"] = false
+
+	return schema
+}
+
+// fieldHintToJSONSchema converts a FieldHint to a JSON Schema property definition.
+func (t *BaseTool) fieldHintToJSONSchema(field FieldHint) map[string]interface{} {
+	prop := map[string]interface{}{
+		"type": field.Type,
+	}
+
+	if field.Description != "" {
+		prop["description"] = field.Description
+	}
+
+	if field.Example != "" {
+		prop["examples"] = []string{field.Example}
+	}
+
+	return prop
 }
 
 // setupStandardEndpoints adds standard endpoints like /api/capabilities and /health
