@@ -86,7 +86,7 @@ func NewRedisClient(opts RedisClientOptions) (*RedisClient, error) {
 				"error_type": "ErrInvalidConfiguration",
 			})
 		}
-		return nil, fmt.Errorf("Redis URL is required: %w", ErrInvalidConfiguration)
+		return nil, fmt.Errorf("redis URL is required: %w", ErrInvalidConfiguration)
 	}
 
 	// Parse Redis URL

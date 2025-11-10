@@ -45,7 +45,7 @@ func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
 // GenerateResponse generates a response using Gemini's native GenerateContent API
 func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
 	if c.apiKey == "" {
-		return nil, fmt.Errorf("Gemini API key not configured")
+		return nil, fmt.Errorf("gemini API key not configured")
 	}
 
 	// Apply defaults
@@ -104,7 +104,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Error can be safely ignored as we've read the body
+	}()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)

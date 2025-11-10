@@ -534,7 +534,6 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_AI_API_KEY"); v != "" {
 		c.AI.APIKey = v
 		c.AI.Enabled = true // Auto-enable if API key is provided
-		envVarsLoaded++
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "ai_api_key",
@@ -545,7 +544,6 @@ func (c *Config) LoadFromEnv() error {
 	} else if v := os.Getenv("OPENAI_API_KEY"); v != "" {
 		c.AI.APIKey = v
 		c.AI.Enabled = true // Auto-enable if OpenAI key is present
-		envVarsLoaded++
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "ai_api_key",
@@ -568,7 +566,6 @@ func (c *Config) LoadFromEnv() error {
 	if v := os.Getenv("GOMIND_TELEMETRY_ENDPOINT"); v != "" {
 		c.Telemetry.Endpoint = v
 		c.Telemetry.Enabled = true // Auto-enable if endpoint is provided
-		envVarsLoaded++
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "telemetry_endpoint",
@@ -579,7 +576,6 @@ func (c *Config) LoadFromEnv() error {
 	} else if v := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); v != "" {
 		c.Telemetry.Endpoint = v
 		c.Telemetry.Enabled = true // Auto-enable if OTEL endpoint is present
-		envVarsLoaded++
 		if c.logger != nil {
 			c.logger.Debug("Configuration loaded", map[string]interface{}{
 				"setting": "telemetry_endpoint",
@@ -1572,7 +1568,7 @@ func (p *ProductionLogger) logEvent(level, msg string, fields map[string]interfa
 		}
 
 		if data, err := json.Marshal(logEntry); err == nil {
-			fmt.Fprintln(p.output, string(data))
+			_, _ = fmt.Fprintln(p.output, string(data)) // Error writing logs can be safely ignored
 		}
 	} else {
 		// Human-readable for local development
@@ -1591,8 +1587,8 @@ func (p *ProductionLogger) logEvent(level, msg string, fields map[string]interfa
 			}
 		}
 
-		fmt.Fprintf(p.output, "%s [%s] [%s] %s%s%s\n",
-			timestamp, level, p.serviceName, traceInfo, msg, fieldStr.String())
+		_, _ = fmt.Fprintf(p.output, "%s [%s] [%s] %s%s%s\n",
+			timestamp, level, p.serviceName, traceInfo, msg, fieldStr.String()) // Error writing logs can be safely ignored
 	}
 
 	if p.metricsEnabled {

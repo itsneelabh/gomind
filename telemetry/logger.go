@@ -164,7 +164,7 @@ func (l *TelemetryLogger) logJSON(timestamp, level, msg string, fields map[strin
 
 	// Output as JSON
 	if data, err := json.Marshal(logEntry); err == nil {
-		fmt.Fprintln(l.output, string(data))
+		_, _ = fmt.Fprintln(l.output, string(data)) // Error writing logs can be safely ignored
 	}
 }
 
@@ -198,8 +198,8 @@ func (l *TelemetryLogger) logText(timestamp, level, msg string, fields map[strin
 	}
 
 	// Output formatted log line following document pattern
-	fmt.Fprintf(l.output, "%s [%s] [telemetry:%s] %s%s\n",
-		timestamp, level, l.serviceName, msg, fieldStr.String())
+	_, _ = fmt.Fprintf(l.output, "%s [%s] [telemetry:%s] %s%s\n",
+		timestamp, level, l.serviceName, msg, fieldStr.String()) // Error writing logs can be safely ignored
 }
 
 // shouldLog determines if a log level should be output

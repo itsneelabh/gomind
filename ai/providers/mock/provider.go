@@ -4,6 +4,7 @@ package mock
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/itsneelabh/gomind/ai"
 	"github.com/itsneelabh/gomind/core"
@@ -12,7 +13,10 @@ import (
 func init() {
 	// Register only if explicitly enabled via environment or test
 	// This prevents mock from being auto-detected in production
-	ai.Register(&Factory{})
+	if err := ai.Register(&Factory{}); err != nil {
+		// Panic in init() is acceptable for registration errors (caught in tests/development)
+		panic(fmt.Sprintf("failed to register mock AI provider: %v", err))
+	}
 }
 
 // Factory creates mock AI clients for testing

@@ -91,7 +91,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Error can be safely ignored as we've read the body
+	}()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)

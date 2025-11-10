@@ -267,7 +267,9 @@ func (s *ServiceCapabilityProvider) queryExternalService(ctx context.Context, re
 	if err != nil {
 		return "", fmt.Errorf("failed to query capability service: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Error can be safely ignored as we've read the body
+	}()
 
 	// Check HTTP status code
 	if resp.StatusCode != http.StatusOK {
@@ -307,13 +309,6 @@ func (s *ServiceCapabilityProvider) logError(msg string) {
 	}
 }
 
-// logInfo logs info messages if logger is available
-func (s *ServiceCapabilityProvider) logInfo(msg string) {
-	if s.logger != nil {
-		s.logger.Info(msg, nil)
-	}
-}
-
 // Health checks if the external service is healthy
 func (s *ServiceCapabilityProvider) Health(ctx context.Context) error {
 	// Implement health check for monitoring (framework requirement)
@@ -326,7 +321,9 @@ func (s *ServiceCapabilityProvider) Health(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Error can be safely ignored after health check
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check failed: status %d", resp.StatusCode)

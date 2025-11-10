@@ -50,27 +50,27 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 
 	// Apply timeout if specified
 	if config.Timeout > 0 {
-		client.BaseClient.HTTPClient.Timeout = config.Timeout
+		client.HTTPClient.Timeout = config.Timeout
 	}
 
 	// Apply retry configuration
 	if config.MaxRetries > 0 {
-		client.BaseClient.MaxRetries = config.MaxRetries
+		client.MaxRetries = config.MaxRetries
 	}
 
 	// Apply model defaults
 	if config.Model != "" {
-		client.BaseClient.DefaultModel = config.Model
+		client.DefaultModel = config.Model
 	}
 
 	// Apply temperature default
 	if config.Temperature > 0 {
-		client.BaseClient.DefaultTemperature = config.Temperature
+		client.DefaultTemperature = config.Temperature
 	}
 
 	// Apply max tokens default
 	if config.MaxTokens > 0 {
-		client.BaseClient.DefaultMaxTokens = config.MaxTokens
+		client.DefaultMaxTokens = config.MaxTokens
 	}
 
 	// Apply custom headers if any
@@ -80,7 +80,7 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 			headers: config.Headers,
 			base:    http.DefaultTransport,
 		}
-		client.BaseClient.HTTPClient.Transport = transport
+		client.HTTPClient.Transport = transport
 	}
 
 	return client
@@ -322,7 +322,9 @@ func isLocalServiceAvailable(url string) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Error can be safely ignored after health check
+	}()
 	return resp.StatusCode == http.StatusOK
 }
 

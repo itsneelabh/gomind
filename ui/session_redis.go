@@ -263,10 +263,10 @@ func (r *RedisSessionManager) Get(ctx context.Context, sessionID string) (*Sessi
 		}
 	}
 	if v, ok := result["token_count"]; ok {
-		fmt.Sscanf(v, "%d", &session.TokenCount)
+		_, _ = fmt.Sscanf(v, "%d", &session.TokenCount) // Error can be ignored, defaults to 0
 	}
 	if v, ok := result["message_count"]; ok {
-		fmt.Sscanf(v, "%d", &session.MessageCount)
+		_, _ = fmt.Sscanf(v, "%d", &session.MessageCount) // Error can be ignored, defaults to 0
 	}
 
 	// Parse metadata (fix missing metadata parsing)
@@ -543,7 +543,7 @@ func (r *RedisSessionManager) GetMessages(ctx context.Context, sessionID string,
 	start := -int64(limit)
 	if limit <= 0 {
 		start = 0
-		limit = r.config.MaxMessages
+		// Use all messages when limit is not specified
 	}
 
 	results, err := r.client.LRange(ctx, messagesKey, start, -1).Result()
@@ -827,10 +827,10 @@ func (r *RedisSessionManager) parseSession(data map[string]string) (*Session, er
 		}
 	}
 	if v, ok := data["token_count"]; ok {
-		fmt.Sscanf(v, "%d", &session.TokenCount)
+		_, _ = fmt.Sscanf(v, "%d", &session.TokenCount) // Error can be ignored, defaults to 0
 	}
 	if v, ok := data["message_count"]; ok {
-		fmt.Sscanf(v, "%d", &session.MessageCount)
+		_, _ = fmt.Sscanf(v, "%d", &session.MessageCount) // Error can be ignored, defaults to 0
 	}
 	if v, ok := data["metadata"]; ok && v != "" {
 		if err := json.Unmarshal([]byte(v), &session.Metadata); err != nil {

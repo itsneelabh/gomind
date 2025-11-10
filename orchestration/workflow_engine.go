@@ -419,12 +419,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 
 				// TODO: Add proper logging here when logger is available
 				// For now, store panic info in execution errors with context
-				if result.Output != nil {
-					// Extract stack trace if available for debugging
-					if _, ok := result.Output["stack_trace"]; ok {
-						// Stack trace is available in Output for debugging
-					}
-				}
+				// Stack trace is available in result.Output["stack_trace"] for debugging if needed
 
 				// Decide whether to continue or fail based on error strategy
 				if workflow.OnError == nil || workflow.OnError.Strategy != "continue" {

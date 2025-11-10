@@ -122,7 +122,8 @@ func (cb *TelemetryCircuitBreaker) RecordSuccess() {
 	cb.successes.Add(1)
 	state := cb.State()
 
-	if state == "half-open" {
+	switch state {
+	case "half-open":
 		successes := cb.successes.Load()
 
 		// Log recovery progress
@@ -158,7 +159,7 @@ func (cb *TelemetryCircuitBreaker) RecordSuccess() {
 			}
 			cb.mu.Unlock()
 		}
-	} else if state == "closed" {
+	case "closed":
 		// Reset failure count on success in closed state
 		cb.failures.Store(0)
 	}

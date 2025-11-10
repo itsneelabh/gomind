@@ -58,27 +58,27 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 
 	// Apply timeout if specified
 	if config.Timeout > 0 {
-		client.BaseClient.HTTPClient.Timeout = config.Timeout
+		client.HTTPClient.Timeout = config.Timeout
 	}
 
 	// Apply retry configuration
 	if config.MaxRetries > 0 {
-		client.BaseClient.MaxRetries = config.MaxRetries
+		client.MaxRetries = config.MaxRetries
 	}
 
 	// Apply model defaults
 	if config.Model != "" {
-		client.BaseClient.DefaultModel = config.Model
+		client.DefaultModel = config.Model
 	}
 
 	// Apply temperature default
 	if config.Temperature > 0 {
-		client.BaseClient.DefaultTemperature = config.Temperature
+		client.DefaultTemperature = config.Temperature
 	}
 
 	// Apply max tokens default
 	if config.MaxTokens > 0 {
-		client.BaseClient.DefaultMaxTokens = config.MaxTokens
+		client.DefaultMaxTokens = config.MaxTokens
 	}
 
 	return client

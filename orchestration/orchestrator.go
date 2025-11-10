@@ -109,15 +109,9 @@ func (o *AIOrchestrator) SetTelemetry(telemetry core.Telemetry) {
 	} else {
 		o.telemetry = telemetry
 	}
-	// Propagate telemetry to executor and synthesizer if they support it
-	if o.executor != nil {
-		// If executor supports telemetry, set it here
-		// o.executor.SetTelemetry(telemetry)
-	}
-	if o.synthesizer != nil {
-		// If synthesizer supports telemetry, set it here
-		// o.synthesizer.SetTelemetry(telemetry)
-	}
+	// TODO: Propagate telemetry to executor and synthesizer when they support SetTelemetry()
+	// - o.executor.SetTelemetry(telemetry) - when implemented
+	// - o.synthesizer.SetTelemetry(telemetry) - when implemented
 }
 
 // SetLogger sets the logger provider (follows framework design principles)
@@ -135,10 +129,7 @@ func (o *AIOrchestrator) SetLogger(logger core.Logger) {
 	if o.catalog != nil {
 		o.catalog.SetLogger(logger)
 	}
-	if o.synthesizer != nil {
-		// If synthesizer supports logging, set it here
-		// o.synthesizer.SetLogger(logger)
-	}
+	// TODO: Add synthesizer.SetLogger(logger) when synthesizer supports logging interface
 }
 
 // catalogRefreshLoop periodically refreshes the agent catalog

@@ -100,7 +100,7 @@ func (b *BaseClient) ExecuteWithRetry(ctx context.Context, req *http.Request) (*
 			lastErr = err
 		} else {
 			lastErr = fmt.Errorf("server error: status %d", resp.StatusCode)
-			resp.Body.Close()
+			_ = resp.Body.Close() // Error can be safely ignored in error path
 		}
 
 		// Check if we should retry

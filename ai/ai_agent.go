@@ -96,8 +96,9 @@ func (a *AIAgent) ProcessWithMemory(ctx context.Context, input string) (string, 
 	// Store input in memory if available
 	if a.Memory != nil {
 		// Store with both generic and specific keys for compatibility
-		a.Memory.Set(ctx, "last_input", input, 0)
-		a.Memory.Set(ctx, fmt.Sprintf("input:%s", input), input, 0)
+		// Errors are intentionally ignored as memory storage is auxiliary and not critical
+		_ = a.Memory.Set(ctx, "last_input", input, 0)
+		_ = a.Memory.Set(ctx, fmt.Sprintf("input:%s", input), input, 0)
 	}
 
 	// Process with AI
@@ -117,8 +118,9 @@ func (a *AIAgent) ProcessWithMemory(ctx context.Context, input string) (string, 
 	// Store response in memory if available
 	if a.Memory != nil {
 		// Store with both generic and specific keys for compatibility
-		a.Memory.Set(ctx, "last_response", response.Content, 0)
-		a.Memory.Set(ctx, fmt.Sprintf("response:%s", input), response.Content, 0)
+		// Errors are intentionally ignored as memory storage is auxiliary and not critical
+		_ = a.Memory.Set(ctx, "last_response", response.Content, 0)
+		_ = a.Memory.Set(ctx, fmt.Sprintf("response:%s", input), response.Content, 0)
 	}
 
 	return response.Content, nil

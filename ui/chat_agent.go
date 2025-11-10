@@ -59,19 +59,19 @@ func NewChatAgent(config ChatAgentConfig, aiClient core.AIClient, sessions Sessi
 	}
 
 	// This follows the Intelligent Configuration principle from FRAMEWORK_DESIGN_PRINCIPLES.md
-	if agent.BaseAgent.Logger == nil || isNoOpLogger(agent.BaseAgent.Logger) {
-		agent.BaseAgent.Logger = NewChatAgentLogger(config)
+	if agent.Logger == nil || isNoOpLogger(agent.Logger) {
+		agent.Logger = NewChatAgentLogger(config)
 		// Note: Logger tracking is handled automatically by core.NewProductionLogger
 	}
 
 	// This ensures consistent logging across all UI components
 	if sessionManager, ok := sessions.(*RedisSessionManager); ok {
-		sessionManager.SetLogger(agent.BaseAgent.Logger)
+		sessionManager.SetLogger(agent.Logger)
 	}
 
 	// This ensures operational visibility for transport registration/unregistration
 	if registry, ok := DefaultRegistry.(*transportRegistry); ok {
-		registry.SetLogger(agent.BaseAgent.Logger)
+		registry.SetLogger(agent.Logger)
 	}
 
 	// Auto-configure available transports
@@ -123,15 +123,15 @@ func NewChatAgentWithDependencies(
 
 	// Set logger and telemetry if provided
 	if deps.Logger != nil {
-		agent.BaseAgent.Logger = deps.Logger
+		agent.Logger = deps.Logger
 	}
 	if deps.Telemetry != nil {
-		agent.BaseAgent.Telemetry = deps.Telemetry
+		agent.Telemetry = deps.Telemetry
 	}
 
 	// This follows the Intelligent Configuration principle - smart defaults when user intent is clear
-	if agent.BaseAgent.Logger == nil || isNoOpLogger(agent.BaseAgent.Logger) {
-		agent.BaseAgent.Logger = NewChatAgentLogger(config)
+	if agent.Logger == nil || isNoOpLogger(agent.Logger) {
+		agent.Logger = NewChatAgentLogger(config)
 		// Note: Logger tracking is handled automatically by core.NewProductionLogger
 	}
 
@@ -651,9 +651,10 @@ func (c *DefaultChatAgent) StreamResponse(ctx context.Context, sessionID string,
 		// Build prompt with history
 		var prompt string
 		for _, msg := range messages {
-			if msg.Role == "user" {
+			switch msg.Role {
+			case "user":
 				prompt += fmt.Sprintf("User: %s\n", msg.Content)
-			} else if msg.Role == "assistant" {
+			case "assistant":
 				prompt += fmt.Sprintf("Assistant: %s\n", msg.Content)
 			}
 		}

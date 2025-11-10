@@ -47,7 +47,7 @@ func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
 // GenerateResponse generates a response using Anthropic's native Messages API
 func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
 	if c.apiKey == "" {
-		return nil, fmt.Errorf("Anthropic API key not configured")
+		return nil, fmt.Errorf("anthropic API key not configured")
 	}
 
 	// Apply defaults
@@ -99,7 +99,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Error can be safely ignored as we've read the body
+	}()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)
