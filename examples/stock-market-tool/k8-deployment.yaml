@@ -1,0 +1,103 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: stock-tool-secrets
+  namespace: gomind-examples
+type: Opaque
+stringData:
+  FINNHUB_API_KEY: "your-finnhub-api-key-here"  # Replace with your actual API key
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stock-service
+  namespace: gomind-examples
+  labels:
+    app: stock-tool
+    component: tool
+spec:
+  selector:
+    app: stock-tool
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8082
+      protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stock-tool
+  namespace: gomind-examples
+  labels:
+    app: stock-tool
+    component: tool
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: stock-tool
+  template:
+    metadata:
+      labels:
+        app: stock-tool
+        component: tool
+    spec:
+      containers:
+      - name: stock-tool
+        image: stock-tool:latest
+        imagePullPolicy: Never  # For local Kind cluster
+        ports:
+        - containerPort: 8082
+          name: http
+        env:
+        - name: PORT
+          value: "8082"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: REDIS_URL
+          value: "redis://redis.default.svc.cluster.local:6379"
+        - name: FINNHUB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: stock-tool-secrets
+              key: FINNHUB_API_KEY
+        - name: DEV_MODE
+          value: "false"
+        - name: GOMIND_LOG_LEVEL
+          value: "info"
+        - name: GOMIND_LOG_FORMAT
+          value: "json"
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "stock-service"
+        - name: GOMIND_K8S_SERVICE_PORT
+          value: "80"
+        - name: GOMIND_K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 10

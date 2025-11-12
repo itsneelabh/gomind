@@ -1,0 +1,123 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/itsneelabh/gomind/core"
+)
+
+func main() {
+	// Validate configuration first
+	if err := validateConfig(); err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	// Create stock market tool
+	tool := NewStockTool()
+
+	// Get port configuration from environment
+	port := 8082 // default (8080 is weather, 8081 might be used)
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil {
+			port = p
+		}
+	}
+
+	// Framework handles all the complexity
+	framework, err := core.NewFramework(tool,
+		// Core configuration from environment
+		core.WithName("stock-service"),
+		core.WithPort(port),
+		core.WithNamespace(os.Getenv("NAMESPACE")),
+
+		// Discovery configuration (tools can register but not discover)
+		core.WithRedisURL(os.Getenv("REDIS_URL")),
+		core.WithDiscovery(true, "redis"),
+
+		// CORS for web access
+		core.WithCORS([]string{"*"}, true),
+
+		// Development mode from environment
+		core.WithDevelopmentMode(os.Getenv("DEV_MODE") == "true"),
+	)
+	if err != nil {
+		log.Fatalf("Failed to create framework: %v", err)
+	}
+
+	// Display startup information
+	log.Println("📈 Stock Market Tool Service Starting...")
+	log.Printf("🌐 Server Port: %d\n", port)
+	log.Println("📋 Registered endpoints will be shown in framework logs below...")
+	log.Println()
+
+	// Set up graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		log.Println("\n⚠️  Shutting down gracefully...")
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+
+		cancel()
+
+		select {
+		case <-shutdownCtx.Done():
+			log.Println("❌ Shutdown timeout exceeded")
+			os.Exit(1)
+		case <-time.After(1 * time.Second):
+			// Give framework time to clean up
+		}
+
+		log.Println("✅ Shutdown completed")
+		os.Exit(0)
+	}()
+
+	// Run the framework (blocking)
+	if err := framework.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Fatalf("Framework error: %v", err)
+	}
+}
+
+// validateConfig validates all required configuration at startup
+func validateConfig() error {
+	// REDIS_URL is required for discovery
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		return fmt.Errorf("REDIS_URL environment variable required")
+	}
+
+	// Validate Redis URL format
+	if !strings.HasPrefix(redisURL, "redis://") && !strings.HasPrefix(redisURL, "rediss://") {
+		return fmt.Errorf("invalid REDIS_URL format (must start with redis:// or rediss://)")
+	}
+
+	// FINNHUB_API_KEY is required for stock data
+	apiKey := os.Getenv("FINNHUB_API_KEY")
+	if apiKey == "" {
+		log.Println("⚠️  Warning: FINNHUB_API_KEY not set - tool will use mock data")
+	}
+
+	// Validate port if set
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		if _, err := strconv.Atoi(portStr); err != nil {
+			return fmt.Errorf("invalid PORT value: %v", err)
+		}
+	}
+
+	return nil
+}
