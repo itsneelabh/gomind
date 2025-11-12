@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
       - name: weather-tool
-        image: weather-tool-example:latest
+        image: weather-tool:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
@@ -41,11 +41,33 @@ spec:
         - name: GOMIND_NAMESPACE
           value: "gomind-examples"
         - name: REDIS_URL
-          value: "redis://redis:6379"
+          value: "redis://redis.default.svc.cluster.local:6379"
         - name: GOMIND_REDIS_URL
-          value: "redis://redis:6379"
+          value: "redis://redis.default.svc.cluster.local:6379"
         - name: GOMIND_DEV_MODE
           value: "false"
+        # Logging Configuration (change to debug for troubleshooting)
+        - name: GOMIND_LOG_LEVEL
+          value: "info"
+        - name: GOMIND_LOG_FORMAT
+          value: "json"
+        # 🔧 KUBERNETES SERVICE DISCOVERY CONFIGURATION
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "weather-tool-service"
+        - name: GOMIND_K8S_SERVICE_PORT
+          value: "80"
+        - name: GOMIND_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: GOMIND_K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: GOMIND_K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         # Telemetry Configuration
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: "http://otel-collector:4318"
@@ -128,7 +150,7 @@ data:
     discovery:
       enabled: true
       provider: redis
-      redis_url: redis://redis:6379
+      redis_url: redis://redis.default.svc.cluster.local:6379
     logging:
       level: info
       format: json

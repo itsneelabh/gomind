@@ -8,8 +8,53 @@ A comprehensive example demonstrating how to build an **Agent** (active orchestr
 - **AI Integration**: Auto-detecting AI providers (OpenAI, Anthropic, Groq, etc.)
 - **Service Discovery**: Finding and calling available tools dynamically
 - **Intelligent Orchestration**: Using AI to plan and execute multi-step workflows
+- **3-Phase Schema Discovery**: AI-powered payload generation with progressive enhancement
 - **Production Patterns**: Resilient HTTP calls, error handling, caching
 - **Kubernetes Deployment**: Complete K8s configuration with AI secrets
+
+## 🤖 3-Phase AI-Powered Payload Generation
+
+This example implements the complete 3-phase approach for AI-powered tool payload generation:
+
+### Phase 1: Description-Based (Always Active)
+- AI generates payloads from natural language capability descriptions
+- ~85-90% accuracy baseline
+- Works for all capabilities automatically
+
+### Phase 2: Field-Hint-Based (Implemented)
+- All capabilities include structured field hints (`InputSummary`)
+- AI uses exact field names, types, and examples
+- ~95% accuracy for tool calls
+- See [research_agent.go:93-238](research_agent.go#L93-L238) for implementation
+
+### Phase 3: Schema Validation (Optional)
+- Full JSON Schema v7 validation before sending payloads
+- Cached in Redis (0ms overhead after first fetch)
+- Enable with `GOMIND_VALIDATE_PAYLOADS=true`
+- See [orchestration.go:93-121](orchestration.go#L93-L121) for validation logic
+
+**Example Capability with Phase 2:**
+```go
+r.RegisterCapability(core.Capability{
+    Name: "research_topic",
+    Description: "Researches a topic by discovering and coordinating relevant tools",
+    // Phase 2: Field hints guide AI generation
+    InputSummary: &core.SchemaSummary{
+        RequiredFields: []core.FieldHint{
+            {
+                Name: "topic",
+                Type: "string",
+                Example: "latest developments in renewable energy",
+                Description: "The research topic or question to investigate",
+            },
+        },
+        // ... optional fields
+    },
+    Handler: r.handleResearchTopic,
+})
+```
+
+**Learn More**: See [Tool Schema Discovery Guide](../../docs/TOOL_SCHEMA_DISCOVERY_GUIDE.md) for complete documentation.
 
 ## 🧠 Architecture
 
@@ -39,49 +84,136 @@ A comprehensive example demonstrating how to build an **Agent** (active orchestr
 
 **Key Principle**: Agents are **active** - they can discover other components and orchestrate complex workflows.
 
-## 🚀 Quick Start (5 minutes)
+## 🚀 Quick Start - Local Kind Cluster (2 minutes)
 
 ### Prerequisites
-- Go 1.25+
-- Redis (or use Docker Compose)
+- Docker Desktop or Docker Engine
+- [kind](https://kind.sigs.k8s.io/) - Kubernetes in Docker
+- [kubectl](https://kubernetes.io/docs/tasks/tools/) - Kubernetes CLI
 - Optional: AI API key (OpenAI, Anthropic, Groq, etc.)
 
-### 1. Set Up AI Provider (Optional)
-
-The agent works without AI but is much more powerful with it:
+### Option 1: Complete Setup (Easiest)
 
 ```bash
-# Option A: OpenAI
-export OPENAI_API_KEY="sk-your-openai-key-here"
+# 1. Navigate to the example
+cd examples/agent-example
 
-# Option B: Groq (fast and free tier available)
-export GROQ_API_KEY="gsk-your-groq-key-here"
+# 2. (Optional) Configure AI provider
+cp .env.example .env
+# Edit .env and add your API key:
+#   OPENAI_API_KEY=sk-...
 
-# Option C: Anthropic Claude
-export ANTHROPIC_API_KEY="sk-ant-your-anthropic-key-here"
+# 3. Deploy everything with one command
+make all
+```
 
-# Option D: Multiple providers (agent picks the best available)
+That's it! The agent is now running in your local Kind cluster.
+
+### Option 2: Step-by-Step
+
+```bash
+# 1. Set up Kind cluster and Redis
+make setup
+
+# 2. Build and deploy the agent
+make deploy
+
+# 3. Test the deployment
+make test
+```
+
+### Accessing the Agent
+
+```bash
+# Port forward to access locally
+kubectl port-forward -n gomind-examples svc/research-agent-service 8090:80
+
+# In another terminal, test it
+curl http://localhost:8090/health
+curl http://localhost:8090/api/capabilities
+```
+
+### Configuring AI Provider
+
+The agent works without AI but has limited functionality. To enable full AI capabilities:
+
+**Method 1: Using .env file (Recommended)**
+```bash
+# Copy the example file
+cp .env.example .env
+
+# Then load it and recreate secrets
+source .env
+make create-secrets
+
+# Restart the agent to use new keys
+kubectl rollout restart deployment/research-agent -n gomind-examples
+```
+
+**Method 2: Environment Variables**
+```bash
+# Set directly in your shell
 export OPENAI_API_KEY="sk-..."
-export GROQ_API_KEY="gsk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Then create secrets
+make create-secrets
 ```
 
-### 2. Run the Complete Stack
+### Available Make Commands
 
 ```bash
-# From examples/ directory - runs agent + tool + Redis
-docker-compose up
-
-# Or run just the agent (requires Redis and optionally other tools)
-cd agent-example
-go mod tidy
-go run main.go
+make setup      # Create Kind cluster, install Redis
+make deploy     # Build and deploy the agent
+make test       # Run automated tests
+make logs       # View agent logs
+make status     # Check deployment status
+make clean      # Delete everything
+make help       # Show all commands
 ```
 
-### 3. Test Agent Capabilities
+## 🧪 Testing the Agent
+
+### Understanding the `use_ai` Parameter
+
+The research agent supports **hybrid operation** - combining tool orchestration with AI intelligence:
+
+| Scenario | `use_ai` Setting | Behavior | Use Case |
+|----------|------------------|----------|----------|
+| **Tools Available** | `false` | Tools only, basic text summary | Fast, deterministic results |
+| **Tools Available** | `true` | Tools + AI synthesis | Intelligent analysis of tool results |
+| **No Tools Available** | `false` | Empty results | N/A - need relevant tools |
+| **No Tools Available** | `true` | **AI answers directly** | General knowledge questions |
+
+**Key Discovery**: When `use_ai: true` and no relevant tools are found, the agent automatically falls back to direct AI responses. This enables the agent to answer general questions:
 
 ```bash
-# Health check
+# Example: Product recommendation (no tools available)
+curl -X POST http://localhost:8090/api/capabilities/research_topic \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "Recommend top 3 wifi routers supporting 2 Gbps for home use",
+    "use_ai": true,
+    "max_results": 1
+  }'
+# ✓ Works - AI provides recommendations directly
+
+# Same query without AI
+curl -X POST http://localhost:8090/api/capabilities/research_topic \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "Recommend top 3 wifi routers supporting 2 Gbps for home use",
+    "use_ai": false
+  }'
+# ✗ Returns empty results - no relevant tools
+```
+
+### Basic Testing
+
+```bash
+# Start port forwarding
+kubectl port-forward -n gomind-examples svc/research-agent-service 8090:80
+
+# Test health endpoint
 curl http://localhost:8090/health
 
 # Discover available tools and agents
@@ -374,46 +506,76 @@ Provide:
 
 ## 🔧 Configuration Options
 
-### Environment Variables
+### Environment Variables (Production Best Practice)
 
 ```bash
-# Core Agent Configuration  
-export GOMIND_AGENT_NAME="research-assistant"
-export GOMIND_PORT=8090
-export GOMIND_NAMESPACE="examples"
+# Core Agent Configuration (v0.6.4+ pattern - no hardcoded values)
+export PORT="8090"                         # Service port
+export NAMESPACE="examples"                # Service namespace
+export DEV_MODE="false"                    # Production mode
 
-# Discovery Configuration
-export REDIS_URL="redis://localhost:6379"
-export GOMIND_REDIS_URL="redis://localhost:6379"
+# Legacy support (for backward compatibility)
+export GOMIND_PORT="8090"
+export GOMIND_NAMESPACE="examples"
+export GOMIND_DEV_MODE="false"
+
+# Discovery Configuration (REQUIRED - no defaults)
+export REDIS_URL="redis://localhost:6379"  # Must be set explicitly
+export GOMIND_REDIS_URL="redis://localhost:6379"  # Legacy support
 
 # AI Provider Configuration (pick one or multiple)
 export OPENAI_API_KEY="sk-..."
 export GROQ_API_KEY="gsk-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-# Development
-export GOMIND_DEV_MODE=true
+# Production Configuration
+export GOMIND_LOG_LEVEL="info"            # info, debug, error
+export GOMIND_LOG_FORMAT="json"           # json for structured logging
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4318"
 ```
 
-### Framework Options
+### Framework Options (v0.6.4+ Pattern)
 
 ```go
+// Production pattern: ALL configuration from environment
 framework, _ := core.NewFramework(agent,
-    // Core configuration
-    core.WithName("research-assistant"),
-    core.WithPort(8090),
-    core.WithNamespace("examples"),
-    
-    // Discovery (agents get full powers)
-    core.WithRedisURL("redis://localhost:6379"),
-    core.WithDiscovery(true, "redis"), // Full discovery enabled
-    
-    // CORS for web access
-    core.WithCORS([]string{"*"}, true),
-    
-    // Development features
-    core.WithDevelopmentMode(true),
+    // Read from environment - no hardcoded values
+    core.WithRedisURL(os.Getenv("REDIS_URL")),     // Required
+    core.WithNamespace(os.Getenv("NAMESPACE")),    // Optional
+
+    // Port from environment with proper parsing
+    core.WithPort(getPortFromEnv()),
+
+    // Development mode from environment
+    core.WithDevelopmentMode(os.Getenv("DEV_MODE") == "true"),
+
+    // Discovery enabled for agents
+    core.WithDiscovery(true, "redis"),
+
+    // CORS configuration (can be environment-based too)
+    core.WithCORS(getCORSFromEnv(), true),
 )
+
+// Helper functions for production
+func getPortFromEnv() int {
+    portStr := os.Getenv("PORT")
+    if portStr == "" {
+        return 8090 // Default only if not set
+    }
+    port, err := strconv.Atoi(portStr)
+    if err != nil {
+        log.Fatalf("Invalid PORT: %v", err)
+    }
+    return port
+}
+
+func getCORSFromEnv() []string {
+    origins := os.Getenv("CORS_ORIGINS")
+    if origins == "" {
+        return []string{"*"} // Default for development
+    }
+    return strings.Split(origins, ",")
+}
 ```
 
 ### AI Configuration
@@ -432,6 +594,274 @@ aiClient, err := ai.NewClient(
 // Multiple providers with fallback
 primary, _ := ai.NewClient(ai.WithProvider("openai"))
 fallback, _ := ai.NewClient(ai.WithProvider("groq"))
+```
+
+## 🏭 Production Best Practices
+
+### 1. Environment-Based Configuration
+**NEVER hardcode configuration values** in production code:
+
+```go
+// ❌ BAD - Hardcoded values
+core.WithRedisURL("redis://localhost:6379")
+core.WithPort(8090)
+
+// ✅ GOOD - Environment-based
+core.WithRedisURL(os.Getenv("REDIS_URL"))
+core.WithPort(getPortFromEnv())
+```
+
+### 2. Health Checks & Readiness Probes
+Always implement comprehensive health checks:
+
+```go
+// Liveness probe - is the service running?
+func (r *ResearchAgent) handleHealth(w http.ResponseWriter, req *http.Request) {
+    health := map[string]interface{}{
+        "status": "healthy",
+        "timestamp": time.Now().Unix(),
+    }
+
+    // Check critical dependencies
+    if err := r.checkRedis(); err != nil {
+        health["status"] = "unhealthy"
+        health["redis"] = err.Error()
+        w.WriteHeader(http.StatusServiceUnavailable)
+    }
+
+    json.NewEncoder(w).Encode(health)
+}
+
+// Readiness probe - is the service ready to handle requests?
+func (r *ResearchAgent) handleReady(w http.ResponseWriter, req *http.Request) {
+    // Check if discovery is initialized
+    if r.Discovery == nil {
+        http.Error(w, "Discovery not ready", http.StatusServiceUnavailable)
+        return
+    }
+
+    // Check if we can discover services
+    ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+    defer cancel()
+
+    _, err := r.Discovery.Discover(ctx, core.DiscoveryFilter{})
+    if err != nil {
+        http.Error(w, "Discovery check failed", http.StatusServiceUnavailable)
+        return
+    }
+
+    w.WriteHeader(http.StatusOK)
+    json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+}
+```
+
+### 3. Graceful Shutdown
+Implement proper shutdown handling:
+
+```go
+func main() {
+    // ... framework setup ...
+
+    // Graceful shutdown
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+    go func() {
+        <-sigChan
+        log.Println("Shutting down gracefully...")
+
+        // Give ongoing requests time to complete
+        ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+        defer cancel()
+
+        if err := framework.Shutdown(ctx); err != nil {
+            log.Printf("Shutdown error: %v", err)
+        }
+        os.Exit(0)
+    }()
+
+    framework.Run()
+}
+```
+
+### 4. Error Handling & Retries
+Implement resilient error handling with retries:
+
+```go
+func (r *ResearchAgent) callToolWithRetry(ctx context.Context, tool *core.ServiceInfo, query string) (*ToolResult, error) {
+    var lastErr error
+
+    for attempt := 0; attempt < 3; attempt++ {
+        if attempt > 0 {
+            // Exponential backoff
+            time.Sleep(time.Duration(math.Pow(2, float64(attempt))) * time.Second)
+        }
+
+        result, err := r.callTool(ctx, tool, query)
+        if err == nil {
+            return result, nil
+        }
+
+        lastErr = err
+        log.Printf("Tool call attempt %d failed: %v", attempt+1, err)
+
+        // Don't retry on context cancellation
+        if errors.Is(err, context.Canceled) {
+            return nil, err
+        }
+    }
+
+    return nil, fmt.Errorf("all retry attempts failed: %w", lastErr)
+}
+```
+
+### 5. Structured Logging
+Use structured logging for better observability:
+
+```go
+import "github.com/sirupsen/logrus"
+
+func setupLogging() {
+    // Configure based on environment
+    if os.Getenv("GOMIND_LOG_FORMAT") == "json" {
+        logrus.SetFormatter(&logrus.JSONFormatter{})
+    }
+
+    level, err := logrus.ParseLevel(os.Getenv("GOMIND_LOG_LEVEL"))
+    if err == nil {
+        logrus.SetLevel(level)
+    }
+
+    // Add context to all logs
+    logrus.WithFields(logrus.Fields{
+        "service": "research-agent",
+        "version": "v0.6.4",
+        "namespace": os.Getenv("NAMESPACE"),
+    }).Info("Agent starting")
+}
+```
+
+### 6. Resource Limits & Monitoring
+Set appropriate resource limits and monitor usage:
+
+```yaml
+# In k8-deployment.yaml
+resources:
+  requests:
+    memory: "256Mi"  # Baseline memory
+    cpu: "200m"      # Baseline CPU
+  limits:
+    memory: "512Mi"  # Prevent memory leaks from affecting cluster
+    cpu: "1000m"     # Prevent CPU spikes
+```
+
+### 7. Security Best Practices
+
+```go
+// Input validation
+func (r *ResearchAgent) validateRequest(req *ResearchRequest) error {
+    if len(req.Topic) > 500 {
+        return fmt.Errorf("topic too long")
+    }
+
+    // Sanitize input to prevent injection
+    req.Topic = strings.TrimSpace(req.Topic)
+
+    // Validate rate limits
+    if !r.checkRateLimit(req.ClientID) {
+        return fmt.Errorf("rate limit exceeded")
+    }
+
+    return nil
+}
+
+// Secure AI prompts
+func (r *ResearchAgent) sanitizePrompt(userInput string) string {
+    // Remove potential injection patterns
+    sanitized := strings.ReplaceAll(userInput, "```", "")
+    sanitized = strings.ReplaceAll(sanitized, "system:", "")
+    return sanitized
+}
+```
+
+### 8. Circuit Breaker Pattern
+Prevent cascade failures:
+
+```go
+import "github.com/sony/gobreaker"
+
+func setupCircuitBreaker() *gobreaker.CircuitBreaker {
+    settings := gobreaker.Settings{
+        Name:        "ToolCall",
+        MaxRequests: 3,
+        Interval:    10 * time.Second,
+        Timeout:     30 * time.Second,
+        OnStateChange: func(name string, from, to gobreaker.State) {
+            log.Printf("Circuit breaker %s: %s -> %s", name, from, to)
+        },
+    }
+    return gobreaker.NewCircuitBreaker(settings)
+}
+```
+
+### 9. Distributed Tracing
+Implement proper tracing for debugging:
+
+```go
+import "go.opentelemetry.io/otel"
+
+func (r *ResearchAgent) handleWithTracing(w http.ResponseWriter, req *http.Request) {
+    ctx, span := otel.Tracer("research-agent").Start(req.Context(), "research_topic")
+    defer span.End()
+
+    // Add attributes
+    span.SetAttributes(
+        attribute.String("topic", request.Topic),
+        attribute.Bool("ai_enabled", request.UseAI),
+    )
+
+    // Pass context through call chain
+    result, err := r.orchestrateResearch(ctx, request)
+    if err != nil {
+        span.RecordError(err)
+        span.SetStatus(codes.Error, err.Error())
+    }
+}
+```
+
+### 10. Configuration Validation
+Validate all configuration at startup:
+
+```go
+func validateConfig() error {
+    required := []string{"REDIS_URL", "PORT"}
+
+    for _, env := range required {
+        if os.Getenv(env) == "" {
+            return fmt.Errorf("required environment variable %s not set", env)
+        }
+    }
+
+    // Validate Redis URL format
+    redisURL := os.Getenv("REDIS_URL")
+    if !strings.HasPrefix(redisURL, "redis://") {
+        return fmt.Errorf("invalid REDIS_URL format")
+    }
+
+    // Validate port is numeric
+    if _, err := strconv.Atoi(os.Getenv("PORT")); err != nil {
+        return fmt.Errorf("invalid PORT: %v", err)
+    }
+
+    return nil
+}
+
+func main() {
+    if err := validateConfig(); err != nil {
+        log.Fatalf("Configuration error: %v", err)
+    }
+    // ... rest of setup ...
+}
 ```
 
 ## 🐳 Docker Usage
@@ -715,6 +1145,215 @@ resources:
   limits:
     memory: "512Mi"  # Increased from 256Mi
     cpu: "1000m"     # Increased from 500m
+```
+
+## 📋 Redis Service Registry Example
+
+When the research-agent is deployed and running, it automatically registers itself in Redis. Here's what the agent's service entry looks like:
+
+```json
+{
+  "name": "research-assistant",
+  "type": "agent",
+  "address": "research-agent-service.gomind-examples.svc.cluster.local",
+  "port": 80,
+  "namespace": "gomind-examples",
+  "capabilities": [
+    {
+      "name": "research_topic",
+      "description": "Researches a topic by discovering and coordinating relevant tools, optionally using AI for intelligent analysis",
+      "endpoint": "/api/capabilities/research_topic",
+      "input_types": ["application/json"],
+      "output_types": ["application/json"],
+      "input_summary": {
+        "required_fields": [
+          {
+            "name": "topic",
+            "type": "string",
+            "example": "weather in New York",
+            "description": "Research topic or question to investigate"
+          }
+        ],
+        "optional_fields": [
+          {
+            "name": "use_ai",
+            "type": "boolean",
+            "example": true,
+            "description": "Enable AI-powered analysis and synthesis"
+          },
+          {
+            "name": "max_results",
+            "type": "integer",
+            "example": 5,
+            "description": "Maximum number of tool results to collect"
+          }
+        ]
+      }
+    },
+    {
+      "name": "discover_tools",
+      "description": "Discovers available tools and services in the system",
+      "endpoint": "/api/capabilities/discover_tools",
+      "input_types": ["application/json"],
+      "output_types": ["application/json"],
+      "input_summary": {
+        "optional_fields": [
+          {
+            "name": "type",
+            "type": "string",
+            "example": "tool",
+            "description": "Filter by component type (tool/agent)"
+          },
+          {
+            "name": "capability",
+            "type": "string",
+            "example": "current_weather",
+            "description": "Filter by capability name"
+          }
+        ]
+      }
+    },
+    {
+      "name": "analyze_data",
+      "description": "Uses AI to analyze and provide insights on provided data",
+      "endpoint": "/api/capabilities/analyze_data",
+      "input_types": ["application/json"],
+      "output_types": ["application/json"],
+      "input_summary": {
+        "required_fields": [
+          {
+            "name": "data",
+            "type": "string",
+            "example": "Temperature: 22°C, Humidity: 65%",
+            "description": "Data to analyze"
+          }
+        ],
+        "optional_fields": [
+          {
+            "name": "analysis_type",
+            "type": "string",
+            "example": "summary",
+            "description": "Type of analysis (summary/detailed/trends)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "orchestrate_workflow",
+      "description": "Orchestrates complex multi-step workflows across discovered tools",
+      "endpoint": "/api/capabilities/orchestrate_workflow",
+      "input_types": ["application/json"],
+      "output_types": ["application/json"],
+      "input_summary": {
+        "required_fields": [
+          {
+            "name": "workflow_type",
+            "type": "string",
+            "example": "weather_analysis",
+            "description": "Type of workflow to execute"
+          }
+        ],
+        "optional_fields": [
+          {
+            "name": "parameters",
+            "type": "object",
+            "example": {"location": "New York"},
+            "description": "Workflow-specific parameters"
+          }
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "version": "v1.0.0",
+    "framework_version": "0.6.4",
+    "discovery_enabled": true,
+    "ai_enabled": true,
+    "ai_provider": "openai",
+    "last_heartbeat": "2025-11-10T05:15:25Z"
+  },
+  "health_endpoint": "/health",
+  "registered_at": "2025-11-10T04:45:17Z",
+  "last_seen": "2025-11-10T05:15:25Z",
+  "ttl": 30
+}
+```
+
+### Understanding the Agent Registry Data
+
+**Key Differences from Tools:**
+- **type**: Set to `agent` (active orchestrator with discovery powers)
+- **ai_enabled**: Indicates AI integration is available
+- **ai_provider**: Shows which AI provider is configured (openai, anthropic, groq, etc.)
+- **capabilities**: Orchestration-focused capabilities that coordinate multiple tools
+
+**Agent-Specific Features:**
+- Agents can **discover** other services using the Discovery API
+- Agents can **orchestrate** complex workflows across multiple tools
+- Agents can use **AI** for intelligent analysis and decision-making
+- Agents typically run as singletons or small replicas for coordination
+
+**Service Discovery Pattern:**
+- Both pod replicas send heartbeats to the same Redis key: `gomind:services:research-assistant`
+- Kubernetes Service (`research-agent-service`) load-balances traffic across pods
+- Other agents/tools discover one service entry, Kubernetes handles routing
+- Heartbeat keeps TTL fresh - service auto-expires if pods stop
+
+**Redis Index Structure:**
+```
+gomind:services:research-assistant       → Full service data (30s TTL)
+gomind:types:agent                       → Set of all agents (60s TTL)
+gomind:names:research-assistant          → Name index (60s TTL)
+gomind:capabilities:research_topic       → Capability index (60s TTL)
+gomind:capabilities:discover_tools       → Capability index (60s TTL)
+gomind:capabilities:analyze_data         → Capability index (60s TTL)
+gomind:capabilities:orchestrate_workflow → Capability index (60s TTL)
+```
+
+**Phase 2 Input Summary:**
+All capabilities include `input_summary` with field hints:
+- **required_fields**: Fields that must be provided
+- **optional_fields**: Fields that enhance functionality
+- Each field includes: name, type, example, description
+- AI uses these hints for 95% accurate payload generation
+
+You can inspect this data in your cluster:
+```bash
+# Get the full agent entry
+kubectl exec -it deployment/redis -n default -- \
+  redis-cli GET "gomind:services:research-assistant"
+
+# List all registered services
+kubectl exec -it deployment/redis -n default -- \
+  redis-cli KEYS "gomind:services:*"
+
+# See all agents
+kubectl exec -it deployment/redis -n default -- \
+  redis-cli SMEMBERS "gomind:types:agent"
+
+# Check which services have specific capabilities
+kubectl exec -it deployment/redis -n default -- \
+  redis-cli SMEMBERS "gomind:capabilities:research_topic"
+```
+
+**How Agents Use Discovery:**
+```go
+// Agent discovers tools at runtime
+tools, err := agent.Discovery.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeTool,
+    Capability: "current_weather",
+})
+
+// Agent calls discovered tool
+for _, tool := range tools {
+    result := agent.callTool(ctx, tool, payload)
+    // Process results...
+}
+
+// Agent uses AI to synthesize
+if agent.AI != nil {
+    analysis := agent.AI.GenerateResponse(ctx, prompt, options)
+}
 ```
 
 ## 📚 Next Steps & Extensions

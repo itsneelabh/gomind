@@ -9,7 +9,7 @@ metadata:
     version: v1.0.0
     gomind.framework/type: agent
 spec:
-  replicas: 1  # Agents typically run as singletons for coordination
+  replicas: 2  # Running 2 replicas for high availability
   selector:
     matchLabels:
       app: research-agent
@@ -57,9 +57,9 @@ spec:
               key: redis_url
               optional: false
         - name: DEV_MODE
-          value: "true"  # Enable for Kind cluster testing (set to "false" in production)
-        - name: GOMIND_DEV_MODE  # For backward compatibility
-          value: "true"  # Enable for Kind cluster testing (set to "false" in production)
+          value: "false"
+        - name: GOMIND_DEV_MODE
+          value: "false"
         # Logging Configuration (change to debug for troubleshooting)
         - name: GOMIND_LOG_LEVEL
           value: "info"
@@ -85,24 +85,12 @@ spec:
         # Telemetry Configuration
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: "http://otel-collector:4318"
-        # AI Provider Configuration (optional)
+        # AI Provider Configuration
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
               name: ai-provider-keys
               key: OPENAI_API_KEY
-              optional: true
-        - name: ANTHROPIC_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: ai-provider-keys
-              key: ANTHROPIC_API_KEY
-              optional: true
-        - name: GROQ_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: ai-provider-keys
-              key: GROQ_API_KEY
               optional: true
         resources:
           requests:
