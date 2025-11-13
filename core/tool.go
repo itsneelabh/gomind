@@ -48,6 +48,9 @@ type BaseTool struct {
 
 	// Handler registration tracking (same as BaseAgent for consistency)
 	registeredPatterns map[string]bool // Track registered patterns to prevent duplicates
+
+	// Mutex for thread-safe Registry access during background retry
+	mu sync.RWMutex
 }
 
 // NewTool creates a new tool with default implementations
@@ -119,7 +122,9 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 				if registry, err := NewRedisRegistry(t.Config.Discovery.RedisURL); err == nil {
 					// Set logger for better observability
 					registry.SetLogger(t.Logger)
+					t.mu.Lock()
 					t.Registry = registry
+					t.mu.Unlock()
 					t.Logger.Info("Redis registry initialized successfully", map[string]interface{}{
 						"provider":  "redis",
 						"redis_url": t.Config.Discovery.RedisURL,
@@ -127,12 +132,59 @@ func (t *BaseTool) Initialize(ctx context.Context) error {
 				} else {
 					// Enhance existing error logging with dependency context
 					t.Logger.Error("Failed to initialize Redis registry", map[string]interface{}{
-						"error":      err,
-						"error_type": fmt.Sprintf("%T", err),
-						"redis_url":  t.Config.Discovery.RedisURL,
-						"impact":     "tool_will_run_without_registry",
-						"fallback":   "manual_configuration_required",
+						"error":         err,
+						"error_type":    fmt.Sprintf("%T", err),
+						"redis_url":     t.Config.Discovery.RedisURL,
+						"impact":        "tool_will_run_without_registry",
+						"retry_enabled": t.Config.Discovery.RetryOnFailure,
 					})
+
+					// Start background retry if enabled
+					if t.Config.Discovery.RetryOnFailure {
+						address, port := ResolveServiceAddress(t.Config, t.Logger)
+
+						serviceInfo := &ServiceInfo{
+							ID:           t.ID,
+							Name:         t.Name,
+							Type:         ComponentTypeTool,
+							Capabilities: t.GetCapabilities(),
+							Address:      address,
+							Port:         port,
+							Metadata:     BuildServiceMetadata(t.Config),
+						}
+
+						// Define callback to update registry reference
+						onSuccess := func(newRegistry Registry) error {
+							t.mu.Lock()
+							defer t.mu.Unlock()
+
+							// Stop old heartbeat if exists
+							if oldRegistry, ok := t.Registry.(*RedisRegistry); ok && oldRegistry != nil {
+								oldRegistry.StopHeartbeat(ctx, t.ID)
+							}
+
+							// Update to new registry
+							t.Registry = newRegistry
+							t.Logger.Info("Registry reference updated", map[string]interface{}{
+								"tool_id": t.ID,
+							})
+							return nil
+						}
+
+						// Start background retry manager
+						StartRegistryRetry(
+							ctx,
+							t.Config.Discovery.RedisURL,
+							serviceInfo,
+							t.Config.Discovery.RetryInterval,
+							t.Logger,
+							onSuccess,
+						)
+
+						t.Logger.Info("Background registry retry started", map[string]interface{}{
+							"tool_id": t.ID,
+						})
+					}
 				}
 			}
 		}

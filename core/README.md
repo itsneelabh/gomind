@@ -2023,8 +2023,12 @@ All components automatically provide health endpoints:
 
 ### Production Reliability
 - **Redis Failure Resilience**: Components automatically handle Redis outages and recover without manual intervention
+- **Background Retry**: Services automatically retry Redis connection failures without blocking startup
 - **Self-Healing Discovery**: Services re-register themselves when Redis comes back online
+- **Fast Startup**: Initial retry reduced to ~7-10 seconds (down from 18s) for faster component startup
+- **Exponential Backoff**: Background retry with intelligent backoff (30s → 60s → 120s → 300s cap)
 - **Atomic Operations**: Registration uses Redis transactions to prevent partial state issues
+- **Zero Downtime**: Services remain functional even when Redis is unavailable during startup
 
 ## 🎉 Summary
 

@@ -110,6 +110,10 @@ type DiscoveryConfig struct {
 	CacheTTL          time.Duration `json:"cache_ttl" env:"GOMIND_DISCOVERY_CACHE_TTL" default:"5m"`
 	HeartbeatInterval time.Duration `json:"heartbeat_interval" env:"GOMIND_DISCOVERY_HEARTBEAT" default:"10s"`
 	TTL               time.Duration `json:"ttl" env:"GOMIND_DISCOVERY_TTL" default:"30s"`
+
+	// Retry configuration for handling initial connection failures
+	RetryOnFailure bool          `json:"retry_on_failure" env:"GOMIND_DISCOVERY_RETRY" default:"false"`
+	RetryInterval  time.Duration `json:"retry_interval" env:"GOMIND_DISCOVERY_RETRY_INTERVAL" default:"30s"`
 }
 
 // AIConfig contains AI client configuration for LLM integration.
@@ -283,6 +287,8 @@ func DefaultConfig() *Config {
 			CacheTTL:          5 * time.Minute,
 			HeartbeatInterval: 10 * time.Second,
 			TTL:               30 * time.Second,
+			RetryOnFailure:    false, // Disabled by default, opt-in
+			RetryInterval:     30 * time.Second,
 		},
 		AI: AIConfig{
 			Enabled:       false,
@@ -525,6 +531,35 @@ func (c *Config) LoadFromEnv() error {
 	}
 	if v := os.Getenv("GOMIND_DISCOVERY_CACHE"); v != "" {
 		c.Discovery.CacheEnabled = parseBool(v)
+	}
+	if v := os.Getenv("GOMIND_DISCOVERY_RETRY"); v != "" {
+		c.Discovery.RetryOnFailure = parseBool(v)
+		envVarsLoaded++
+		if c.logger != nil {
+			c.logger.Debug("Configuration loaded", map[string]interface{}{
+				"setting": "discovery_retry",
+				"source":  "GOMIND_DISCOVERY_RETRY",
+				"value":   c.Discovery.RetryOnFailure,
+			})
+		}
+	}
+	if v := os.Getenv("GOMIND_DISCOVERY_RETRY_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Discovery.RetryInterval = d
+			envVarsLoaded++
+			if c.logger != nil {
+				c.logger.Debug("Configuration loaded", map[string]interface{}{
+					"setting": "discovery_retry_interval",
+					"source":  "GOMIND_DISCOVERY_RETRY_INTERVAL",
+					"value":   d.String(),
+				})
+			}
+		} else if c.logger != nil {
+			c.logger.Warn("Invalid retry interval in environment variable", map[string]interface{}{
+				"GOMIND_DISCOVERY_RETRY_INTERVAL": v,
+				"error":                            err.Error(),
+			})
+		}
 	}
 
 	// AI settings

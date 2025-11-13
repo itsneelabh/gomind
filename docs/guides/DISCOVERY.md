@@ -719,3 +719,205 @@ GoMind's approach to Redis failures follows these principles:
 This design ensures that your AI agents and tools remain resilient in production environments, automatically adapting to infrastructure issues without losing their core functionality.
 
 Most of the time, you'll find that the system is making intelligent trade-offs to maintain overall system health.
+
+## Background Retry for Initial Connection Failures
+
+While the self-healing recovery mechanism handles Redis outages during runtime, there's another critical scenario: **what happens when Redis is unavailable during component startup?**
+
+### The Startup Challenge
+
+In production Kubernetes environments, particularly during rolling updates or cluster restarts, services often start before their dependencies are ready. Consider this real-world scenario:
+
+```
+03:20:48 - Kubernetes initiates rolling restart
+03:20:49 - All agents/tools start simultaneously
+03:20:50 - Services attempt Redis connection
+03:21:08 - Initial connection fails after 18 seconds
+03:21:18 - Redis becomes ready (30 seconds total)
+```
+
+**The Problem**: Services that fail initial connection run in standalone mode permanently, requiring manual pod restarts to retry registration.
+
+### The Solution: Background Retry Manager
+
+GoMind now includes an intelligent background retry system that automatically recovers from initial connection failures without manual intervention.
+
+#### Key Features
+
+1. **Fast Initial Startup**: Reduced from 18s to ~7-10s
+   - Services start quickly even when Redis is unavailable
+   - No blocking on initial connection attempts
+   - Faster feedback during development and testing
+
+2. **Non-Blocking Retry**: Services remain fully functional
+   - Business logic continues running immediately
+   - Background goroutine handles reconnection attempts
+   - Zero impact on service performance
+
+3. **Exponential Backoff**: Intelligent retry intervals
+   - Starts at 30 seconds (configurable)
+   - Doubles on each failure: 30s → 60s → 120s → 240s
+   - Caps at 5 minutes to prevent excessive delays
+   - Reduces Redis load during extended outages
+
+4. **Automatic Re-registration**: Seamless recovery
+   - Detects successful Redis connection
+   - Registers service with full capabilities
+   - Starts heartbeat automatically
+   - Updates parent component's registry reference thread-safely
+
+5. **Type-Aware Creation**: Correct registry types
+   - Creates `RedisRegistry` for tools
+   - Creates `RedisDiscovery` for agents
+   - Ensures proper discovery interface compatibility
+
+### Configuration
+
+The background retry feature is opt-in by default for backward compatibility:
+
+```yaml
+# Enable retry in your Kubernetes deployment
+env:
+- name: GOMIND_DISCOVERY_RETRY
+  value: "true"
+- name: GOMIND_DISCOVERY_RETRY_INTERVAL
+  value: "30s"  # Starting interval (doubles on each failure)
+```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOMIND_DISCOVERY_RETRY` | `false` | Enable background retry on initial connection failure |
+| `GOMIND_DISCOVERY_RETRY_INTERVAL` | `30s` | Starting retry interval (increases exponentially) |
+
+### How It Works
+
+#### Initial Connection Attempt (Fast Fail)
+
+```
+T=0s:   Service starts
+T=0s:   Attempt Redis connection
+T=7s:   Initial connection fails (reduced from 18s)
+T=7s:   Service starts in standalone mode
+T=7s:   Background retry manager starts (if enabled)
+```
+
+#### Background Recovery (Automatic)
+
+```
+T=7s:   First retry attempt (30s interval)
+T=37s:  Connection fails → interval doubles to 60s
+T=97s:  Connection fails → interval doubles to 120s
+T=217s: Connection succeeds!
+T=217s: Service registers with Redis
+T=217s: Heartbeat starts
+T=217s: Service now fully discoverable
+```
+
+### Real-World Example
+
+Consider a production deployment where Redis takes 2 minutes to be ready:
+
+**Without Background Retry:**
+```bash
+# Services fail initial connection and stay in standalone mode
+$ kubectl logs weather-tool-abc123
+ERROR: Failed to connect to Redis registry
+INFO: Running in standalone mode (discovery disabled)
+# Manual intervention required: kubectl rollout restart deployment/weather-tool
+```
+
+**With Background Retry:**
+```bash
+$ kubectl logs weather-tool-abc123
+WARN: Failed initial Redis connection (error=dial tcp: connection refused)
+INFO: Background retry enabled (interval=30s)
+INFO: Weather tool starting on port 8080 (standalone mode temporarily)
+...
+INFO: Background Redis retry started (service_id=weather-tool-abc123, retry_interval=30s)
+INFO: Attempting Redis reconnection (service_id=weather-tool-abc123, attempt=1)
+WARN: Redis reconnection failed (attempt=1, error=connection refused)
+INFO: Attempting Redis reconnection (service_id=weather-tool-abc123, attempt=2)
+INFO: Successfully registered after background retry (service_id=weather-tool-abc123, attempt=2)
+INFO: Registry reference updated (tool_id=weather-tool-abc123)
+# No manual intervention needed!
+```
+
+### Production Benefits
+
+1. **Zero Manual Restarts**: Services recover automatically from startup race conditions
+2. **Faster Deployments**: ~7-10s initial startup vs 18s reduces pod initialization time
+3. **Resilient Orchestration**: Handles complex dependency timing in Kubernetes
+4. **Cost Efficient**: No wasted resources waiting for dependencies during startup
+5. **Developer Friendly**: Less debugging of "why isn't my service discoverable?" issues
+
+### Monitoring Background Retry
+
+You can observe the retry behavior in logs:
+
+```bash
+# Watch for retry activity
+kubectl logs -f deployment/weather-tool | grep -E "(retry|reconnection)"
+
+# Check if services recovered
+kubectl logs deployment/weather-tool | grep "Successfully registered after background retry"
+
+# Monitor retry health
+kubectl logs deployment/weather-tool | grep "Background Redis retry"
+```
+
+### Best Practices
+
+#### For Development
+
+```yaml
+# Faster feedback with shorter retry intervals
+env:
+- name: GOMIND_DISCOVERY_RETRY
+  value: "true"
+- name: GOMIND_DISCOVERY_RETRY_INTERVAL
+  value: "5s"  # Faster retries for dev
+```
+
+#### For Production
+
+```yaml
+# Balanced retry with standard intervals
+env:
+- name: GOMIND_DISCOVERY_RETRY
+  value: "true"
+- name: GOMIND_DISCOVERY_RETRY_INTERVAL
+  value: "30s"  # Standard production interval
+```
+
+#### For Kubernetes Startup Dependencies
+
+Consider using init containers if you prefer waiting for Redis:
+
+```yaml
+# Option 1: Wait for Redis (traditional approach)
+initContainers:
+- name: wait-for-redis
+  image: busybox
+  command: ['sh', '-c', 'until nc -z redis 6379; do sleep 2; done']
+
+# Option 2: Use background retry (modern approach)
+env:
+- name: GOMIND_DISCOVERY_RETRY
+  value: "true"
+```
+
+**Recommendation**: Use background retry for production systems as it provides better resilience and doesn't block pod startup.
+
+### Comparison with Self-Healing Recovery
+
+| Feature | Self-Healing Recovery | Background Retry |
+|---------|----------------------|------------------|
+| **When It Activates** | After successful initial registration | On initial connection failure |
+| **Trigger** | Heartbeat detects missing registration | Initial `NewRedisRegistry()` fails |
+| **Service State** | Was registered, now needs re-registration | Never registered, needs first registration |
+| **Use Case** | Redis outage during runtime | Redis unavailable at startup |
+| **User Impact** | Seamless (already registered once) | Service discoverable after retry |
+
+Both mechanisms work together to provide **complete Redis resilience** across the entire service lifecycle.
