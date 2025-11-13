@@ -172,7 +172,9 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 				if discovery, err := NewRedisDiscovery(b.Config.Discovery.RedisURL); err == nil {
 					// Set logger for better observability
 					discovery.SetLogger(b.Logger)
+					b.mu.Lock()
 					b.Discovery = discovery
+					b.mu.Unlock()
 					b.Logger.Info("Redis discovery initialized successfully", map[string]interface{}{
 						"provider":  "redis",
 						"redis_url": b.Config.Discovery.RedisURL,
@@ -180,12 +182,59 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 				} else {
 					// Enhance existing error logging with dependency context
 					b.Logger.Error("Failed to initialize Redis discovery", map[string]interface{}{
-						"error":      err,
-						"error_type": fmt.Sprintf("%T", err),
-						"redis_url":  b.Config.Discovery.RedisURL,
-						"impact":     "agent_will_run_without_discovery",
-						"fallback":   "manual_configuration_required",
+						"error":         err,
+						"error_type":    fmt.Sprintf("%T", err),
+						"redis_url":     b.Config.Discovery.RedisURL,
+						"impact":        "agent_will_run_without_discovery",
+						"retry_enabled": b.Config.Discovery.RetryOnFailure,
 					})
+
+					// Start background retry if enabled
+					if b.Config.Discovery.RetryOnFailure {
+						address, port := ResolveServiceAddress(b.Config, b.Logger)
+
+						serviceInfo := &ServiceInfo{
+							ID:           b.ID,
+							Name:         b.Name,
+							Type:         ComponentTypeAgent,
+							Capabilities: b.Capabilities,
+							Address:      address,
+							Port:         port,
+							Metadata:     BuildServiceMetadata(b.Config),
+						}
+
+						// Define callback to update discovery reference
+						onSuccess := func(newRegistry Registry) error {
+							b.mu.Lock()
+							defer b.mu.Unlock()
+
+							// Stop old heartbeat if exists
+							if oldDiscovery, ok := b.Discovery.(*RedisDiscovery); ok && oldDiscovery != nil {
+								oldDiscovery.StopHeartbeat(ctx, b.ID)
+							}
+
+							// Update to new discovery
+							b.Discovery = newRegistry.(Discovery)
+							b.Logger.Info("Discovery reference updated", map[string]interface{}{
+								"agent_id": b.ID,
+							})
+							return nil
+						}
+
+						// Start background retry manager
+						StartRegistryRetry(
+							ctx,
+							b.Config.Discovery.RedisURL,
+							serviceInfo,
+							b.Config.Discovery.RetryInterval,
+							b.Logger,
+							onSuccess,
+						)
+
+						b.Logger.Info("Background discovery retry started", map[string]interface{}{
+							"agent_id": b.ID,
+						})
+					}
 				}
 			}
 		}

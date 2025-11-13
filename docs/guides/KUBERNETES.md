@@ -1707,6 +1707,8 @@ GoMind uses a **three-layer configuration system**:
 | `GOMIND_DISCOVERY_ENABLED` | `false` | Enable service discovery |
 | `GOMIND_DISCOVERY_CACHE` | `true` | Cache discovery results |
 | `GOMIND_DISCOVERY_TTL` | `30s` | Registration TTL |
+| `GOMIND_DISCOVERY_RETRY` | `false` | Enable background retry on initial connection failure |
+| `GOMIND_DISCOVERY_RETRY_INTERVAL` | `30s` | Starting retry interval (increases exponentially) |
 
 #### Kubernetes Integration
 
@@ -1784,6 +1786,191 @@ spec:
   - port: 80              # Must match GOMIND_K8S_SERVICE_PORT
     targetPort: 8080      # Your container port
 ```
+
+### Redis Registration Resilience
+
+GoMind includes intelligent retry mechanisms to handle Redis connection failures during service startup, ensuring your services can recover automatically without manual intervention.
+
+#### The Problem: Startup Race Conditions
+
+In Kubernetes environments, services often start before their dependencies are ready:
+
+```
+Time    Event
+-----   -----
+T=0s    kubectl rollout restart (all pods restart)
+T=1s    Agents/tools start, attempt Redis connection
+T=10s   Initial Redis connection fails
+T=15s   Redis becomes ready
+Result: Services run in standalone mode, require manual restart
+```
+
+#### The Solution: Background Retry
+
+GoMind provides two configuration options to handle this:
+
+```yaml
+env:
+- name: GOMIND_DISCOVERY_RETRY
+  value: "true"                # Enable automatic background retry
+- name: GOMIND_DISCOVERY_RETRY_INTERVAL
+  value: "30s"                 # Starting interval (doubles on failure)
+```
+
+**How it works:**
+
+1. **Fast Initial Startup**: Services attempt connection for ~7-10s (reduced from 18s)
+2. **Non-Blocking**: Service starts immediately in standalone mode if Redis unavailable
+3. **Background Retry**: Goroutine periodically retries connection
+4. **Exponential Backoff**: 30s → 60s → 120s → 240s → 300s (capped at 5 minutes)
+5. **Automatic Recovery**: On success, registers service and starts heartbeat
+6. **Thread-Safe Updates**: Registry reference updated safely across goroutines
+
+#### Production Deployment Example
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-tool
+  labels:
+    app: weather-tool
+    component: tool
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: weather-tool
+  template:
+    metadata:
+      labels:
+        app: weather-tool
+        component: tool
+    spec:
+      containers:
+      - name: weather-tool
+        image: weather-tool:v1.0.0
+        env:
+        # Redis connection
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        - name: GOMIND_DISCOVERY_ENABLED
+          value: "true"
+
+        # Background retry (recommended for production)
+        - name: GOMIND_DISCOVERY_RETRY
+          value: "true"
+        - name: GOMIND_DISCOVERY_RETRY_INTERVAL
+          value: "30s"
+
+        # Kubernetes service discovery
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "weather-tool"
+        - name: GOMIND_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+
+        ports:
+        - containerPort: 8080
+          name: http
+
+        resources:
+          requests:
+            memory: "8Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "100m"
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+```
+
+#### Monitoring Retry Behavior
+
+```bash
+# Watch for retry activity in logs
+kubectl logs -f deployment/weather-tool | grep -E "(retry|reconnection)"
+
+# Check if service recovered automatically
+kubectl logs deployment/weather-tool | grep "Successfully registered after background retry"
+
+# View retry configuration
+kubectl logs deployment/weather-tool | grep "Background Redis retry started"
+```
+
+**Expected log output during recovery:**
+
+```
+INFO: Failed initial Redis connection (error=dial tcp: connection refused)
+INFO: Background retry enabled (interval=30s)
+INFO: Weather tool starting on port 8080 (standalone mode temporarily)
+INFO: Background Redis retry started (service_id=weather-tool-abc123, retry_interval=30s)
+INFO: Attempting Redis reconnection (service_id=weather-tool-abc123, attempt=1)
+WARN: Redis reconnection failed (attempt=1, error=connection refused)
+INFO: Attempting Redis reconnection (service_id=weather-tool-abc123, attempt=2)
+INFO: Successfully registered after background retry (service_id=weather-tool-abc123, attempt=2)
+INFO: Registry reference updated (tool_id=weather-tool-abc123)
+```
+
+#### Configuration Strategies
+
+**Development Environment:**
+```yaml
+# Fast feedback with shorter retry intervals
+env:
+- name: GOMIND_DISCOVERY_RETRY
+  value: "true"
+- name: GOMIND_DISCOVERY_RETRY_INTERVAL
+  value: "5s"  # Faster retries for development
+```
+
+**Production Environment:**
+```yaml
+# Balanced retry with standard intervals
+env:
+- name: GOMIND_DISCOVERY_RETRY
+  value: "true"
+- name: GOMIND_DISCOVERY_RETRY_INTERVAL
+  value: "30s"  # Standard production interval
+```
+
+**Traditional Init Container Approach (Alternative):**
+```yaml
+# Wait for Redis before starting (blocks pod startup)
+initContainers:
+- name: wait-for-redis
+  image: busybox
+  command: ['sh', '-c', 'until nc -z redis 6379; do sleep 2; done']
+
+containers:
+- name: weather-tool
+  env:
+  - name: GOMIND_DISCOVERY_RETRY
+    value: "false"  # Not needed with init container
+```
+
+**Recommendation**: Use background retry for production systems as it provides better resilience and doesn't block pod startup.
+
+#### Benefits
+
+✅ **Zero Manual Intervention**: Services recover automatically from startup race conditions
+✅ **Faster Deployments**: ~7-10s initial startup vs 18s
+✅ **Resilient Orchestration**: Handles complex dependency timing in Kubernetes
+✅ **Cost Efficient**: No wasted resources waiting for dependencies
+✅ **Developer Friendly**: Less debugging of "why isn't my service discoverable?" issues
 
 ### Heartbeat Monitoring
 

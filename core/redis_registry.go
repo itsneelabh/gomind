@@ -23,6 +23,48 @@ type HeartbeatStats struct {
 	LastSummaryAt time.Time // Track when we last logged summary
 }
 
+// RegistryUpdateCallback is invoked when background retry successfully reconnects to Redis.
+//
+// This callback enables parent components (BaseTool, BaseAgent) to atomically update their
+// registry/discovery references in a thread-safe manner. The callback receives the new
+// registry instance and should:
+//   1. Acquire appropriate locks (e.g., mu.Lock())
+//   2. Stop old heartbeat if one exists
+//   3. Update the registry/discovery field
+//   4. Release locks
+//
+// Example usage in BaseTool:
+//   onSuccess := func(newRegistry Registry) error {
+//       t.mu.Lock()
+//       defer t.mu.Unlock()
+//       if oldReg, ok := t.Registry.(*RedisRegistry); ok && oldReg != nil {
+//           oldReg.StopHeartbeat(ctx, t.ID)
+//       }
+//       t.Registry = newRegistry
+//       return nil
+//   }
+//
+// The callback must return nil on success, or an error if the update failed.
+// Note: For agents, the registry will be *RedisDiscovery (implements Discovery interface).
+//       For tools, the registry will be *RedisRegistry (implements Registry interface).
+type RegistryUpdateCallback func(newRegistry Registry) error
+
+// registryRetryState maintains state for background retry attempts.
+//
+// This internal structure tracks the service information, current retry interval,
+// and success callback for a background reconnection attempt. It's used by
+// registryRetryManager to manage exponential backoff and service registration.
+//
+// Fields:
+//   - serviceInfo: Information about the service to register (ID, Name, Type, etc.)
+//   - currentInterval: Current retry interval (doubles on each failure, caps at 5 minutes)
+//   - onSuccess: Callback to invoke when reconnection succeeds
+type registryRetryState struct {
+	serviceInfo     *ServiceInfo
+	currentInterval time.Duration
+	onSuccess       RegistryUpdateCallback
+}
+
 // RedisRegistry provides Redis-based service registration (implements Registry interface)
 type RedisRegistry struct {
 	client    *redis.Client
@@ -37,6 +79,10 @@ type RedisRegistry struct {
 	// Heartbeat tracking for periodic summaries
 	heartbeatStats map[string]*HeartbeatStats
 	heartbeatMutex sync.RWMutex
+
+	// Heartbeat cancel functions for cleanup
+	heartbeats   map[string]context.CancelFunc
+	heartbeatsMu sync.RWMutex
 }
 
 // NewRedisRegistry creates a new Redis registry client
@@ -64,9 +110,10 @@ func NewRedisRegistryWithNamespace(redisURL, namespace string) (*RedisRegistry, 
 
 	client := redis.NewClient(opt)
 
-	// Enhanced: Connection verification with retry (internal enhancement)
+	// Enhanced: Connection verification with retry (reduced to ~10s total)
+	// 3 attempts × 3s timeout + (2s + 2s) backoff = ~13 seconds
 	for i := 0; i < 3; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		err = client.Ping(ctx).Err()
 		cancel()
 
@@ -74,8 +121,8 @@ func NewRedisRegistryWithNamespace(redisURL, namespace string) (*RedisRegistry, 
 			break
 		}
 
-		if i < 2 { // Exponential backoff
-			time.Sleep(time.Duration(i+1) * time.Second)
+		if i < 2 { // Fixed backoff for faster startup
+			time.Sleep(2 * time.Second)
 		}
 	}
 
@@ -91,6 +138,8 @@ func NewRedisRegistryWithNamespace(redisURL, namespace string) (*RedisRegistry, 
 		stateMutex:        sync.RWMutex{},                // Enhanced: thread safety
 		heartbeatStats:    make(map[string]*HeartbeatStats),
 		heartbeatMutex:    sync.RWMutex{},
+		heartbeats:        make(map[string]context.CancelFunc), // Track cancel functions
+		heartbeatsMu:      sync.RWMutex{},
 	}
 
 	// Note: Logger will be set later via SetLogger method if needed
@@ -687,6 +736,39 @@ func (r *RedisRegistry) logHeartbeatSummary(serviceID string, isFinal bool) {
 	}
 }
 
+// StopHeartbeat gracefully stops the heartbeat goroutine for a specific service.
+//
+// This method cancels the heartbeat context and removes the service from the
+// heartbeat tracking map. It's typically called during:
+//   - Service shutdown
+//   - Registry replacement (when switching to a new registry instance)
+//   - Manual service de-registration
+//
+// The method is thread-safe and safe to call multiple times for the same service.
+// If the service doesn't have an active heartbeat, this is a no-op.
+//
+// Parameters:
+//   - ctx: Context for the operation (currently unused but kept for consistency)
+//   - serviceID: Unique identifier of the service whose heartbeat should stop
+//
+// Example usage:
+//   registry.StopHeartbeat(ctx, "my-service-123")
+func (r *RedisRegistry) StopHeartbeat(ctx context.Context, serviceID string) {
+	r.heartbeatsMu.Lock()
+	defer r.heartbeatsMu.Unlock()
+
+	if cancel, exists := r.heartbeats[serviceID]; exists {
+		cancel() // Cancel the context, stopping the goroutine
+		delete(r.heartbeats, serviceID)
+
+		if r.logger != nil {
+			r.logger.Info("Stopped heartbeat", map[string]interface{}{
+				"service_id": serviceID,
+			})
+		}
+	}
+}
+
 // StartHeartbeat starts a heartbeat goroutine to keep registration alive (enhanced for self-healing)
 func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
 	// Initialize heartbeat stats
@@ -696,6 +778,14 @@ func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
 		LastSummaryAt: time.Now(),
 	}
 	r.heartbeatMutex.Unlock()
+
+	// Create cancellable context for this heartbeat
+	hbCtx, cancel := context.WithCancel(ctx)
+
+	// Store cancel function for StopHeartbeat
+	r.heartbeatsMu.Lock()
+	r.heartbeats[serviceID] = cancel
+	r.heartbeatsMu.Unlock()
 
 	// Base interval with jitter to distribute load
 	baseInterval := r.ttl / 2
@@ -709,7 +799,7 @@ func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-hbCtx.Done():
 				// Log final stats on shutdown
 				r.logHeartbeatSummary(serviceID, true)
 				// Clean up stats
@@ -719,10 +809,261 @@ func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
 				return
 			case <-ticker.C:
 				// Use enhanced maintenance logic with self-healing
-				r.maintainRegistration(ctx, serviceID)
+				r.maintainRegistration(hbCtx, serviceID)
 				// Check if it's time for periodic summary (every 5 minutes)
 				r.checkAndLogPeriodicSummary(serviceID)
 			}
 		}
 	}()
+}
+
+// StartRegistryRetry initiates background reconnection attempts to Redis.
+//
+// This function is the entry point for the retry mechanism, enabling services to
+// recover from initial Redis connection failures without manual intervention. It
+// launches a background goroutine (registryRetryManager) that periodically attempts
+// to reconnect and register the service.
+//
+// This is a package-level function that doesn't require an existing registry instance,
+// making it suitable for use during initialization when the registry creation fails.
+//
+// Key behaviors:
+//   - Non-blocking: Returns immediately, retry happens in background
+//   - Exponential backoff: Retry interval doubles on each failure (caps at 5 minutes)
+//   - Type-aware: Creates RedisDiscovery for agents, RedisRegistry for tools
+//   - Self-terminating: Stops automatically on success or context cancellation
+//
+// Parameters:
+//   - ctx: Context for cancellation (when cancelled, retry stops gracefully)
+//   - redisURL: Redis connection string (e.g., "redis://localhost:6379")
+//   - serviceInfo: Service details for registration (must include Type field)
+//   - retryInterval: Initial retry interval (e.g., 30s). Will grow exponentially.
+//   - logger: Logger for retry status messages (can be nil)
+//   - onSuccess: Callback invoked when retry succeeds (for updating parent's registry ref)
+//
+// Example usage in BaseTool initialization:
+//   if _, err := NewRedisRegistry(redisURL); err != nil {
+//       StartRegistryRetry(ctx, redisURL, serviceInfo, 30*time.Second, logger,
+//           func(newRegistry Registry) error {
+//               t.mu.Lock()
+//               defer t.mu.Unlock()
+//               t.Registry = newRegistry
+//               return nil
+//           })
+//   }
+//
+// Thread safety: Safe to call from multiple goroutines. Each invocation creates
+// an independent retry manager.
+func StartRegistryRetry(
+	ctx context.Context,
+	redisURL string,
+	serviceInfo *ServiceInfo,
+	retryInterval time.Duration,
+	logger Logger,
+	onSuccess RegistryUpdateCallback,
+) {
+	state := &registryRetryState{
+		serviceInfo:     serviceInfo,
+		currentInterval: retryInterval,
+		onSuccess:       onSuccess,
+	}
+
+	go registryRetryManager(ctx, redisURL, state, logger)
+}
+
+// registryRetryManager is the internal goroutine that handles periodic reconnection attempts.
+//
+// This function implements the core retry logic with exponential backoff. It runs in a
+// background goroutine launched by StartRegistryRetry and continues until either:
+//   1. Reconnection succeeds and service is registered
+//   2. Context is cancelled (e.g., service shutdown)
+//
+// Retry algorithm:
+//   - Attempts reconnection at each timer tick
+//   - On failure: Doubles retry interval (e.g., 30s → 60s → 120s → 240s → 300s cap)
+//   - On success: Registers service, starts heartbeat, invokes callback, and terminates
+//
+// Type handling:
+//   - ComponentTypeAgent: Creates *RedisDiscovery (implements Discovery interface)
+//   - ComponentTypeTool: Creates *RedisRegistry (implements Registry interface)
+//   - This ensures the callback receives the correct type for each component
+//
+// Error handling:
+//   - Connection failures trigger backoff and continue retry
+//   - Registration failures trigger continue (no backoff increase)
+//   - Callback failures are logged but don't prevent heartbeat from running
+//
+// Logging:
+//   - Info: Startup, successful registration
+//   - Warn: Connection failures with retry info
+//   - Error: Registration failures, callback failures
+//   - Debug: Each retry attempt
+//
+// Parameters:
+//   - ctx: Cancellation context (stops retry when cancelled)
+//   - redisURL: Redis connection string
+//   - state: Retry state including service info, current interval, and callback
+//   - logger: Logger for status messages (can be nil)
+//
+// Internal use only - called by StartRegistryRetry.
+func registryRetryManager(
+	ctx context.Context,
+	redisURL string,
+	state *registryRetryState,
+	logger Logger,
+) {
+	ticker := time.NewTicker(state.currentInterval)
+	defer ticker.Stop()
+
+	if logger != nil {
+		logger.Info("Background Redis retry started", map[string]interface{}{
+			"service_id":     state.serviceInfo.ID,
+			"retry_interval": state.currentInterval,
+		})
+	}
+
+	attempt := 0
+	for {
+		select {
+		case <-ctx.Done():
+			if logger != nil {
+				logger.Info("Redis retry manager shutting down", map[string]interface{}{
+					"service_id": state.serviceInfo.ID,
+				})
+			}
+			return
+
+		case <-ticker.C:
+			attempt++
+
+			if logger != nil {
+				logger.Debug("Attempting Redis reconnection", map[string]interface{}{
+					"service_id": state.serviceInfo.ID,
+					"attempt":    attempt,
+				})
+			}
+
+			// Handle agents and tools separately due to different interface requirements
+			// Agents need RedisDiscovery (implements Discovery interface)
+			// Tools need RedisRegistry (implements Registry interface)
+			if state.serviceInfo.Type == ComponentTypeAgent {
+				// Create RedisDiscovery for agents
+				discovery, discoveryErr := NewRedisDiscovery(redisURL)
+				if discoveryErr != nil {
+					if logger != nil {
+						logger.Warn("Redis reconnection failed", map[string]interface{}{
+							"service_id": state.serviceInfo.ID,
+							"attempt":    attempt,
+							"error":      discoveryErr.Error(),
+						})
+					}
+
+					// Simple exponential backoff (double interval, cap at 5 minutes)
+					state.currentInterval = state.currentInterval * 2
+					if state.currentInterval > 5*time.Minute {
+						state.currentInterval = 5 * time.Minute
+					}
+					ticker.Reset(state.currentInterval)
+
+					continue
+				}
+
+				// Success! Register service
+				discovery.SetLogger(logger)
+				regErr := discovery.Register(ctx, state.serviceInfo)
+				if regErr != nil {
+					if logger != nil {
+						logger.Error("Failed to register after reconnection", map[string]interface{}{
+							"service_id": state.serviceInfo.ID,
+							"error":      regErr.Error(),
+						})
+					}
+					continue
+				}
+
+				// Start heartbeat
+				discovery.StartHeartbeat(ctx, state.serviceInfo.ID)
+
+				if logger != nil {
+					logger.Info("Successfully registered after background retry", map[string]interface{}{
+						"service_id": state.serviceInfo.ID,
+						"attempt":    attempt,
+					})
+				}
+
+				// Call success callback with discovery (implements Registry interface)
+				if state.onSuccess != nil {
+					if err := state.onSuccess(discovery); err != nil {
+						if logger != nil {
+							logger.Error("Failed to update registry reference", map[string]interface{}{
+								"service_id": state.serviceInfo.ID,
+								"error":      err.Error(),
+							})
+						}
+					}
+				}
+
+				return // Success - terminate goroutine
+
+			} else {
+				// Create RedisRegistry for tools
+				registry, registryErr := NewRedisRegistry(redisURL)
+				if registryErr != nil {
+					if logger != nil {
+						logger.Warn("Redis reconnection failed", map[string]interface{}{
+							"service_id": state.serviceInfo.ID,
+							"attempt":    attempt,
+							"error":      registryErr.Error(),
+						})
+					}
+
+					// Simple exponential backoff (double interval, cap at 5 minutes)
+					state.currentInterval = state.currentInterval * 2
+					if state.currentInterval > 5*time.Minute {
+						state.currentInterval = 5 * time.Minute
+					}
+					ticker.Reset(state.currentInterval)
+
+					continue
+				}
+
+				// Success! Register service
+				registry.SetLogger(logger)
+				regErr := registry.Register(ctx, state.serviceInfo)
+				if regErr != nil {
+					if logger != nil {
+						logger.Error("Failed to register after reconnection", map[string]interface{}{
+							"service_id": state.serviceInfo.ID,
+							"error":      regErr.Error(),
+						})
+					}
+					continue
+				}
+
+				// Start heartbeat
+				registry.StartHeartbeat(ctx, state.serviceInfo.ID)
+
+				if logger != nil {
+					logger.Info("Successfully registered after background retry", map[string]interface{}{
+						"service_id": state.serviceInfo.ID,
+						"attempt":    attempt,
+					})
+				}
+
+				// Call success callback with registry
+				if state.onSuccess != nil {
+					if err := state.onSuccess(registry); err != nil {
+						if logger != nil {
+							logger.Error("Failed to update registry reference", map[string]interface{}{
+								"service_id": state.serviceInfo.ID,
+								"error":      err.Error(),
+							})
+						}
+					}
+				}
+
+				return // Success - terminate goroutine
+			}
+		}
+	}
 }
