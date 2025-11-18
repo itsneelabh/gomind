@@ -49,8 +49,9 @@ RUN addgroup -g 1001 -S appgroup && \
 # Copy binary from builder stage
 COPY --from=builder /app/weather-tool .
 
-# Change ownership to non-root user
-RUN chown appuser:appgroup /app/weather-tool
+# Change ownership and set executable permissions
+RUN chown appuser:appgroup /app/weather-tool && \
+    chmod +x /app/weather-tool
 USER appuser
 
 # Set default PORT if not provided

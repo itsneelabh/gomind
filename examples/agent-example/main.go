@@ -1,3 +1,24 @@
+// Package main implements a research assistant agent that demonstrates intelligent
+// tool orchestration and AI-powered analysis using the GoMind framework.
+//
+// This agent showcases several key capabilities:
+//   - Automatic tool discovery via Redis service registry
+//   - Multi-entity comparison with parallel execution (e.g., "Compare SF vs LA weather")
+//   - Hybrid AI operation (uses tools when available, direct AI when not)
+//   - AI-powered payload generation for tool calls
+//   - Schema validation caching for performance
+//
+// Environment Variables:
+//   REDIS_URL              - Redis connection URL (required)
+//   PORT                   - HTTP server port (default: 8090)
+//   NAMESPACE              - Kubernetes namespace for service discovery
+//   OPENAI_API_KEY         - OpenAI API key for AI capabilities
+//   DEV_MODE               - Enable development mode (true/false)
+//
+// Example Usage:
+//   export REDIS_URL="redis://localhost:6379"
+//   export OPENAI_API_KEY="sk-..."
+//   go run .
 package main
 
 import (

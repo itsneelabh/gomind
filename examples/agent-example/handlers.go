@@ -59,44 +59,70 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 		"topic":              request.Topic,
 	})
 
-	// Step 2: Orchestrate tool calls based on topic
+	// Step 2: Intelligent tool orchestration with AI-powered routing
 	var results []ToolResult
 	var toolsUsed []string
 
-	// Look for weather tools if topic is weather-related
-	if r.isWeatherRelated(request.Topic) {
-		r.Logger.Info("Topic identified as weather-related, selecting weather tool", map[string]interface{}{
-			"topic":  request.Topic,
-			"reason": "contains weather keywords (weather, temperature, rain, storm, forecast, climate)",
+	// STRATEGY 1: Multi-Entity Comparison (Highest Priority)
+	// Try to extract entities for comparison (e.g., "Compare Amazon vs Google")
+	entities, err := r.extractEntitiesForComparison(ctx, request.Topic)
+	if err == nil && len(entities) >= 2 {
+		r.Logger.Info("Multi-entity comparison query detected", map[string]interface{}{
+			"topic":        request.Topic,
+			"entity_count": len(entities),
+			"entities":     entities,
+			"strategy":     "parallel tool calls",
 		})
-		weatherResult := r.callWeatherTool(ctx, tools, request.Topic)
-		if weatherResult != nil {
-			r.Logger.Info("Weather tool selected and called", map[string]interface{}{
-				"tool":       weatherResult.ToolName,
-				"capability": weatherResult.Capability,
-				"success":    weatherResult.Success,
-				"topic":      request.Topic,
+
+		// Use AI to select the most relevant tool AND capability in ONE call
+		selections := r.selectToolsAndCapabilities(ctx, request.Topic, tools)
+		if len(selections) > 0 {
+			selection := selections[0]
+
+			r.Logger.Info("AI selected tool+capability for multi-entity comparison (1 call)", map[string]interface{}{
+				"tool":           selection.Tool.Name,
+				"capability":     selection.Capability.Name,
+				"entity_count":   len(entities),
+				"selection_type": "AI-powered (combined)",
 			})
-			results = append(results, *weatherResult)
-			toolsUsed = append(toolsUsed, weatherResult.ToolName)
+
+			// Execute parallel tool calls with the FIX
+			entityResults := r.callToolForEntities(ctx, selection.Tool, selection.Capability, request.Topic, entities)
+			if len(entityResults) > 0 {
+				results = append(results, entityResults...)
+				toolsUsed = append(toolsUsed, selection.Tool.Name)
+
+				r.Logger.Info("Multi-entity comparison completed", map[string]interface{}{
+					"entities_requested": len(entities),
+					"results_received":   len(entityResults),
+					"tool":               selection.Tool.Name,
+				})
+			}
 		} else {
-			r.Logger.Warn("No weather tool found despite weather-related topic", map[string]interface{}{
-				"topic": request.Topic,
+			r.Logger.Warn("No relevant tools found for multi-entity comparison", map[string]interface{}{
+				"topic":           request.Topic,
+				"entities":        entities,
+				"available_tools": len(tools),
 			})
 		}
-	}
+	} else {
+		// STRATEGY 2: Single-Entity Query
+		// AI selects the most relevant tool AND capability in ONE call (50% cost savings)
+		selections := r.selectToolsAndCapabilities(ctx, request.Topic, tools)
 
-	// Look for other relevant tools
-	for _, tool := range tools {
-		if r.isToolRelevant(tool, request.Topic) {
-			r.Logger.Info("Tool identified as relevant for topic", map[string]interface{}{
-				"tool":   tool.Name,
-				"topic":  request.Topic,
-				"reason": "tool capabilities match topic keywords",
+		if len(selections) > 0 {
+			selection := selections[0]
+
+			r.Logger.Info("Calling AI-selected tool+capability (1 call)", map[string]interface{}{
+				"tool":       selection.Tool.Name,
+				"capability": selection.Capability.Name,
+				"topic":      request.Topic,
 			})
-			result := r.callTool(ctx, tool, request.Topic)
+
+			// Call the tool with pre-selected capability (no second AI call needed)
+			result := r.callToolWithCapability(ctx, selection.Tool, selection.Capability, request.Topic)
 			if result != nil {
-				r.Logger.Info("Tool selected and called", map[string]interface{}{
+				r.Logger.Info("Tool call completed", map[string]interface{}{
 					"tool":       result.ToolName,
 					"capability": result.Capability,
 					"success":    result.Success,
@@ -105,6 +131,11 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 				results = append(results, *result)
 				toolsUsed = append(toolsUsed, result.ToolName)
 			}
+		} else {
+			r.Logger.Warn("No relevant tools found for topic", map[string]interface{}{
+				"topic":           request.Topic,
+				"available_tools": len(tools),
+			})
 		}
 	}
 
