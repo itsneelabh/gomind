@@ -44,6 +44,11 @@ spec:
           value: "redis://redis.default.svc.cluster.local:6379"
         - name: GOMIND_REDIS_URL
           value: "redis://redis.default.svc.cluster.local:6379"
+        # Redis Registration Resilience (handles Redis startup race conditions)
+        - name: GOMIND_DISCOVERY_RETRY
+          value: "true"
+        - name: GOMIND_DISCOVERY_RETRY_INTERVAL
+          value: "30s"
         - name: GOMIND_DEV_MODE
           value: "false"
         # Logging Configuration (change to debug for troubleshooting)

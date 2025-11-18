@@ -10,45 +10,72 @@ import (
 	"github.com/itsneelabh/gomind/core"
 )
 
-// ResearchAgent is an intelligent agent that discovers and orchestrates tools
-// It demonstrates the active agent pattern - can discover and coordinate other components
+// ResearchAgent is an intelligent agent that demonstrates the active agent pattern.
+// It can discover available tools via Redis, orchestrate multiple tool calls, and
+// synthesize results using AI.
+//
+// Key Features:
+//   - Tool Discovery: Automatically finds available tools in the service mesh
+//   - Smart Orchestration: Routes requests to appropriate tools based on topic analysis
+//   - Multi-Entity Support: Detects comparison queries and makes parallel tool calls
+//   - Hybrid AI Mode: Uses tools when available, falls back to direct AI when not
+//   - Performance: Connection pooling, caching, and parallel execution
 type ResearchAgent struct {
 	*core.BaseAgent
 	aiClient   core.AIClient
 	httpClient *http.Client // Shared HTTP client for connection pooling
 }
 
-// ResearchRequest represents the input for research operations
+// ResearchRequest represents the input for research operations.
+// This is the main request format accepted by the research_topic capability.
 type ResearchRequest struct {
-	Topic      string            `json:"topic"`
-	Sources    []string          `json:"sources,omitempty"`     // Specific sources to use
-	MaxResults int               `json:"max_results,omitempty"` // Limit results
-	Metadata   map[string]string `json:"metadata,omitempty"`    // Additional parameters
-	UseAI      bool              `json:"use_ai,omitempty"`      // Whether to use AI analysis
-	WorkflowID string            `json:"workflow_id,omitempty"` // For workflow tracking
+	// Topic is the research query or question (required)
+	// Examples: "weather in Paris", "Compare SF vs LA weather"
+	Topic string `json:"topic"`
+
+	// Sources optionally specifies which tools to use
+	// If empty, agent automatically discovers and selects tools
+	Sources []string `json:"sources,omitempty"`
+
+	// MaxResults limits the number of results to return (default: 5)
+	MaxResults int `json:"max_results,omitempty"`
+
+	// Metadata provides additional context or parameters
+	Metadata map[string]string `json:"metadata,omitempty"`
+
+	// UseAI enables AI-powered analysis and synthesis
+	// When true with no tools: AI answers directly (hybrid mode)
+	// When true with tools: AI synthesizes tool results
+	// When false: Returns raw tool data only
+	UseAI bool `json:"use_ai,omitempty"`
+
+	// WorkflowID enables tracking across multiple related requests
+	WorkflowID string `json:"workflow_id,omitempty"`
 }
 
-// ResearchResponse represents the synthesized research output
+// ResearchResponse represents the synthesized research output.
+// Contains both raw tool results and AI-generated analysis when enabled.
 type ResearchResponse struct {
-	Topic          string                 `json:"topic"`
-	Summary        string                 `json:"summary"`
-	ToolsUsed      []string               `json:"tools_used"`
-	Results        []ToolResult           `json:"results"`
-	AIAnalysis     string                 `json:"ai_analysis,omitempty"`
-	Confidence     float64                `json:"confidence"`
-	ProcessingTime string                 `json:"processing_time"`
-	WorkflowID     string                 `json:"workflow_id,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	Topic          string                 `json:"topic"`           // Original research topic
+	Summary        string                 `json:"summary"`         // Text summary of findings
+	ToolsUsed      []string               `json:"tools_used"`      // Names of tools that were called
+	Results        []ToolResult           `json:"results"`         // Detailed results from each tool
+	AIAnalysis     string                 `json:"ai_analysis,omitempty"` // AI-generated insights
+	Confidence     float64                `json:"confidence"`      // Confidence score (0-1)
+	ProcessingTime string                 `json:"processing_time"` // Total time taken
+	WorkflowID     string                 `json:"workflow_id,omitempty"` // Workflow tracking ID
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`    // Additional metadata
 }
 
-// ToolResult represents the result from calling a tool
+// ToolResult represents the result from a single tool call.
+// For multi-entity queries, there will be one result per entity.
 type ToolResult struct {
-	ToolName   string      `json:"tool_name"`
-	Capability string      `json:"capability"`
-	Data       interface{} `json:"data"`
-	Success    bool        `json:"success"`
-	Error      string      `json:"error,omitempty"`
-	Duration   string      `json:"duration"`
+	ToolName   string      `json:"tool_name"`  // Name of the tool that was called
+	Capability string      `json:"capability"` // Specific capability used
+	Data       interface{} `json:"data"`       // Tool-specific response data
+	Success    bool        `json:"success"`    // Whether the call succeeded
+	Error      string      `json:"error,omitempty"` // Error message if failed
+	Duration   string      `json:"duration"`   // Time taken for this call
 }
 
 // NewResearchAgent creates a new AI-powered research assistant

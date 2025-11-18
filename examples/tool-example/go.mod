@@ -2,7 +2,7 @@ module weather-tool-example
 
 go 1.25
 
-require github.com/itsneelabh/gomind/core v0.6.4
+require github.com/itsneelabh/gomind/core v0.6.5
 
 require (
 	github.com/alicebob/miniredis/v2 v2.35.0 // indirect
