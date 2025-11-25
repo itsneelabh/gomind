@@ -95,11 +95,20 @@ func (c *RedisSchemaCache) Get(ctx context.Context, toolName, capabilityName str
 	if err == redis.Nil {
 		// Cache miss
 		atomic.AddInt64(&c.misses, 1)
+		// Emit framework metrics for schema cache miss
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("memory.cache.misses", "memory_type", "schema_cache")
+		}
 		return nil, false
 	}
 	if err != nil {
 		// Redis error - degrade gracefully
 		atomic.AddInt64(&c.misses, 1)
+		// Emit framework metrics for schema cache error
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("memory.cache.misses", "memory_type", "schema_cache")
+			registry.Counter("memory.operations", "operation", "get", "memory_type", "schema_cache", "result", "error")
+		}
 		return nil, false
 	}
 
@@ -108,10 +117,20 @@ func (c *RedisSchemaCache) Get(ctx context.Context, toolName, capabilityName str
 	if err := json.Unmarshal([]byte(val), &schema); err != nil {
 		// Corrupt data in Redis - treat as miss
 		atomic.AddInt64(&c.misses, 1)
+		// Emit framework metrics for corrupt cache entry
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("memory.cache.misses", "memory_type", "schema_cache")
+			registry.Counter("memory.operations", "operation", "get", "memory_type", "schema_cache", "result", "corrupt")
+		}
 		return nil, false
 	}
 
 	atomic.AddInt64(&c.hits, 1)
+	// Emit framework metrics for schema cache hit
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		registry.Counter("memory.cache.hits", "memory_type", "schema_cache")
+		registry.Counter("memory.operations", "operation", "get", "memory_type", "schema_cache", "result", "hit")
+	}
 	return schema, true
 }
 
@@ -128,7 +147,17 @@ func (c *RedisSchemaCache) Set(ctx context.Context, toolName, capabilityName str
 
 	// Write to Redis
 	if err := c.client.Set(ctx, redisKey, data, c.ttl).Err(); err != nil {
+		// Emit framework metrics for failed cache set
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("memory.operations", "operation", "set", "memory_type", "schema_cache", "result", "error")
+		}
 		return fmt.Errorf("failed to set schema in Redis: %w", err)
+	}
+
+	// Emit framework metrics for successful cache set
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		registry.Counter("memory.operations", "operation", "set", "memory_type", "schema_cache", "result", "success")
+		registry.Gauge("memory.size_bytes", float64(len(data)), "memory_type", "schema_cache")
 	}
 
 	return nil

@@ -149,6 +149,8 @@ func NewRedisRegistryWithNamespace(redisURL, namespace string) (*RedisRegistry, 
 
 // Register registers a service with the registry (implements Registry interface)
 func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
+	start := time.Now()
+
 	if r.logger != nil {
 		r.logger.Info("Registering service", map[string]interface{}{
 			"service_id":         info.ID,
@@ -171,6 +173,16 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 	key := fmt.Sprintf("%s:services:%s", r.namespace, info.ID)
 	data, err := json.Marshal(info)
 	if err != nil {
+		// Emit framework metrics for marshal failure
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("discovery.registrations",
+				"service_type", string(info.Type),
+				"namespace", r.namespace,
+				"status", "error",
+				"error_type", "marshal",
+			)
+		}
+
 		if r.logger != nil {
 			r.logger.Error("Failed to marshal service info", map[string]interface{}{
 				"error":        err,
@@ -201,6 +213,21 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 	// Execute all operations atomically
 	_, err = pipe.Exec(ctx)
 	if err != nil {
+		// Emit framework metrics for failed registration
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			duration := float64(time.Since(start).Milliseconds())
+			registry.Counter("discovery.registrations",
+				"service_type", string(info.Type),
+				"namespace", r.namespace,
+				"status", "error",
+				"error_type", "redis_exec",
+			)
+			registry.Histogram("discovery.registration.duration_ms", duration,
+				"service_type", string(info.Type),
+				"namespace", r.namespace,
+			)
+		}
+
 		if r.logger != nil {
 			r.logger.Error("Failed to register service atomically", map[string]interface{}{
 				"error":        err,
@@ -210,6 +237,20 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 			})
 		}
 		return fmt.Errorf("failed to register service atomically: %w", err)
+	}
+
+	// Emit framework metrics for successful registration
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		duration := float64(time.Since(start).Milliseconds())
+		registry.Counter("discovery.registrations",
+			"service_type", string(info.Type),
+			"namespace", r.namespace,
+			"status", "success",
+		)
+		registry.Histogram("discovery.registration.duration_ms", duration,
+			"service_type", string(info.Type),
+			"namespace", r.namespace,
+		)
 	}
 
 	if r.logger != nil {
@@ -224,8 +265,10 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 	return nil
 }
 
-// UpdateHealth updates service health status  
+// UpdateHealth updates service health status
 func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, status HealthStatus) error {
+	start := time.Now()
+
 	if r.logger != nil {
 		r.logger.Debug("Updating service health", map[string]interface{}{
 			"service_id": serviceID,
@@ -239,6 +282,14 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 	data, err := r.client.Get(ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
+			// Emit framework metrics for service not found
+			if registry := GetGlobalMetricsRegistry(); registry != nil {
+				registry.Counter("discovery.health_checks",
+					"namespace", r.namespace,
+					"status", "not_found",
+				)
+			}
+
 			if r.logger != nil {
 				r.logger.Warn("Service not found for health update", map[string]interface{}{
 					"service_id": serviceID,
@@ -247,6 +298,16 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 			}
 			return fmt.Errorf("service %s: %w", serviceID, ErrServiceNotFound)
 		}
+
+		// Emit framework metrics for Redis error
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("discovery.health_checks",
+				"namespace", r.namespace,
+				"status", "error",
+				"error_type", "redis_get",
+			)
+		}
+
 		if r.logger != nil {
 			r.logger.Error("Failed to get service for health update", map[string]interface{}{
 				"error":      err,
@@ -260,6 +321,15 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 
 	var info ServiceInfo
 	if err := json.Unmarshal([]byte(data), &info); err != nil {
+		// Emit framework metrics for unmarshal failure
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("discovery.health_checks",
+				"namespace", r.namespace,
+				"status", "error",
+				"error_type", "unmarshal",
+			)
+		}
+
 		if r.logger != nil {
 			r.logger.Error("Failed to unmarshal service data for health update", map[string]interface{}{
 				"error":      err,
@@ -280,6 +350,15 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 	// Marshal updated data
 	updatedData, err := json.Marshal(info)
 	if err != nil {
+		// Emit framework metrics for marshal failure
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("discovery.health_checks",
+				"namespace", r.namespace,
+				"status", "error",
+				"error_type", "marshal",
+			)
+		}
+
 		if r.logger != nil {
 			r.logger.Error("Failed to marshal health data", map[string]interface{}{
 				"error":      err,
@@ -293,6 +372,15 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 
 	// Update with TTL
 	if err := r.client.Set(ctx, key, updatedData, r.ttl).Err(); err != nil {
+		// Emit framework metrics for Redis SET failure
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("discovery.health_checks",
+				"namespace", r.namespace,
+				"status", "error",
+				"error_type", "redis_set",
+			)
+		}
+
 		if r.logger != nil {
 			r.logger.Error("Failed to store health update", map[string]interface{}{
 				"error":      err,
@@ -311,6 +399,19 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 	// even when they're healthy and sending heartbeats
 	r.refreshIndexSetTTLs(ctx, &info)
 
+	// Emit framework metrics for successful health update (heartbeat)
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		duration := float64(time.Since(start).Milliseconds())
+		registry.Counter("discovery.health_checks",
+			"namespace", r.namespace,
+			"status", "success",
+			"health_status", string(status),
+		)
+		registry.Histogram("discovery.health_check.duration_ms", duration,
+			"namespace", r.namespace,
+		)
+	}
+
 	if r.logger != nil {
 		r.logger.Debug("Service health updated", map[string]interface{}{
 			"service_id":      serviceID,
@@ -326,6 +427,8 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 
 // Unregister removes a service from the registry
 func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error {
+	start := time.Now()
+
 	if r.logger != nil {
 		r.logger.Info("Unregistering service", map[string]interface{}{
 			"service_id": serviceID,
@@ -403,6 +506,18 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 
 	// Delete service key
 	if err := r.client.Del(ctx, key).Err(); err != nil {
+		// Emit framework metrics for failed unregistration
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			duration := float64(time.Since(start).Milliseconds())
+			registry.Counter("discovery.unregistrations",
+				"namespace", r.namespace,
+				"status", "error",
+			)
+			registry.Histogram("discovery.unregistration.duration_ms", duration,
+				"namespace", r.namespace,
+			)
+		}
+
 		if r.logger != nil {
 			r.logger.Error("Failed to delete service key", map[string]interface{}{
 				"error":      err,
@@ -418,6 +533,18 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 	r.stateMutex.Lock()
 	delete(r.registrationState, serviceID)
 	r.stateMutex.Unlock()
+
+	// Emit framework metrics for successful unregistration
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		duration := float64(time.Since(start).Milliseconds())
+		registry.Counter("discovery.unregistrations",
+			"namespace", r.namespace,
+			"status", "success",
+		)
+		registry.Histogram("discovery.unregistration.duration_ms", duration,
+			"namespace", r.namespace,
+		)
+	}
 
 	if r.logger != nil {
 		r.logger.Info("Service unregistered successfully", map[string]interface{}{

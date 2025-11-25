@@ -27,7 +27,7 @@ func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
 	}
 
 	base := providers.NewBaseClient(30*time.Second, logger)
-	base.DefaultModel = "gpt-3.5-turbo"
+	base.DefaultModel = "gpt-4.1-mini-2025-04-14" // Latest GPT-4.1-mini: 1M context, 50% faster, better reasoning
 
 	return &Client{
 		BaseClient: base,

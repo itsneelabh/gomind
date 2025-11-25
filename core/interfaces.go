@@ -174,12 +174,37 @@ func (m *InMemoryStore) Exists(ctx context.Context, key string) (bool, error) {
 // Global Registry Pattern for Telemetry Integration
 // ============================================================================
 
-// MetricsRegistry enables telemetry module to register itself with core
-// This avoids circular dependencies while enabling metrics emission
+// MetricsRegistry enables telemetry module to register itself with core.
+// This avoids circular dependencies while enabling metrics emission from
+// framework internals (discovery, cache, agent lifecycle).
+//
+// The telemetry module implements this interface via FrameworkMetricsRegistry
+// and registers itself using SetMetricsRegistry() during initialization.
 type MetricsRegistry interface {
+	// === Existing methods (preserved for backward compatibility) ===
+
+	// Counter increments a counter metric by 1
+	// Example: Counter("discovery.registrations", "service_type", "agent")
 	Counter(name string, labels ...string)
+
+	// EmitWithContext emits a metric with context for trace correlation
+	// This is the generic emission method - works for any metric type
 	EmitWithContext(ctx context.Context, name string, value float64, labels ...string)
+
+	// GetBaggage returns baggage from context for correlation
 	GetBaggage(ctx context.Context) map[string]string
+
+	// === New methods for explicit metric type semantics ===
+
+	// Gauge sets a gauge metric to a specific value
+	// Use for point-in-time measurements (active connections, queue size, etc.)
+	// Example: Gauge("discovery.services.active", 5, "namespace", "default")
+	Gauge(name string, value float64, labels ...string)
+
+	// Histogram records a value in a histogram distribution
+	// Use for latency, size distributions, etc.
+	// Example: Histogram("discovery.lookup.duration_ms", 12.5, "service_type", "tool")
+	Histogram(name string, value float64, labels ...string)
 }
 
 // Global registry - set by telemetry module when it initializes

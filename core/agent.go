@@ -141,6 +141,8 @@ func NewBaseAgentWithConfig(config *Config) *BaseAgent {
 
 // Initialize initializes the agent
 func (b *BaseAgent) Initialize(ctx context.Context) error {
+	initStart := time.Now()
+
 	b.Logger.Info("Starting agent initialization", map[string]interface{}{
 		"id":                 b.ID,
 		"name":               b.Name,
@@ -305,6 +307,22 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 		})
 	}
 
+	// Emit framework metrics for agent initialization
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		duration := float64(time.Since(initStart).Milliseconds())
+		registry.Counter("agent.lifecycle",
+			"agent_name", b.Name,
+			"event", "initialized",
+			"discovery_enabled", fmt.Sprintf("%t", b.Discovery != nil),
+		)
+		registry.Histogram("agent.initialization.duration_ms", duration,
+			"agent_name", b.Name,
+		)
+		registry.Gauge("agent.capabilities.count", float64(len(b.Capabilities)),
+			"agent_name", b.Name,
+		)
+	}
+
 	b.Logger.Info("Agent initialization completed", map[string]interface{}{
 		"id":                 b.ID,
 		"name":               b.Name,
@@ -457,6 +475,7 @@ func (b *BaseAgent) RegisterCapability(cap Capability) {
 func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		capStart := time.Now()
 
 		// Start telemetry span if available
 		if b.Telemetry != nil {
@@ -475,6 +494,21 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 		// Parse request
 		var input map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			// Emit framework metrics for capability error
+			if registry := GetGlobalMetricsRegistry(); registry != nil {
+				duration := float64(time.Since(capStart).Milliseconds())
+				registry.Counter("agent.capability.executions",
+					"agent_name", b.Name,
+					"capability", cap.Name,
+					"status", "error",
+					"error_type", "parse_request",
+				)
+				registry.Histogram("agent.capability.duration_ms", duration,
+					"agent_name", b.Name,
+					"capability", cap.Name,
+				)
+			}
+
 			b.Logger.Error("Failed to parse request", map[string]interface{}{
 				"error":      err,
 				"error_type": fmt.Sprintf("%T", err),
@@ -487,6 +521,20 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 
 		// TODO: Actual capability implementation would go here
 		// This is where tool-specific logic would be implemented
+
+		// Emit framework metrics for successful capability execution
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			duration := float64(time.Since(capStart).Milliseconds())
+			registry.Counter("agent.capability.executions",
+				"agent_name", b.Name,
+				"capability", cap.Name,
+				"status", "success",
+			)
+			registry.Histogram("agent.capability.duration_ms", duration,
+				"agent_name", b.Name,
+				"capability", cap.Name,
+			)
+		}
 
 		// Return response
 		response := map[string]interface{}{
@@ -775,6 +823,8 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 
 // Stop stops the HTTP server
 func (b *BaseAgent) Stop(ctx context.Context) error {
+	shutdownStart := time.Now()
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -802,8 +852,38 @@ func (b *BaseAgent) Stop(ctx context.Context) error {
 		// Reset server state
 		b.serverStarted = false
 
-		return b.server.Shutdown(shutdownCtx)
+		// Perform actual shutdown
+		err := b.server.Shutdown(shutdownCtx)
+
+		// Emit framework metrics after shutdown completes (captures actual duration)
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			duration := float64(time.Since(shutdownStart).Milliseconds())
+			status := "success"
+			if err != nil {
+				status = "error"
+			}
+			registry.Counter("agent.lifecycle",
+				"agent_name", b.Name,
+				"event", "shutdown",
+				"status", status,
+			)
+			registry.Histogram("agent.shutdown.duration_ms", duration,
+				"agent_name", b.Name,
+				"status", status,
+			)
+		}
+
+		return err
 	}
+
+	// Emit shutdown metric even if server was nil
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		registry.Counter("agent.lifecycle",
+			"agent_name", b.Name,
+			"event", "shutdown",
+		)
+	}
+
 	return nil
 }
 
