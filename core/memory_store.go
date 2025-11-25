@@ -47,6 +47,12 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 
 	entry, exists := m.store[key]
 	if !exists {
+		// Emit framework metrics for cache miss
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("memory.cache.misses", "memory_type", "in_memory")
+			registry.Counter("memory.operations", "operation", "get", "memory_type", "in_memory", "result", "miss")
+		}
+
 		if m.logger != nil {
 			m.logger.Debug("Cache miss", map[string]interface{}{
 				"operation": "cache_get",
@@ -59,6 +65,12 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 
 	// Check if expired
 	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
+		// Emit framework metrics for expired entry (treated as miss)
+		if registry := GetGlobalMetricsRegistry(); registry != nil {
+			registry.Counter("memory.cache.misses", "memory_type", "in_memory")
+			registry.Counter("memory.evictions", "memory_type", "in_memory", "reason", "expired")
+		}
+
 		if m.logger != nil {
 			m.logger.Debug("Cache entry expired", map[string]interface{}{
 				"operation":  "cache_get",
@@ -68,6 +80,12 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 			})
 		}
 		return "", nil
+	}
+
+	// Emit framework metrics for cache hit
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		registry.Counter("memory.cache.hits", "memory_type", "in_memory")
+		registry.Counter("memory.operations", "operation", "get", "memory_type", "in_memory", "result", "hit")
 	}
 
 	if m.logger != nil {
@@ -109,6 +127,13 @@ func (m *MemoryStore) Set(ctx context.Context, key string, value string, ttl tim
 	}
 
 	m.store[key] = entry
+
+	// Emit framework metrics for cache set
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		registry.Counter("memory.operations", "operation", "set", "memory_type", "in_memory", "result", "success")
+		registry.Gauge("memory.size_bytes", float64(len(value)), "memory_type", "in_memory")
+	}
+
 	return nil
 }
 
@@ -119,6 +144,14 @@ func (m *MemoryStore) Delete(ctx context.Context, key string) error {
 
 	_, existed := m.store[key]
 	delete(m.store, key)
+
+	// Emit framework metrics for cache delete
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		registry.Counter("memory.operations", "operation", "delete", "memory_type", "in_memory")
+		if existed {
+			registry.Counter("memory.evictions", "memory_type", "in_memory", "reason", "explicit_delete")
+		}
+	}
 
 	if m.logger != nil {
 		m.logger.Debug("Cache delete", map[string]interface{}{

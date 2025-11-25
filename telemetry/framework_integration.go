@@ -68,6 +68,38 @@ func (f *FrameworkMetricsRegistry) GetBaggage(ctx context.Context) map[string]st
 	return GetBaggage(ctx)
 }
 
+// Gauge implements core.MetricsRegistry
+func (f *FrameworkMetricsRegistry) Gauge(name string, value float64, labels ...string) {
+	if f.logger != nil && f.logger.debug {
+		f.logger.Debug("Framework gauge emission", map[string]interface{}{
+			"metric_name": name,
+			"type":        "gauge",
+			"value":       value,
+			"label_count": len(labels) / 2,
+			"source":      "framework",
+		})
+	}
+
+	// Use telemetry's Gauge function
+	Gauge(name, value, labels...)
+}
+
+// Histogram implements core.MetricsRegistry
+func (f *FrameworkMetricsRegistry) Histogram(name string, value float64, labels ...string) {
+	if f.logger != nil && f.logger.debug {
+		f.logger.Debug("Framework histogram emission", map[string]interface{}{
+			"metric_name": name,
+			"type":        "histogram",
+			"value":       value,
+			"label_count": len(labels) / 2,
+			"source":      "framework",
+		})
+	}
+
+	// Use telemetry's Histogram function
+	Histogram(name, value, labels...)
+}
+
 // EnableFrameworkIntegration registers the telemetry module with core
 // This must be called after telemetry initialization to enable framework-wide metrics
 func EnableFrameworkIntegration(logger *TelemetryLogger) {
@@ -80,7 +112,7 @@ func EnableFrameworkIntegration(logger *TelemetryLogger) {
 		logger.Info("Framework integration enabled", map[string]interface{}{
 			"integration": "core.MetricsRegistry",
 			"impact":      "All framework components can now emit metrics",
-			"methods":     []string{"Counter", "EmitWithContext", "GetBaggage"},
+			"methods":     []string{"Counter", "EmitWithContext", "GetBaggage", "Gauge", "Histogram"},
 		})
 	}
 }

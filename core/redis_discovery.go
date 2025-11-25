@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -43,6 +44,8 @@ func (d *RedisDiscovery) SetLogger(logger Logger) {
 
 // Discover finds services based on filter criteria (implements Discovery interface)
 func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error) {
+	start := time.Now()
+
 	if d.logger != nil {
 		d.logger.Info("Starting service discovery", map[string]interface{}{
 			"filter_type":         filter.Type,
@@ -67,6 +70,21 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 		
 		ids, err := d.client.SMembers(ctx, typeKey).Result()
 		if err != nil && err != redis.Nil {
+			// Emit framework metrics for discovery error
+			if registry := GetGlobalMetricsRegistry(); registry != nil {
+				duration := float64(time.Since(start).Milliseconds())
+				registry.Counter("discovery.lookups",
+					"namespace", d.namespace,
+					"filter_type", string(filter.Type),
+					"status", "error",
+					"error_type", "type_lookup",
+				)
+				registry.Histogram("discovery.lookup.duration_ms", duration,
+					"namespace", d.namespace,
+					"filter_type", string(filter.Type),
+				)
+			}
+
 			if d.logger != nil {
 				d.logger.Error("Failed to find services by type", map[string]interface{}{
 					"error":      err,
@@ -99,6 +117,21 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 		
 		ids, err := d.client.SMembers(ctx, nameKey).Result()
 		if err != nil && err != redis.Nil {
+			// Emit framework metrics for name lookup error
+			if registry := GetGlobalMetricsRegistry(); registry != nil {
+				duration := float64(time.Since(start).Milliseconds())
+				registry.Counter("discovery.lookups",
+					"namespace", d.namespace,
+					"filter_type", "name",
+					"status", "error",
+					"error_type", "name_lookup",
+				)
+				registry.Histogram("discovery.lookup.duration_ms", duration,
+					"namespace", d.namespace,
+					"filter_type", "name",
+				)
+			}
+
 			if d.logger != nil {
 				d.logger.Error("Failed to find services by name", map[string]interface{}{
 					"error":      err,
@@ -264,6 +297,25 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 				}
 				continue
 			}
+			// Emit framework metrics for service get error
+			if registry := GetGlobalMetricsRegistry(); registry != nil {
+				duration := float64(time.Since(start).Milliseconds())
+				filterType := string(filter.Type)
+				if filterType == "" {
+					filterType = "all"
+				}
+				registry.Counter("discovery.lookups",
+					"namespace", d.namespace,
+					"filter_type", filterType,
+					"status", "error",
+					"error_type", "service_get",
+				)
+				registry.Histogram("discovery.lookup.duration_ms", duration,
+					"namespace", d.namespace,
+					"filter_type", filterType,
+				)
+			}
+
 			if d.logger != nil {
 				d.logger.Error("Failed to get service data", map[string]interface{}{
 					"error":      err,
@@ -315,6 +367,28 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 		}
 
 		services = append(services, &info)
+	}
+
+	// Emit framework metrics for successful discovery
+	if registry := GetGlobalMetricsRegistry(); registry != nil {
+		duration := float64(time.Since(start).Milliseconds())
+		filterType := string(filter.Type)
+		if filterType == "" {
+			filterType = "all"
+		}
+		registry.Counter("discovery.lookups",
+			"namespace", d.namespace,
+			"filter_type", filterType,
+			"status", "success",
+		)
+		registry.Histogram("discovery.lookup.duration_ms", duration,
+			"namespace", d.namespace,
+			"filter_type", filterType,
+		)
+		registry.Gauge("discovery.services.found", float64(len(services)),
+			"namespace", d.namespace,
+			"filter_type", filterType,
+		)
 	}
 
 	// Log discovery summary

@@ -75,6 +75,13 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 	if endpoint == "localhost:4317" {
 		endpoint = "localhost:4318"
 	}
+	// Strip http:// or https:// prefix if present
+	// OTLP exporters expect just host:port, not a full URL
+	if len(endpoint) > 7 && endpoint[:7] == "http://" {
+		endpoint = endpoint[7:]
+	} else if len(endpoint) > 8 && endpoint[:8] == "https://" {
+		endpoint = endpoint[8:]
+	}
 
 	// Create resource with consistent schema
 	logger.Debug("Creating OpenTelemetry resource", map[string]interface{}{
