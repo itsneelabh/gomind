@@ -175,6 +175,28 @@ func (m *MockMetricsRegistry) GetBaggage(ctx context.Context) map[string]string 
 	return make(map[string]string)
 }
 
+func (m *MockMetricsRegistry) Gauge(name string, value float64, labels ...string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics = append(m.metrics, MetricEntry{
+		Name:   name,
+		Value:  value,
+		Labels: parseLabels(labels...),
+		Ctx:    context.Background(),
+	})
+}
+
+func (m *MockMetricsRegistry) Histogram(name string, value float64, labels ...string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics = append(m.metrics, MetricEntry{
+		Name:   name,
+		Value:  value,
+		Labels: parseLabels(labels...),
+		Ctx:    context.Background(),
+	})
+}
+
 func (m *MockMetricsRegistry) GetMetrics() []MetricEntry {
 	m.mu.Lock()
 	defer m.mu.Unlock()
