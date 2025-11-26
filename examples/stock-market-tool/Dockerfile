@@ -17,14 +17,10 @@ COPY *.go ./
 ENV GOWORK=off
 ENV CGO_ENABLED=0
 ENV GOOS=linux
-ENV GOPROXY=direct
 ENV GONOSUMDB=github.com/itsneelabh/gomind/*
 
-# Download dependencies from GitHub (v0.6.4)
+# Download dependencies from GitHub (v0.6.6)
 RUN go mod download && go mod verify
-
-# Verify dependencies
-RUN go list -m all
 
 # Build the binary with optimizations
 RUN go build -a -installsuffix cgo \

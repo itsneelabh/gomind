@@ -87,6 +87,11 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        # Telemetry Configuration
+        - name: APP_ENV
+          value: "development"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "otel-collector.default.svc.cluster.local:4318"
         resources:
           requests:
             memory: "64Mi"
