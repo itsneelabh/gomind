@@ -267,8 +267,8 @@ func TestFactory_Create(t *testing.T) {
 			name:   "default configuration",
 			config: &ai.AIConfig{},
 			verify: func(t *testing.T, c *Client) {
-				if c.DefaultModel != "gpt-3.5-turbo" {
-					t.Errorf("expected default model 'gpt-3.5-turbo', got %q", c.DefaultModel)
+				if c.DefaultModel != "gpt-4.1-mini-2025-04-14" {
+					t.Errorf("expected default model 'gpt-4.1-mini-2025-04-14', got %q", c.DefaultModel)
 				}
 				if c.DefaultMaxTokens != 1000 {
 					t.Errorf("expected default max tokens 1000, got %d", c.DefaultMaxTokens)

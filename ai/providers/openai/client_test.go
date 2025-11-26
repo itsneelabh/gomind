@@ -98,8 +98,8 @@ func TestNewClient(t *testing.T) {
 			if client.baseURL != tt.want.baseURL {
 				t.Errorf("baseURL = %q, want %q", client.baseURL, tt.want.baseURL)
 			}
-			if client.DefaultModel != "gpt-3.5-turbo" {
-				t.Errorf("DefaultModel = %q, want gpt-3.5-turbo", client.DefaultModel)
+			if client.DefaultModel != "gpt-4.1-mini-2025-04-14" {
+				t.Errorf("DefaultModel = %q, want gpt-4.1-mini-2025-04-14", client.DefaultModel)
 			}
 		})
 	}
