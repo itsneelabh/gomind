@@ -1340,6 +1340,64 @@ func (t *DataTool) fetchData(ctx context.Context, id string) error {
 }
 ```
 
+#### Intelligent Error Handling for Tool-Agent Communication
+
+When tools and agents communicate, they need a standardized way to report errors with enough context for intelligent retry decisions. GoMind provides the `ToolError` and `ToolResponse` types for this purpose.
+
+**Why This Matters:** A tool might fail because of bad input (don't retry with same data) or a rate limit (wait and retry). Without structured error information, agents can't make smart decisions.
+
+```go
+// ToolResponse wraps all tool responses with success/error information
+type ToolResponse struct {
+    Success bool        `json:"success"`
+    Data    interface{} `json:"data,omitempty"`
+    Error   *ToolError  `json:"error,omitempty"`
+}
+
+// ToolError provides structured error information
+type ToolError struct {
+    Code      string            `json:"code"`       // e.g., "INVALID_LOCATION"
+    Message   string            `json:"message"`    // Human-readable description
+    Category  ErrorCategory     `json:"category"`   // INPUT_ERROR, RATE_LIMIT, etc.
+    Retryable bool              `json:"retryable"`  // Should agent retry?
+    Details   map[string]string `json:"details,omitempty"` // Additional context
+}
+```
+
+**Quick Usage in Tools:**
+
+```go
+// Success response
+return core.ToolResponse{
+    Success: true,
+    Data:    weatherData,
+}
+
+// Error response with category
+return core.ToolResponse{
+    Success: false,
+    Error: &core.ToolError{
+        Code:      "INVALID_LOCATION",
+        Message:   "City 'Flower Mount' not found. Did you mean 'Flower Mound'?",
+        Category:  core.CategoryInputError,
+        Retryable: true,
+        Details:   map[string]string{"suggestion": "Flower Mound, TX"},
+    },
+}
+```
+
+**Error Categories:**
+
+| Category | When to Use | HTTP Status |
+|----------|-------------|-------------|
+| `CategoryInputError` | Invalid user input, typos | 400 |
+| `CategoryNotFound` | Resource doesn't exist | 404 |
+| `CategoryRateLimit` | Too many requests | 429 |
+| `CategoryAuthError` | Authentication failed | 401 |
+| `CategoryServiceError` | Internal/external service failure | 500/502 |
+
+📖 **For comprehensive implementation details, see the [Intelligent Error Handling Guide](../docs/INTELLIGENT_ERROR_HANDLING.md).**
+
 ### ⚙️ Configuration System: Three-Layer Magic
 
 The configuration system uses a three-layer priority system:
