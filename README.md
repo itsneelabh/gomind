@@ -3,6 +3,8 @@
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+> **Note:** This framework is currently under active development and is not ready for production use. Please wait for the 1.0.0 GA release.
+
 A modular framework for building AI agents in Go with production-grade resilience, observability, and orchestration capabilities built-in from the start.
 
 ## 📋 Table of Contents
