@@ -21,9 +21,8 @@ spec:
         version: v1.0.0
         gomind.framework/type: agent
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8090"
-        prometheus.io/path: "/metrics"
+        # Note: This agent doesn't have telemetry enabled, so no /metrics endpoint
+        prometheus.io/scrape: "false"
     spec:
       containers:
       - name: research-agent

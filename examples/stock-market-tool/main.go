@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
 )
 
 func main() {
@@ -20,6 +21,16 @@ func main() {
 	if err := validateConfig(); err != nil {
 		log.Fatalf("Configuration error: %v", err)
 	}
+
+	// Initialize telemetry
+	initTelemetry("stock-service")
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetry.Shutdown(ctx); err != nil {
+			log.Printf("⚠️  Warning: Telemetry shutdown error: %v", err)
+		}
+	}()
 
 	// Create stock market tool
 	tool := NewStockTool()
@@ -55,6 +66,7 @@ func main() {
 
 	// Display startup information
 	log.Println("📈 Stock Market Tool Service Starting...")
+	log.Println("📊 Telemetry: Enabled")
 	log.Printf("🌐 Server Port: %d\n", port)
 	log.Println("📋 Registered endpoints will be shown in framework logs below...")
 	log.Println()
@@ -120,4 +132,37 @@ func validateConfig() error {
 	}
 
 	return nil
+}
+
+// initTelemetry sets up telemetry based on environment
+func initTelemetry(serviceName string) {
+	env := os.Getenv("APP_ENV")
+	if env == "" {
+		env = "development"
+	}
+
+	var profile telemetry.Profile
+	switch env {
+	case "production", "prod":
+		profile = telemetry.ProfileProduction
+	case "staging", "stage", "qa":
+		profile = telemetry.ProfileStaging
+	default:
+		profile = telemetry.ProfileDevelopment
+	}
+
+	config := telemetry.UseProfile(profile)
+	config.ServiceName = serviceName
+
+	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+		config.Endpoint = endpoint
+	}
+
+	if err := telemetry.Initialize(config); err != nil {
+		log.Printf("⚠️  Warning: Telemetry initialization failed: %v", err)
+		log.Printf("   Tool will continue without telemetry")
+		return
+	}
+
+	log.Printf("✅ Telemetry initialized for %s", serviceName)
 }

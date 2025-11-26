@@ -74,8 +74,10 @@ spec:
             fieldRef:
               fieldPath: spec.nodeName
         # Telemetry Configuration
+        - name: APP_ENV
+          value: "development"
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: "http://otel-collector:4318"
+          value: "otel-collector.default.svc.cluster.local:4318"
         - name: WEATHER_API_KEY
           valueFrom:
             secretKeyRef:
