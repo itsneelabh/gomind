@@ -524,6 +524,8 @@ func classifyError(err error) string {
 }
 ```
 
+> **See Also**: For advanced error handling patterns including AI-powered error correction and intelligent retry strategies, see the [Intelligent Error Handling Guide](https://github.com/itsneelabh/gomind/blob/main/docs/INTELLIGENT_ERROR_HANDLING.md).
+
 ## Next Steps
 
 1. **Add Custom Metrics**: Extend `DeclareMetrics()` with agent-specific metrics

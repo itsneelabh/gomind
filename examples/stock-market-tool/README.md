@@ -341,6 +341,10 @@ curl -X POST http://localhost:8082/api/capabilities/stock_quote \
   -d '{"symbol": "AAPL"}'
 ```
 
+## Error Handling
+
+For advanced error handling patterns including AI-powered error correction and intelligent retry strategies, see the [Intelligent Error Handling Guide](https://github.com/itsneelabh/gomind/blob/main/docs/INTELLIGENT_ERROR_HANDLING.md).
+
 ## License
 
 Part of the GoMind framework examples.
