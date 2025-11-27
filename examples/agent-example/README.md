@@ -715,6 +715,8 @@ func (r *ResearchAgent) callToolWithRetry(ctx context.Context, tool *core.Servic
 }
 ```
 
+> **See Also**: For advanced error handling patterns including AI-powered error correction and intelligent retry strategies, see the [Intelligent Error Handling Guide](https://github.com/itsneelabh/gomind/blob/main/docs/INTELLIGENT_ERROR_HANDLING.md).
+
 ### 5. Structured Logging
 Use structured logging for better observability:
 

@@ -43,6 +43,21 @@ A comprehensive example demonstrating how to build a **Tool** (passive component
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) - Kubernetes CLI
 - Optional: Weather API key from [weatherapi.com](https://www.weatherapi.com/)
 
+### Getting Your Free Weather API Key
+
+1. Visit [https://www.weatherapi.com/signup.aspx](https://www.weatherapi.com/signup.aspx)
+2. Sign up for a free account (no credit card required)
+3. After email verification, navigate to your dashboard
+4. Copy your API key from the dashboard
+5. Free tier includes:
+   - 1,000,000 calls per month
+   - Current weather data
+   - 3-day forecast
+   - Location autocomplete
+   - Astronomy data
+
+> **Note**: The tool works without an API key using mock/simulated data, which is useful for development and testing.
+
 ### Option 1: Complete Setup (Easiest)
 
 ```bash
@@ -1279,6 +1294,7 @@ The 4-file structure provides clear benefits:
 - **Discovery Integration**: Automatic Redis registration and heartbeat
 - **CORS Support**: Browser-friendly API access
 - **Multi-Stage Builds**: Optimized Docker images (~10MB)
+- **Error Handling**: See the [Intelligent Error Handling Guide](https://github.com/itsneelabh/gomind/blob/main/docs/INTELLIGENT_ERROR_HANDLING.md) for advanced patterns
 
 ### Development Workflow
 
