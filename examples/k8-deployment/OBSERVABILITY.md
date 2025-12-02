@@ -77,7 +77,7 @@ The stack automatically configures these environment variables for your applicat
 ```yaml
 env:
 - name: OTEL_EXPORTER_OTLP_ENDPOINT
-  value: "http://otel-collector:4318"    # OTLP export endpoint
+  value: "http://otel-collector.gomind-examples:4318"    # OTLP export endpoint
 - name: REDIS_URL
   value: "redis://redis:6379"           # Service discovery
 ```

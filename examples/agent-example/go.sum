@@ -12,10 +12,10 @@ github.com/go-redis/redis/v8 v8.11.5 h1:AcZZR7igkdvfVmQTPnu9WE37LRrO/YrBH5zWyjDC
 github.com/go-redis/redis/v8 v8.11.5/go.mod h1:gREzHqY1hg6oD9ngVRbLStwAWKhA0FEgq8Jd4h5lpwo=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/itsneelabh/gomind/ai v0.6.6 h1:B/vrh0wVSS8tDxdHnUIF3lNaqZzXY6A1kqgNEwsfXaY=
-github.com/itsneelabh/gomind/ai v0.6.6/go.mod h1:2b1iYpBAwDmpuJGMj9fAJlor4xKFqh3Clfkkshdk3Fw=
-github.com/itsneelabh/gomind/core v0.6.6 h1:lwS/wxbjpBTADIDezpsOCliT76xx6WMewwSnd+t811A=
-github.com/itsneelabh/gomind/core v0.6.6/go.mod h1:ZQsPmQLy9NudYIucSNICHxAoTtniRP9W1fgljJjd558=
+github.com/itsneelabh/gomind/ai v0.6.7 h1:2vaLHUjNCpfzIAO6UY/Vm+n7zouMQMrzZusN7ZSj8P8=
+github.com/itsneelabh/gomind/ai v0.6.7/go.mod h1:2b1iYpBAwDmpuJGMj9fAJlor4xKFqh3Clfkkshdk3Fw=
+github.com/itsneelabh/gomind/core v0.6.7 h1:EKtUZGWhspKyHIKt/vnK86VgijsDd0SVlpPTTdonI7E=
+github.com/itsneelabh/gomind/core v0.6.7/go.mod h1:ZQsPmQLy9NudYIucSNICHxAoTtniRP9W1fgljJjd558=
 github.com/nxadm/tail v1.4.8 h1:nPr65rt6Y5JFSKQO7qToXr7pePgD6Gwiw05lkbyAQTE=
 github.com/nxadm/tail v1.4.8/go.mod h1:+ncqLTQzXmGhMZNUePPaPqPvBxHAIsmXswZKocGu+AU=
 github.com/onsi/ginkgo v1.16.5 h1:8xi0RTUf59SOSfEtZMvwTvXYMzG4gV23XVHOZiXNtnE=

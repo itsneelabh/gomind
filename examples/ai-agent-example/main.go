@@ -98,7 +98,7 @@ func (a *AIFirstAgent) registerAIFirstCapabilities() {
 		Handler:     a.handleIntelligentOrchestration,
 	})
 
-	// 🚀 CAPABILITY 4: Adaptive Problem Solver
+	// CAPABILITY 4: Adaptive Problem Solver
 	// Pattern: AI understands problem → AI generates solution strategies → AI executes best strategy → AI learns
 	a.RegisterCapability(core.Capability{
 		Name:        "solve_adaptive_problem",
@@ -398,7 +398,7 @@ func (a *AIFirstAgent) handleIntelligentOrchestration(rw http.ResponseWriter, re
 	})
 }
 
-// 🚀 CAPABILITY 4: Adaptive Problem Solver
+// CAPABILITY 4: Adaptive Problem Solver
 // This shows AI continuously adapting its approach based on results
 func (a *AIFirstAgent) handleAdaptiveProblemSolver(rw http.ResponseWriter, req *http.Request) {
 	var problemRequest struct {

@@ -13,9 +13,10 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-CLUSTER_NAME="gomind-demo"
+CLUSTER_NAME="gomind-demo-$(whoami)"
 NAMESPACE="gomind-examples"
 APP_NAME="research-agent"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Functions
 print_header() {
@@ -41,6 +42,27 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+load_env() {
+    print_step "Loading environment variables..."
+
+    if [ -f "$SCRIPT_DIR/.env" ]; then
+        set -a
+        source "$SCRIPT_DIR/.env"
+        set +a
+        print_success "Loaded .env file"
+    elif [ -f "$SCRIPT_DIR/.env.example" ]; then
+        print_warning "No .env file found, copying from .env.example"
+        cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+        set -a
+        source "$SCRIPT_DIR/.env"
+        set +a
+        print_success "Created .env from example"
+    else
+        print_warning "No .env file found"
+    fi
+    echo ""
+}
+
 check_command() {
     if ! command -v $1 &> /dev/null; then
         print_error "$1 is not installed"
@@ -62,20 +84,11 @@ check_prerequisites() {
 }
 
 create_kind_cluster() {
-    print_step "Setting up Kind cluster..."
+    print_step "Setting up Kind cluster ($CLUSTER_NAME)..."
 
-    if kind get clusters 2>/dev/null | grep -q "$CLUSTER_NAME"; then
-        print_warning "Cluster $CLUSTER_NAME already exists"
-        read -p "Do you want to delete and recreate it? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            kind delete cluster --name $CLUSTER_NAME
-        else
-            print_warning "Using existing cluster"
-        fi
-    fi
-
-    if ! kind get clusters 2>/dev/null | grep -q "$CLUSTER_NAME"; then
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        print_success "Cluster $CLUSTER_NAME already exists, reusing it"
+    else
         cat <<EOF | kind create cluster --name $CLUSTER_NAME --config=-
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -104,7 +117,13 @@ setup_namespace() {
 }
 
 install_redis() {
-    print_step "Installing Redis..."
+    print_step "Setting up Redis..."
+
+    # Check if Redis already exists in the namespace
+    if kubectl get deployment redis -n $NAMESPACE >/dev/null 2>&1; then
+        print_success "Redis already running in $NAMESPACE"
+        return 0
+    fi
 
     kubectl apply -f - <<EOF
 apiVersion: v1
@@ -177,40 +196,26 @@ EOF
 setup_api_keys() {
     print_step "Setting up API keys..."
 
-    # Check for API keys
+    # Check for API keys (loaded from .env)
     if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
-        print_warning "No AI API keys found in environment"
+        print_warning "No AI API keys found in .env file"
         echo ""
-        echo "Would you like to:"
-        echo "1) Enter an API key now"
-        echo "2) Continue with dummy keys (limited functionality)"
+        echo "To enable AI features, add API keys to your .env file:"
+        echo "  OPENAI_API_KEY=your-key"
+        echo "  # or"
+        echo "  ANTHROPIC_API_KEY=your-key"
+        echo "  # or"
+        echo "  GROQ_API_KEY=your-key"
         echo ""
-        read -p "Choice (1/2): " choice
-
-        if [ "$choice" = "1" ]; then
-            echo ""
-            echo "Select provider:"
-            echo "1) OpenAI"
-            echo "2) Anthropic"
-            echo "3) Groq"
-            read -p "Provider (1/2/3): " provider
-
-            read -s -p "Enter API key: " api_key
-            echo ""
-
-            case $provider in
-                1) OPENAI_API_KEY=$api_key ;;
-                2) ANTHROPIC_API_KEY=$api_key ;;
-                3) GROQ_API_KEY=$api_key ;;
-            esac
-        fi
+    else
+        print_success "Using API keys from .env file"
     fi
 
-    # Create secret
+    # Create secret with available keys (empty string for unset keys - won't be detected as available)
     kubectl create secret generic ai-provider-keys \
-        --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-dummy-key}" \
-        --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy-key}" \
-        --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-dummy-key}" \
+        --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+        --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+        --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
         -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
     print_success "API keys configured"
@@ -219,7 +224,7 @@ setup_api_keys() {
 
 build_and_deploy() {
     print_step "Building Docker image..."
-    docker build -t $APP_NAME:latest . >/dev/null 2>&1
+    docker build -t $APP_NAME:latest "$SCRIPT_DIR" >/dev/null 2>&1
     print_success "Docker image built"
 
     print_step "Loading image into Kind cluster..."
@@ -227,7 +232,7 @@ build_and_deploy() {
     print_success "Image loaded"
 
     print_step "Deploying agent..."
-    kubectl apply -f k8-deployment.yaml
+    kubectl apply -f "$SCRIPT_DIR/k8-deployment.yaml"
 
     echo "Waiting for deployment to be ready..."
     if kubectl wait --for=condition=available --timeout=120s deployment/$APP_NAME -n $NAMESPACE 2>/dev/null; then
@@ -299,6 +304,7 @@ main() {
     clear
     print_header
 
+    load_env
     check_prerequisites
     create_kind_cluster
     setup_namespace

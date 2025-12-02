@@ -21,9 +21,8 @@ spec:
         version: v1.0.0
         gomind.framework/type: tool
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
-        prometheus.io/path: "/metrics"
+        # Uses OTLP push-based telemetry, not Prometheus pull scraping
+        prometheus.io/scrape: "false"
     spec:
       containers:
       - name: weather-tool
@@ -41,9 +40,9 @@ spec:
         - name: GOMIND_NAMESPACE
           value: "gomind-examples"
         - name: REDIS_URL
-          value: "redis://redis.default.svc.cluster.local:6379"
+          value: "redis://redis.gomind-examples:6379"
         - name: GOMIND_REDIS_URL
-          value: "redis://redis.default.svc.cluster.local:6379"
+          value: "redis://redis.gomind-examples:6379"
         # Redis Registration Resilience (handles Redis startup race conditions)
         - name: GOMIND_DISCOVERY_RETRY
           value: "true"
@@ -77,7 +76,7 @@ spec:
         - name: APP_ENV
           value: "development"
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: "otel-collector.default.svc.cluster.local:4318"
+          value: "http://otel-collector.gomind-examples:4318"
         - name: WEATHER_API_KEY
           valueFrom:
             secretKeyRef:
@@ -157,7 +156,7 @@ data:
     discovery:
       enabled: true
       provider: redis
-      redis_url: redis://redis.default.svc.cluster.local:6379
+      redis_url: redis://redis.gomind-examples:6379
     logging:
       level: info
       format: json

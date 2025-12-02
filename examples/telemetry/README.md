@@ -171,7 +171,7 @@ The deployment includes:
 The example automatically exports metrics to OTLP collector when configured:
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4318"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector.gomind-examples:4318"
 ```
 
 ### With Prometheus

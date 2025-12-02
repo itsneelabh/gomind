@@ -214,6 +214,14 @@ data:
           action: replace
           target_label: pod
 
+      # OTEL Collector (static config for gomind-examples namespace)
+      - job_name: 'otel-collector-metrics'
+        static_configs:
+        - targets: ['otel-collector.gomind-examples:8889']
+          labels:
+            service: 'otel-collector'
+            component: 'telemetry'
+
       # Infrastructure components
       - job_name: 'redis'
         static_configs:

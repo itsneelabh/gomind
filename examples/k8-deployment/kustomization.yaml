@@ -72,7 +72,7 @@ configMapGenerator:
 - name: shared-config
   literals:
   - REDIS_URL=redis://redis:6379
-  - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+  - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.gomind-examples:4318
   - PROMETHEUS_URL=http://prometheus:9090
   - JAEGER_ENDPOINT=http://jaeger-collector:4317
   - GRAFANA_URL=http://grafana

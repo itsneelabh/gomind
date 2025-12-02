@@ -71,7 +71,41 @@ func NewMultiProviderService() (*MultiProviderService, error) {
 
 // setupAIClients configures multiple AI providers with fallback
 func (s *MultiProviderService) setupAIClients() error {
-	// Primary provider (OpenAI)
+	// SHOWCASE NEW FEATURE: Provider Aliases with Model Aliases
+	// Using the new WithProviderAlias for OpenAI-compatible providers
+
+	// Primary provider - Try Groq first (ultra-fast)
+	if apiKey := os.Getenv("GROQ_API_KEY"); apiKey != "" {
+		client, err := ai.NewClient(
+			ai.WithProviderAlias("openai.groq"),
+			ai.WithAPIKey(apiKey),
+			ai.WithModel("fast"), // Model alias - resolves to llama-3.3-70b-versatile
+			ai.WithTemperature(0.3),
+		)
+		if err == nil {
+			s.primaryClient = client
+			log.Println("✅ Primary AI provider (Groq) configured using provider alias")
+		} else {
+			log.Printf("⚠️ Primary provider setup failed: %v", err)
+		}
+	}
+
+	// Try DeepSeek as alternative primary (reasoning model)
+	if s.primaryClient == nil && os.Getenv("DEEPSEEK_API_KEY") != "" {
+		client, err := ai.NewClient(
+			ai.WithProviderAlias("openai.deepseek"),
+			ai.WithModel("smart"), // Model alias - resolves to deepseek-reasoner
+			ai.WithTemperature(0.3),
+		)
+		if err == nil {
+			s.primaryClient = client
+			log.Println("✅ Primary AI provider (DeepSeek) configured using provider alias")
+		} else {
+			log.Printf("⚠️ DeepSeek provider setup failed: %v", err)
+		}
+	}
+
+	// Traditional providers as fallback
 	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
 		client, err := ai.NewClient(
 			ai.WithProvider("openai"),
@@ -80,53 +114,91 @@ func (s *MultiProviderService) setupAIClients() error {
 			ai.WithTemperature(0.3),
 		)
 		if err == nil {
-			s.primaryClient = client
-			log.Println("✅ Primary AI provider (OpenAI) configured")
-		} else {
-			log.Printf("⚠️ Primary provider setup failed: %v", err)
-		}
-	}
-
-	// Fallback provider (Anthropic)
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
-		client, err := ai.NewClient(
-			ai.WithProvider("anthropic"),
-			ai.WithAPIKey(apiKey),
-			ai.WithModel("claude-3-sonnet"),
-			ai.WithTemperature(0.3),
-		)
-		if err == nil {
 			s.fallbackClient = client
-			log.Println("✅ Fallback AI provider (Anthropic) configured")
+			log.Println("✅ Fallback AI provider (OpenAI) configured")
 		} else {
 			log.Printf("⚠️ Fallback provider setup failed: %v", err)
 		}
 	}
 
-	// Secondary provider (Gemini)
-	if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
+	// Anthropic as secondary fallback
+	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
 		client, err := ai.NewClient(
-			ai.WithProvider("gemini"),
+			ai.WithProvider("anthropic"),
 			ai.WithAPIKey(apiKey),
-			ai.WithModel("gemini-pro"),
+			ai.WithModel("claude-3-5-sonnet-20240620"),
 			ai.WithTemperature(0.3),
 		)
 		if err == nil {
 			s.secondaryClient = client
-			log.Println("✅ Secondary AI provider (Gemini) configured")
+			log.Println("✅ Secondary AI provider (Anthropic) configured")
 		} else {
 			log.Printf("⚠️ Secondary provider setup failed: %v", err)
 		}
 	}
 
-	// Auto-detect if no explicit providers configured
+	// SHOWCASE NEW FEATURE: Chain Client for automatic failover
+	// Create a chain client that automatically fails over between providers
+	chainProviders := []ai.ChainProvider{}
+
+	// Add Groq if available
+	if os.Getenv("GROQ_API_KEY") != "" {
+		chainProviders = append(chainProviders, ai.ChainProvider{
+			ProviderAlias: "openai.groq",
+			Model:         "fast",
+			Priority:      1,
+		})
+	}
+
+	// Add DeepSeek if available
+	if os.Getenv("DEEPSEEK_API_KEY") != "" {
+		chainProviders = append(chainProviders, ai.ChainProvider{
+			ProviderAlias: "openai.deepseek",
+			Model:         "smart",
+			Priority:      2,
+		})
+	}
+
+	// Add OpenAI if available
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		chainProviders = append(chainProviders, ai.ChainProvider{
+			Provider: "openai",
+			Model:    "gpt-3.5-turbo",
+			Priority: 3,
+		})
+	}
+
+	// Add Anthropic if available
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		chainProviders = append(chainProviders, ai.ChainProvider{
+			Provider: "anthropic",
+			Model:    "claude-3-sonnet",
+			Priority: 4,
+		})
+	}
+
+	if len(chainProviders) > 0 {
+		// Create chain client for automatic failover
+		chainClient, err := ai.NewChainClient(
+			ai.WithProviderChain(chainProviders),
+		)
+		if err == nil {
+			log.Printf("🔗 Chain client configured with %d providers for automatic failover", len(chainProviders))
+			// Store chain client as primary if no individual clients configured
+			if s.primaryClient == nil {
+				s.primaryClient = chainClient
+			}
+		}
+	}
+
+	// Auto-detect if nothing configured
 	if s.primaryClient == nil && s.fallbackClient == nil && s.secondaryClient == nil {
 		client, err := ai.NewClient() // Auto-detects from environment
 		if err != nil {
 			return fmt.Errorf("no AI providers available: %w", err)
 		}
 		s.primaryClient = client
-		log.Println("✅ Auto-detected AI provider configured")
+		log.Println("Auto-detected AI provider configured")
 	}
 
 	return nil
@@ -150,6 +222,15 @@ func (s *MultiProviderService) registerCapabilities() {
 			InputTypes:  []string{"json"},
 			OutputTypes: []string{"json"},
 			Handler:     s.handleProviderHealth,
+		})
+
+		// NEW CAPABILITY: Demonstrate provider aliases and chain client
+		s.BaseTool.RegisterCapability(core.Capability{
+			Name:        "test_provider_aliases",
+			Description: "Test the new provider alias and model alias features",
+			InputTypes:  []string{"json"},
+			OutputTypes: []string{"json"},
+			Handler:     s.handleTestProviderAliases,
 		})
 	}
 
@@ -373,6 +454,106 @@ func (s *MultiProviderService) handleIntelligentRouting(w http.ResponseWriter, r
 	json.NewEncoder(w).Encode(response)
 }
 
+// handleTestProviderAliases demonstrates the new provider alias features
+func (s *MultiProviderService) handleTestProviderAliases(w http.ResponseWriter, r *http.Request) {
+	var req AIRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request format", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	results := make(map[string]interface{})
+
+	// Test 1: Create a client with Groq provider alias
+	if os.Getenv("GROQ_API_KEY") != "" {
+		groqClient, err := ai.NewClient(
+			ai.WithProviderAlias("openai.groq"),
+			ai.WithModel("fast"), // Model alias
+		)
+		if err == nil {
+			resp, err := groqClient.GenerateResponse(ctx, "Say 'Groq works with provider alias!'", &core.AIOptions{
+				MaxTokens: 50,
+			})
+			if err == nil {
+				results["groq_alias"] = map[string]interface{}{
+					"success": true,
+					"content": resp.Content,
+					"model":   resp.Model,
+				}
+			} else {
+				results["groq_alias"] = map[string]interface{}{
+					"success": false,
+					"error":   err.Error(),
+				}
+			}
+		}
+	}
+
+	// Test 2: Create a client with DeepSeek provider alias
+	if os.Getenv("DEEPSEEK_API_KEY") != "" {
+		deepseekClient, err := ai.NewClient(
+			ai.WithProviderAlias("openai.deepseek"),
+			ai.WithModel("smart"), // Model alias resolves to deepseek-reasoner
+		)
+		if err == nil {
+			resp, err := deepseekClient.GenerateResponse(ctx, "Say 'DeepSeek works with model aliases!'", &core.AIOptions{
+				MaxTokens: 50,
+			})
+			if err == nil {
+				results["deepseek_alias"] = map[string]interface{}{
+					"success": true,
+					"content": resp.Content,
+					"model":   resp.Model,
+				}
+			} else {
+				results["deepseek_alias"] = map[string]interface{}{
+					"success": false,
+					"error":   err.Error(),
+				}
+			}
+		}
+	}
+
+	// Test 3: Create and test chain client with automatic failover
+	chainProviders := []ai.ChainProvider{
+		{ProviderAlias: "openai.groq", Model: "fast", Priority: 1},
+		{ProviderAlias: "openai.deepseek", Model: "smart", Priority: 2},
+		{Provider: "openai", Model: "gpt-3.5-turbo", Priority: 3},
+	}
+
+	chainClient, err := ai.NewChainClient(
+		ai.WithProviderChain(chainProviders),
+	)
+	if err == nil {
+		resp, err := chainClient.GenerateResponse(ctx, "Say 'Chain client with automatic failover works!'", &core.AIOptions{
+			MaxTokens: 50,
+		})
+		if err == nil {
+			results["chain_client"] = map[string]interface{}{
+				"success":   true,
+				"content":   resp.Content,
+				"model":     resp.Model,
+				"providers": len(chainProviders),
+			}
+		} else {
+			results["chain_client"] = map[string]interface{}{
+				"success": false,
+				"error":   err.Error(),
+			}
+		}
+	}
+
+	response := AIResponse{
+		Results:   results,
+		Success:   true,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // handleProviderOrchestration coordinates multiple providers for complex tasks
 func (s *MultiProviderService) handleProviderOrchestration(w http.ResponseWriter, r *http.Request) {
 	var req AIRequest
@@ -453,7 +634,7 @@ func main() {
 		}
 		
 		toolPort := getIntEnvOrDefault("TOOL_PORT", 8085)
-		log.Printf("🚀 Multi-Provider AI Tool starting on port %d", toolPort)
+		log.Printf("Multi-Provider AI Tool starting on port %d", toolPort)
 		log.Fatal(service.BaseTool.Start(ctx, toolPort))
 
 	case "agent":
@@ -463,7 +644,7 @@ func main() {
 		}
 		
 		agentPort := getIntEnvOrDefault("AGENT_PORT", 8086)
-		log.Printf("🚀 Multi-Provider AI Agent starting on port %d", agentPort)
+		log.Printf("Multi-Provider AI Agent starting on port %d", agentPort)
 		log.Fatal(service.BaseAgent.Start(ctx, agentPort))
 
 	case "both":
@@ -475,7 +656,7 @@ func main() {
 				log.Fatalf("Tool initialization failed: %v", err)
 			}
 			toolPort := getIntEnvOrDefault("TOOL_PORT", 8085)
-			log.Printf("🚀 Multi-Provider AI Tool starting on port %d", toolPort)
+			log.Printf("Multi-Provider AI Tool starting on port %d", toolPort)
 			log.Fatal(service.BaseTool.Start(ctx, toolPort))
 		}()
 
@@ -484,7 +665,7 @@ func main() {
 			log.Fatalf("Agent initialization failed: %v", err)
 		}
 		agentPort := getIntEnvOrDefault("AGENT_PORT", 8086)
-		log.Printf("🚀 Multi-Provider AI Agent starting on port %d", agentPort)
+		log.Printf("Multi-Provider AI Agent starting on port %d", agentPort)
 		log.Fatal(service.BaseAgent.Start(ctx, agentPort))
 
 	default:

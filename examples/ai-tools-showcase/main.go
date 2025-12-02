@@ -66,28 +66,28 @@ func NewAIToolsShowcase() (*AIToolsShowcase, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create translation tool: %w", err)
 	}
-	log.Println("✅ Translation Tool created successfully")
+	log.Println("Translation Tool created successfully")
 
 	// Summarization Tool - Intelligent text summarization and key point extraction
 	summarizationTool, err := ai.NewSummarizationTool(apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create summarization tool: %w", err)
 	}
-	log.Println("✅ Summarization Tool created successfully")
+	log.Println("Summarization Tool created successfully")
 
 	// Sentiment Analysis Tool - Emotion and tone analysis with confidence scoring
 	sentimentTool, err := ai.NewSentimentAnalysisTool(apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sentiment analysis tool: %w", err)
 	}
-	log.Println("✅ Sentiment Analysis Tool created successfully")
+	log.Println("Sentiment Analysis Tool created successfully")
 
 	// Code Review Tool - AI-powered code quality, security, and best practice analysis
 	codeReviewTool, err := ai.NewCodeReviewTool(apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create code review tool: %w", err)
 	}
-	log.Println("✅ Code Review Tool created successfully")
+	log.Println("Code Review Tool created successfully")
 
 	// Step 3: Create a composite tool that aggregates all AI tool capabilities
 	// This allows deploying all tools as a single service
@@ -150,7 +150,7 @@ func (a *AIToolsShowcase) DeployAsComposite(port int) error {
 		return fmt.Errorf("failed to create composite framework: %w", err)
 	}
 
-	log.Printf("🚀 AI Tools Composite Service starting on port %d...", port)
+	log.Printf("AI Tools Composite Service starting on port %d...", port)
 	log.Println("🔧 Available AI capabilities (all tools in one service):")
 	log.Println("   - POST /ai/translate                  (Translation)")
 	log.Println("   - POST /ai/summarize                  (Summarization)")
@@ -212,7 +212,7 @@ func (a *AIToolsShowcase) DeployIndividually(basePort int) error {
 			a.frameworks = append(a.frameworks, framework)
 			a.mu.Unlock()
 
-			log.Printf("🚀 %s starting on port %d...", name, port)
+			log.Printf("%s starting on port %d...", name, port)
 			
 			ctx := context.Background()
 			if err := framework.Run(ctx); err != nil {
@@ -227,7 +227,7 @@ func (a *AIToolsShowcase) DeployIndividually(basePort int) error {
 		return err
 	default:
 		// All services started successfully
-		log.Println("✅ All AI tools deployed individually:")
+		log.Println("All AI tools deployed individually:")
 		log.Printf("   Translation Tool:    http://localhost:%d", basePort)
 		log.Printf("   Summarization Tool:  http://localhost:%d", basePort+1)
 		log.Printf("   Sentiment Tool:      http://localhost:%d", basePort+2)

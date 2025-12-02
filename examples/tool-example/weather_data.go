@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 // OpenWeatherMap API response structure
@@ -105,8 +107,9 @@ func (w *WeatherTool) fetchRealWeatherData(ctx context.Context, location, units 
 	return result, nil
 }
 
-// simulateWeatherData creates realistic weather data for demo purposes (fallback)
-// Used when API key is not configured
+// simulateWeatherData creates realistic weather data for demo purposes
+// NOTE: This is ONLY used for forecast endpoint which doesn't have a real API yet
+// Current weather endpoint returns errors instead of simulated data
 func (w *WeatherTool) simulateWeatherData(location, requestType string) WeatherResponse {
 	// Simulate different weather based on location
 	baseTemp := 20.0
@@ -132,3 +135,76 @@ func (w *WeatherTool) simulateWeatherData(location, requestType string) WeatherR
 		Source:      "weather-service-v1.0 (simulated)",
 	}
 }
+
+// classifyError analyzes an API error and returns a structured core.ToolError
+// This enables agents to understand errors and potentially fix/retry
+func (w *WeatherTool) classifyError(err error, location string) *core.ToolError {
+	errStr := err.Error()
+
+	// Handle "city not found" (404)
+	if strings.Contains(errStr, "city not found") || strings.Contains(errStr, "404") {
+		return &core.ToolError{
+			Code:      ErrCodeLocationNotFound,
+			Message:   fmt.Sprintf("Location '%s' not found in weather database", location),
+			Category:  core.CategoryNotFound,
+			Retryable: true,
+			Details: map[string]string{
+				"original_location": location,
+				"api_error":         errStr,
+				"hint":              "OpenWeatherMap expects 'City, Country' format (e.g., 'London, UK')",
+			},
+		}
+	}
+
+	// Handle API key issues (401)
+	if strings.Contains(errStr, "401") || strings.Contains(errStr, "Invalid API key") {
+		return &core.ToolError{
+			Code:      ErrCodeAPIKeyInvalid,
+			Message:   "Weather API authentication failed - invalid API key",
+			Category:  core.CategoryAuthError,
+			Retryable: false,
+			Details: map[string]string{
+				"api_error": errStr,
+			},
+		}
+	}
+
+	// Handle API key not configured
+	if strings.Contains(errStr, "not configured") {
+		return &core.ToolError{
+			Code:      ErrCodeAPIKeyMissing,
+			Message:   "Weather API key not configured on server",
+			Category:  core.CategoryAuthError,
+			Retryable: false,
+			Details: map[string]string{
+				"api_error": errStr,
+			},
+		}
+	}
+
+	// Handle rate limiting (429)
+	if strings.Contains(errStr, "429") || strings.Contains(errStr, "rate limit") {
+		return &core.ToolError{
+			Code:      ErrCodeRateLimitExceeded,
+			Message:   "Weather API rate limit exceeded - please try again later",
+			Category:  core.CategoryRateLimit,
+			Retryable: true,
+			Details: map[string]string{
+				"api_error":   errStr,
+				"retry_after": "60s",
+			},
+		}
+	}
+
+	// Default: service error
+	return &core.ToolError{
+		Code:      ErrCodeServiceUnavailable,
+		Message:   "Weather service temporarily unavailable",
+		Category:  core.CategoryServiceError,
+		Retryable: true,
+		Details: map[string]string{
+			"original_error": errStr,
+		},
+	}
+}
+

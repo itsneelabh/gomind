@@ -531,7 +531,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # Production Configuration
 export GOMIND_LOG_LEVEL="info"            # info, debug, error
 export GOMIND_LOG_FORMAT="json"           # json for structured logging
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4318"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector.gomind-examples:4318"
 ```
 
 ### Framework Options (v0.6.4+ Pattern)
