@@ -1,0 +1,179 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grocery-tool
+  namespace: gomind-examples
+  labels:
+    app: grocery-tool
+    component: tool
+    version: v1.0.0
+    gomind.framework/type: tool
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grocery-tool
+  template:
+    metadata:
+      labels:
+        app: grocery-tool
+        component: tool
+        version: v1.0.0
+        gomind.framework/type: tool
+      annotations:
+        # Uses OTLP push-based telemetry, not Prometheus pull scraping
+        prometheus.io/scrape: "false"
+    spec:
+      containers:
+      - name: grocery-tool
+        image: grocery-tool:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8083
+          name: http
+          protocol: TCP
+        env:
+        # Grocery Store API URL (error injection controlled there)
+        - name: GROCERY_API_URL
+          value: "http://grocery-store-api.gomind-examples.svc.cluster.local"
+        - name: GOMIND_AGENT_NAME
+          value: "grocery-service"
+        - name: PORT
+          value: "8083"
+        - name: GOMIND_PORT
+          value: "8083"
+        - name: GOMIND_NAMESPACE
+          value: "gomind-examples"
+        - name: REDIS_URL
+          value: "redis://redis.gomind-examples:6379"
+        - name: GOMIND_REDIS_URL
+          value: "redis://redis.gomind-examples:6379"
+        # Redis Registration Resilience (handles Redis startup race conditions)
+        - name: GOMIND_DISCOVERY_RETRY
+          value: "true"
+        - name: GOMIND_DISCOVERY_RETRY_INTERVAL
+          value: "30s"
+        - name: GOMIND_DEV_MODE
+          value: "false"
+        # Logging Configuration (change to debug for troubleshooting)
+        - name: GOMIND_LOG_LEVEL
+          value: "info"
+        - name: GOMIND_LOG_FORMAT
+          value: "json"
+        # Kubernetes Service Discovery Configuration
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "grocery-tool-service"
+        - name: GOMIND_K8S_SERVICE_PORT
+          value: "80"
+        - name: GOMIND_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: GOMIND_K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: GOMIND_K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        # Telemetry Configuration
+        - name: APP_ENV
+          value: "development"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.gomind-examples:4318"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8083
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/capabilities
+            port: 8083
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 1001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grocery-tool-service
+  namespace: gomind-examples
+  labels:
+    app: grocery-tool
+    component: tool
+    gomind.framework/type: tool
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8083
+    protocol: TCP
+    name: http
+  selector:
+    app: grocery-tool
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grocery-tool-config
+  namespace: gomind-examples
+  labels:
+    app: grocery-tool
+    component: tool
+data:
+  config.yaml: |
+    service:
+      name: grocery-service
+      port: 8083
+      namespace: gomind-examples
+    backend:
+      api_url: http://grocery-store-api.gomind-examples.svc.cluster.local
+      description: |
+        The grocery-tool proxies requests to the grocery-store-api.
+        Error injection is controlled at the API level via admin endpoints.
+    discovery:
+      enabled: true
+      provider: redis
+      redis_url: redis://redis.gomind-examples:6379
+    logging:
+      level: info
+      format: json
+    cors:
+      enabled: true
+      origins: ["*"]
+    error_injection:
+      description: |
+        Error injection is controlled via the grocery-store-api admin endpoints:
+        - POST /admin/inject-error - Configure error mode
+        - GET  /admin/status       - View current config
+        - POST /admin/reset        - Reset to normal mode
+      modes:
+        - normal: All requests succeed
+        - rate_limit: Return 429 after N requests
+        - server_error: Return 500 with probability

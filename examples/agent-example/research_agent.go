@@ -70,12 +70,13 @@ type ResearchResponse struct {
 // ToolResult represents the result from a single tool call.
 // For multi-entity queries, there will be one result per entity.
 type ToolResult struct {
-	ToolName   string      `json:"tool_name"`  // Name of the tool that was called
-	Capability string      `json:"capability"` // Specific capability used
-	Data       interface{} `json:"data"`       // Tool-specific response data
-	Success    bool        `json:"success"`    // Whether the call succeeded
-	Error      string      `json:"error,omitempty"` // Error message if failed
-	Duration   string      `json:"duration"`   // Time taken for this call
+	ToolName        string          `json:"tool_name"`                  // Name of the tool that was called
+	Capability      string          `json:"capability"`                 // Specific capability used
+	Data            interface{}     `json:"data"`                       // Tool-specific response data
+	Success         bool            `json:"success"`                    // Whether the call succeeded
+	Error           string          `json:"error,omitempty"`            // Error message if failed
+	StructuredError *core.ToolError `json:"structured_error,omitempty"` // Structured error from tool (if available)
+	Duration        string          `json:"duration"`                   // Time taken for this call
 }
 
 // NewResearchAgent creates a new AI-powered research assistant

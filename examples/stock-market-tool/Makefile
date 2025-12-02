@@ -4,7 +4,7 @@
 .PHONY: all help setup deploy test clean logs status
 
 # Variables
-CLUSTER_NAME := gomind-demo
+CLUSTER_NAME := gomind-demo-$(shell whoami)
 NAMESPACE := gomind-examples
 APP_NAME := stock-tool
 IMAGE_NAME := $(APP_NAME):latest

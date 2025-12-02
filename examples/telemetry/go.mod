@@ -2,16 +2,9 @@ module telemetry-example
 
 go 1.25
 
-// Use local development versions
-replace github.com/itsneelabh/gomind/core => ../../core
-
-replace github.com/itsneelabh/gomind/resilience => ../../resilience
-
-replace github.com/itsneelabh/gomind/telemetry => ../../telemetry
-
 require (
-	github.com/itsneelabh/gomind/resilience v0.0.0-00010101000000-000000000000
-	github.com/itsneelabh/gomind/telemetry v0.0.0-20250905161748-22c67e70265c
+	github.com/itsneelabh/gomind/resilience v0.6.7
+	github.com/itsneelabh/gomind/telemetry v0.6.7
 )
 
 require (

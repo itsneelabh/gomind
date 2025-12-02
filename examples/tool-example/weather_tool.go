@@ -31,6 +31,16 @@ type WeatherResponse struct {
 	Source      string  `json:"source"`
 }
 
+// Error codes for weather tool (tool-specific codes within standard core.ErrorCategory)
+const (
+	ErrCodeLocationNotFound   = "LOCATION_NOT_FOUND"
+	ErrCodeAPIKeyMissing      = "API_KEY_MISSING"
+	ErrCodeAPIKeyInvalid      = "API_KEY_INVALID"
+	ErrCodeRateLimitExceeded  = "RATE_LIMIT_EXCEEDED"
+	ErrCodeServiceUnavailable = "SERVICE_UNAVAILABLE"
+	ErrCodeInvalidRequest     = "INVALID_REQUEST"
+)
+
 // NewWeatherTool creates a new weather analysis tool
 func NewWeatherTool() *WeatherTool {
 	tool := &WeatherTool{

@@ -88,7 +88,7 @@ spec:
               fieldPath: spec.nodeName
         # Telemetry Configuration
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: "http://otel-collector:4318"
+          value: "http://otel-collector.gomind-examples:4318"
         # AI Provider Configuration
         - name: OPENAI_API_KEY
           valueFrom:
@@ -194,7 +194,7 @@ metadata:
     component: agent
 data:
   # Direct key for environment variable reference
-  redis_url: "redis://redis.default.svc.cluster.local:6379"
+  redis_url: "redis://redis.gomind-examples:6379"
   # Full configuration file
   config.yaml: |
     service:
@@ -204,7 +204,7 @@ data:
     discovery:
       enabled: true
       provider: redis
-      redis_url: redis://redis.default.svc.cluster.local:6379
+      redis_url: redis://redis.gomind-examples:6379
       cache_enabled: true
     ai:
       auto_detect: true

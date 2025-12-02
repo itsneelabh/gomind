@@ -20,7 +20,7 @@ WORKDIR /app/examples/ai-multi-provider
 RUN go mod download
 
 # Build the multi-provider AI binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o multi-provider-ai .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o multi-provider-ai main.go
 
 # Final stage
 FROM alpine:3.18

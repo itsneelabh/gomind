@@ -19,8 +19,8 @@ data:
   PORT: "8092"
   NAMESPACE: "gomind-examples"
 
-  # Telemetry configuration (points to default namespace)
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.default:4318"
+  # Telemetry configuration (points to gomind-examples namespace)
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.gomind-examples:4318"
 
   # Framework configuration
   DEV_MODE: "false"
@@ -84,7 +84,7 @@ spec:
         # Additional environment variables
         env:
         - name: REDIS_URL
-          value: "redis://redis.default:6379"
+          value: "redis://redis.gomind-examples:6379"
         # K8s service discovery configuration (CRITICAL for proper registration)
         - name: GOMIND_K8S_SERVICE_NAME
           value: "research-agent-telemetry"

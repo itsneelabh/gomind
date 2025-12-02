@@ -2,6 +2,53 @@
 
 Complete, production-ready examples demonstrating AI-enhanced distributed systems with the GoMind framework. Optimized for local development with Kind and cloud deployment on any Kubernetes platform.
 
+---
+
+## 📑 Table of Contents
+
+### Getting Started
+- [📦 Available Examples](#-available-examples) - Browse all examples by complexity
+- [🚀 Quick Start](#-quick-start) - Get running in 5 minutes
+- [🧪 Test the System](#-test-the-system) - Verify your setup works
+- [🔧 Individual Example Usage](#-individual-example-usage) - Run examples locally
+- [🔑 API Key Configuration](#-api-key-configuration) - Set up AI providers
+
+### Deployment
+- [☸️ Kubernetes Deployment](#️-kubernetes-deployment) - Local (Kind) and cloud
+- [📋 Detailed Example Features](#-detailed-example-features) - What each example demonstrates
+- [🏗️ System Architecture](#️-system-architecture) - How components interact
+
+### Operations
+- [📊 Monitoring & Observability](#-monitoring--observability) - Metrics, logs, traces
+- [🚨 Troubleshooting](#-troubleshooting) - Common issues and solutions
+- [🐛 Debugging & Troubleshooting](#-debugging--troubleshooting) - Debug logging guide
+- [🧹 Cleanup](#-cleanup) - Remove deployed resources
+
+### Development
+- [🎨 Development Workflow](#-development-workflow) - Build tools, agents, and workflows
+- [📚 Learning Progression](#-learning-progression) - Structured learning paths
+- [🏗️ Building Your Own Examples](#️-building-your-own-examples) - **Best practices and patterns**
+  - [🎯 Workspace Independence](#-the-foundation-workspace-independence) - Most important rule
+  - [📁 File Structure](#-file-structure) - How to organize your code
+  - [⚙️ Configuration](#️-configuration-best-practices) - Environment-first config
+  - [🏷️ Naming Conventions](#️-naming-conventions) - Consistent naming
+  - [🎯 Capability Registration](#-capability-registration) - With Phase 2 hints
+  - [🔧 Main Function Structure](#-main-function-structure) - Standard pattern
+  - [🎨 Emoji Logging](#-emoji-logging) - Visual clarity
+  - [🛡️ Error Handling](#️-error-handling) - Graceful degradation
+  - [🐳 Docker Best Practices](#-docker-best-practices) - Multi-stage builds
+  - [☸️ Kubernetes Patterns](#️-kubernetes-patterns) - K8s manifests
+  - [📋 Required Supporting Files](#-required-supporting-files) - Checklist
+  - [🔍 Tool vs Agent Distinctions](#-tool-vs-agent-distinctions) - When to use what
+  - [✅ Pre-Commit Checklist](#-pre-commit-checklist) - Verify before commit
+  - [🤖 AI Coding Assistant Tips](#-ai-coding-assistant-tips) - Prompts for AI
+
+### Resources
+- [📚 Next Steps](#-next-steps) - Your journey from learning to deployment
+- [📖 Documentation](#-documentation) - Additional guides and references
+
+---
+
 ## 📦 Available Examples
 
 ### 🎯 Quick Reference - Start Here
@@ -721,14 +768,443 @@ kind delete cluster --name gomind-demo
 **"I want to understand the framework patterns"**
 → `tool-example` → `agent-example` → `context_propagation`
 
+## 🏗️ Building Your Own Examples
+
+Want to create your own tools and agents? Follow these battle-tested patterns learned from all existing examples.
+
+### 🎯 The Foundation: Workspace Independence
+
+**Most Important Rule:** Every example must work standalone - no dependencies on framework source code.
+
+**Why this matters:**
+- Examples are production-ready templates users can copy
+- Docker builds work without framework source
+- Examples can be moved to separate GitHub repos
+- Shows real-world usage patterns
+
+**How it works:**
+```go
+// ✅ Every example's go.mod looks like this
+module github.com/itsneelabh/gomind/examples/your-example
+
+go 1.25
+
+require github.com/itsneelabh/gomind/core v0.6.4  // Fetches from GitHub
+
+// NO replace directives
+// NO workspace references
+```
+
+**Testing standalone builds:**
+```bash
+# Copy example anywhere and it should build
+cp -r examples/your-example /tmp/test
+cd /tmp/test
+go build .  # Should work immediately!
+```
+
+**Getting the latest framework version:**
+```bash
+# Check latest release at https://github.com/itsneelabh/gomind/tags
+# Or via command:
+git tag --sort=-v:refname | head -1
+
+# Update your example
+cd examples/your-example
+go get github.com/itsneelabh/gomind/core@v0.6.4  # Use actual latest
+go mod tidy
+```
+
+---
+
+### 📁 File Structure
+
+**Tools use 4 focused files:**
+```
+your-tool/
+├── main.go              (100-170 lines)  → Lifecycle only
+├── {domain}_tool.go     (150-300 lines)  → Component definition
+├── handlers.go          (150-400 lines)  → HTTP layer
+└── {domain}_data.go     (100-250 lines)  → Business logic
+```
+
+**Agents use 4 focused files:**
+```
+your-agent/
+├── main.go              (150-200 lines)  → Lifecycle only
+├── {domain}_agent.go    (250-350 lines)  → Agent definition
+├── handlers.go          (350-450 lines)  → HTTP + coordination
+└── orchestration.go     (500-1000 lines) → Complex workflows
+```
+
+**File responsibilities:**
+- **main.go** - Configuration, framework setup, graceful shutdown. NO business logic.
+- **{type}.go** - Struct definition, capability registration, types
+- **handlers.go** - HTTP request/response handling
+- **{logic}.go** - Business logic, API calls, orchestration
+
+**Keep it focused:** Aim for <200 lines per file when possible (orchestration.go is the exception).
+
+---
+
+### ⚙️ Configuration Best Practices
+
+**Always use environment variables** - never hardcode values:
+
+```go
+// ✅ GOOD - Environment-based
+func main() {
+    if err := validateConfig(); err != nil {  // Validate FIRST
+        log.Fatalf("Configuration error: %v", err)
+    }
+
+    framework, _ := core.NewFramework(component,
+        core.WithPort(getPortFromEnv()),         // From PORT env var
+        core.WithRedisURL(os.Getenv("REDIS_URL")),  // Required
+        core.WithNamespace(os.Getenv("NAMESPACE")), // Optional
+    )
+}
+
+func validateConfig() error {
+    redisURL := os.Getenv("REDIS_URL")
+    if redisURL == "" {
+        return fmt.Errorf("REDIS_URL environment variable required")
+    }
+    // Validate format, etc.
+    return nil
+}
+
+// ❌ BAD - Hardcoded
+core.WithPort(8080)  // Don't do this!
+```
+
+**Required files:**
+- `.env.example` - Documents all environment variables with examples
+- `validateConfig()` - Checks required config at startup
+
+---
+
+### 🏷️ Naming Conventions
+
+**Be consistent** - it helps developers (and AI) understand your code:
+
+| What | Tool Pattern | Agent Pattern | Example |
+|------|-------------|---------------|---------|
+| Struct | `{Domain}Tool` | `{Domain}Agent` | `WeatherTool`, `ResearchAgent` |
+| Constructor | `New{Domain}Tool()` | `New{Domain}Agent()` | `NewWeatherTool()` |
+| Service Name | `{domain}-service` | `{domain}-assistant` | `weather-service`, `research-assistant` |
+| Port Range | 808X | 809X | Tools: 8080-8089, Agents: 8090-8099 |
+
+**Port allocation:**
+```
+Tools (808X):
+├── 8080 - weather-service
+├── 8082 - stock-service
+└── 8083-8089 - Available
+
+Agents (809X):
+├── 8090 - research-assistant
+├── 8091 - research-assistant-enhanced
+└── 8092-8099 - Available
+```
+
+---
+
+### 🎯 Capability Registration
+
+**Always include Phase 2 field hints** for AI accuracy:
+
+```go
+tool.RegisterCapability(core.Capability{
+    Name:        "current_weather",
+    Description: "Gets current weather conditions for a location",
+    InputTypes:  []string{"json"},
+    OutputTypes: []string{"json"},
+    Handler:     w.handleCurrentWeather,
+
+    // IMPORTANT: Include field hints for AI payload generation
+    InputSummary: &core.SchemaSummary{
+        RequiredFields: []core.FieldHint{
+            {
+                Name:        "location",
+                Type:        "string",
+                Example:     "London",
+                Description: "City name or coordinates",
+            },
+        },
+        OptionalFields: []core.FieldHint{
+            {
+                Name:        "units",
+                Type:        "string",
+                Example:     "metric",
+                Description: "metric or imperial",
+            },
+        },
+    },
+})
+```
+
+---
+
+### 🔧 Main Function Structure
+
+**Every example follows this exact pattern:**
+
+```go
+func main() {
+    // 1. Validate configuration (fail fast)
+    if err := validateConfig(); err != nil {
+        log.Fatalf("Configuration error: %v", err)
+    }
+
+    // 2. Create component
+    component := NewYourComponent()
+
+    // 3. Get port from environment
+    port := 8080 // default
+    if portStr := os.Getenv("PORT"); portStr != "" {
+        if p, err := strconv.Atoi(portStr); err == nil {
+            port = p
+        }
+    }
+
+    // 4. Create framework
+    framework, err := core.NewFramework(component,
+        core.WithPort(port),
+        core.WithRedisURL(os.Getenv("REDIS_URL")),
+        core.WithDiscovery(true, "redis"),
+        core.WithCORS([]string{"*"}, true),
+    )
+
+    // 5. Display startup info (with emojis!)
+    log.Println("🚀 Service Starting...")
+    log.Printf("🌐 Port: %d\n", port)
+
+    // 6. Graceful shutdown (30s timeout)
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+    go func() {
+        <-sigChan
+        log.Println("\n⚠️  Shutting down gracefully...")
+        shutdownCtx, shutdownCancel := context.WithTimeout(
+            context.Background(), 30*time.Second)
+        defer shutdownCancel()
+        cancel()
+        // ... shutdown logic
+    }()
+
+    // 7. Run framework
+    if err := framework.Run(ctx); err != nil &&
+       !errors.Is(err, context.Canceled) {
+        log.Fatalf("Framework error: %v", err)
+    }
+}
+```
+
+---
+
+### 🎨 Emoji Logging
+
+**Use emojis for visual clarity** (makes logs easier to scan):
+
+```go
+// Startup
+log.Println("🌤️  Weather Tool Service Starting...")
+log.Println("🤖 Research Agent Starting...")
+
+// Success
+log.Println("✅ Shutdown completed")
+
+// Warning
+log.Println("⚠️  Warning: API key not set - using mock data")
+
+// Error
+log.Println("❌ Configuration error")
+
+// Info
+log.Printf("🌐 Server Port: %d\n", port)
+log.Println("📋 Registered endpoints...")
+```
+
+---
+
+### 🛡️ Error Handling
+
+**Graceful degradation** - warn for optional features, fail for required:
+
+```go
+// ✅ GOOD - Warn but continue for optional features
+func NewWeatherTool() *WeatherTool {
+    apiKey := os.Getenv("WEATHER_API_KEY")
+    if apiKey == "" {
+        log.Println("⚠️  Warning: WEATHER_API_KEY not set - using mock data")
+    }
+    // Continue - tool still works with mock data
+}
+
+// ✅ GOOD - Fail fast for required features
+func validateConfig() error {
+    redisURL := os.Getenv("REDIS_URL")
+    if redisURL == "" {
+        return fmt.Errorf("REDIS_URL environment variable required")
+    }
+    return nil
+}
+```
+
+---
+
+### 🐳 Docker Best Practices
+
+**Use multi-stage builds** for small images:
+
+```dockerfile
+# Stage 1: Build
+FROM golang:1.25-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -o service .
+
+# Stage 2: Runtime (results in ~16MB image)
+FROM alpine:latest
+RUN adduser -D -u 1001 appuser
+WORKDIR /app
+COPY --from=builder /app/service .
+RUN chown appuser:appuser /app
+USER appuser
+EXPOSE 8080
+CMD ["./service"]
+```
+
+---
+
+### ☸️ Kubernetes Patterns
+
+**Every example needs:**
+
+1. **ConfigMap** - Non-sensitive config
+2. **Secret** - API keys and credentials
+3. **Deployment** - 2 replicas for HA
+4. **Service** - ClusterIP for internal access
+5. **Health Probes** - Liveness + Readiness
+
+**Resource limits:**
+```yaml
+resources:
+  requests:
+    cpu: "200m"      # Tools
+    memory: "256Mi"
+  limits:
+    cpu: "500m"      # Adjust for agents/AI
+    memory: "512Mi"
+```
+
+---
+
+### 📋 Required Supporting Files
+
+**Every example must have:**
+
+- `README.md` - Comprehensive documentation
+- `Dockerfile` - Container build
+- `k8-deployment.yaml` - Kubernetes manifests
+- `Makefile` - Automation (setup, deploy, test, clean)
+- `.env.example` - Configuration template
+- `.gitignore` - Exclude binaries, .env, etc.
+- `go.mod` - With versioned framework dependency
+- `go.sum` - Checksums
+
+---
+
+### 🔍 Tool vs Agent Distinctions
+
+**Tools (Passive):**
+- Use `core.NewTool()`
+- Can register but NOT discover
+- Provide focused capabilities
+- Lightweight (200m CPU, 256Mi RAM)
+
+**Agents (Active):**
+- Use `core.NewBaseAgent()`
+- Can discover AND register
+- Orchestrate multiple tools
+- More resources (500m CPU, 512Mi RAM)
+
+---
+
+### ✅ Pre-Commit Checklist
+
+Before committing your new example, verify:
+
+**Foundation:**
+- [ ] go.mod has versioned framework dependency (no `replace`)
+- [ ] No go.work file in example directory
+- [ ] Standalone build works: `cp -r . /tmp/test && cd /tmp/test && go build .`
+- [ ] Docker build works without framework source
+
+**Code:**
+- [ ] 4 focused Go files (main, component, handlers, logic)
+- [ ] validateConfig() runs first in main()
+- [ ] All config from environment variables
+- [ ] Phase 2 InputSummary on all capabilities
+- [ ] Emoji logging for visual clarity
+
+**Documentation:**
+- [ ] README.md with quick start (<5 min)
+- [ ] .env.example documents all variables
+- [ ] Architecture diagram (ASCII art is fine)
+- [ ] Troubleshooting section
+
+**Deployment:**
+- [ ] Makefile with setup/deploy/test/clean
+- [ ] Multi-stage Dockerfile
+- [ ] k8-deployment.yaml with 2 replicas
+- [ ] ConfigMap + Secret pattern
+- [ ] Resource limits configured
+
+**Production:**
+- [ ] Graceful degradation for optional features
+- [ ] 30-second shutdown timeout
+- [ ] Health probes configured
+- [ ] Port from correct range (808X or 809X)
+
+---
+
+### 🤖 AI Coding Assistant Tips
+
+When working with AI assistants (Claude, Copilot, etc.), use these prompts:
+
+```
+"Create a new GoMind tool following the 4-file pattern from tool-example"
+
+"Add a capability to {domain}_tool.go with Phase 2 InputSummary"
+
+"Implement the handler in handlers.go for the {capability} capability"
+
+"Update main.go to validate the {CONFIG_VAR} environment variable"
+
+"Add graceful degradation for missing {OPTIONAL_FEATURE}"
+```
+
+**Pro tip:** Mention the specific file name for more focused AI responses.
+
+---
+
 ## 📚 Next Steps
 
 1. **🏃 Run Quick Start** - See the full system (5 min)
 2. **🔍 Pick Your Path** - Choose beginner/AI/advanced based on your needs (15-120 min)
 3. **🧪 Test Interactions** - Agent + Tool orchestration (10 min)
 4. **🎨 Customize** - Copy and modify examples for your use case (30 min)
-5. **☸️ Deploy** - Production Kubernetes deployment (1 hour)
-6. **🤖 Build** - Create your intelligent distributed system
+5. **🏗️ Build Your Own** - Follow patterns above to create new examples (1-2 hours)
+6. **☸️ Deploy** - Production Kubernetes deployment (1 hour)
+7. **🤖 Launch** - Your intelligent distributed system is live!
 
 ## 📖 Documentation
 

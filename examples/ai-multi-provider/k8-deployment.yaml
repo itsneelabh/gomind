@@ -30,7 +30,7 @@ data:
   REDIS_URL: "redis://redis:6379"
 
   # Telemetry Configuration
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.gomind-examples:4318"
   
   # Performance Configuration
   CONCURRENT_REQUESTS: "10"
@@ -100,7 +100,7 @@ spec:
         fsGroup: 1001
       containers:
       - name: multi-provider-ai
-        image: multi-provider-ai-example:latest
+        image: multi-provider-ai:latest
         imagePullPolicy: Always
         ports:
         - name: tool-port
@@ -189,6 +189,29 @@ spec:
             configMapKeyRef:
               name: multi-provider-config
               key: CACHE_RESPONSES
+        # Logging Configuration (change to debug for troubleshooting)
+        - name: GOMIND_LOG_LEVEL
+          value: "info"
+        - name: GOMIND_LOG_FORMAT
+          value: "json"
+        # 🔧 KUBERNETES SERVICE DISCOVERY CONFIGURATION
+        # Tool service (port 8085)
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "multi-provider-tool-service"
+        - name: GOMIND_K8S_SERVICE_PORT
+          value: "80"
+        - name: GOMIND_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: GOMIND_K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: GOMIND_K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
         # Load AI provider secrets (minimum 2 required)
         - name: OPENAI_API_KEY
           valueFrom:

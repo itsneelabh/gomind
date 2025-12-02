@@ -29,7 +29,7 @@ That's exactly what this k8-deployment setup provides for your GoMind applicatio
 |-----------|---------|--------|---------|
 | **Namespace** | Isolated environment for GoMind apps | N/A | N/A |
 | **Redis** | Service discovery registry | `redis:6379` | Persistent volume |
-| **OTEL Collector** | Telemetry aggregation and routing | `otel-collector:4318` | None |
+| **OTEL Collector** | Telemetry aggregation and routing | `otel-collector.gomind-examples:4318` | None |
 | **Prometheus** | Metrics storage and querying | `prometheus:9090` | Persistent volume |
 | **Jaeger** | Distributed tracing | `jaeger-query:16686` | None |
 | **Grafana** | Visualization dashboard | `grafana:3000` | Persistent volume |
@@ -52,7 +52,31 @@ That's exactly what this k8-deployment setup provides for your GoMind applicatio
 
 ### Installation
 
-#### Method 1: One-Command Setup (Easiest!)
+#### Method 1: Intelligent Setup Script (Recommended!)
+
+The setup script checks for existing infrastructure and only deploys what's needed. It **never deletes** existing resources.
+
+```bash
+cd examples/k8-deployment
+
+# Deploy with automatic checks
+./setup-infrastructure.sh
+
+# Check status anytime
+./setup-infrastructure.sh status
+
+# See all options
+./setup-infrastructure.sh help
+```
+
+**Safety Features:**
+- ✅ Checks if services already exist before deploying
+- ✅ Skips deployment if service is healthy and running
+- ✅ Never deletes existing resources
+- ✅ Shows clear status of what's new vs existing
+- ✅ Waits for each component to be ready before proceeding
+
+#### Method 2: One-Command Kustomize (Simple)
 
 ```bash
 # Clone the repository (if not already done)
@@ -64,7 +88,9 @@ kubectl apply -k .
 
 This uses Kustomization to deploy all components in the correct order with proper dependencies.
 
-#### Method 2: Step-by-Step Deployment (For Understanding)
+**Note:** This method doesn't check for existing resources first.
+
+#### Method 3: Step-by-Step Deployment (For Understanding)
 
 ```bash
 # 1. Create the namespace first

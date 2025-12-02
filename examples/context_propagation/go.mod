@@ -2,12 +2,7 @@ module context-propagation-example
 
 go 1.25.0
 
-// Use local development versions
-replace github.com/itsneelabh/gomind/telemetry => ../../telemetry
-
-replace github.com/itsneelabh/gomind/core => ../../core
-
-require github.com/itsneelabh/gomind/telemetry v0.0.0-00010101000000-000000000000
+require github.com/itsneelabh/gomind/telemetry v0.6.7
 
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 // handleCurrentWeather processes current weather requests
@@ -38,30 +40,54 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 	startTime := time.Now()
 	weather, err := w.fetchRealWeatherData(ctx, req.Location, req.Units)
 	apiDuration := time.Since(startTime)
+
+	rw.Header().Set("Content-Type", "application/json")
+
 	if err != nil {
-		// Fallback to simulated data if API fails
-		w.Logger.WarnWithContext(ctx, "Weather API call failed, using simulated data", map[string]interface{}{
+		// Return structured error instead of mock data
+		// This allows agents to understand the error and potentially fix/retry
+		toolErr := w.classifyError(err, req.Location)
+
+		w.Logger.ErrorWithContext(ctx, "Weather API call failed - returning structured error", map[string]interface{}{
 			"error":       err.Error(),
+			"error_code":  toolErr.Code,
+			"category":    toolErr.Category,
+			"retryable":   toolErr.Retryable,
 			"location":    req.Location,
 			"api_latency": apiDuration.String(),
 		})
-		weather = w.simulateWeatherData(req.Location, "current")
-	} else {
-		// Log successful API call
-		w.Logger.InfoWithContext(ctx, "Weather API call successful", map[string]interface{}{
-			"location":    req.Location,
-			"api_latency": apiDuration.String(),
-			"source":      weather.Source,
-		})
+
+		// Return appropriate HTTP status based on error category using core utility
+		statusCode := core.HTTPStatusForCategory(toolErr.Category)
+
+		response := core.ToolResponse{
+			Success: false,
+			Error:   toolErr,
+		}
+
+		rw.WriteHeader(statusCode)
+		json.NewEncoder(rw).Encode(response)
+		return
 	}
+
+	// Log successful API call
+	w.Logger.InfoWithContext(ctx, "Weather API call successful", map[string]interface{}{
+		"location":    req.Location,
+		"api_latency": apiDuration.String(),
+		"source":      weather.Source,
+	})
 
 	// Store in memory for caching (framework auto-injects memory)
 	cacheKey := fmt.Sprintf("current:%s", strings.ToLower(req.Location))
 	cacheData, _ := json.Marshal(weather)
 	w.Memory.Set(ctx, cacheKey, string(cacheData), 5*time.Minute)
 
-	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(weather)
+	// Return success response using core.ToolResponse
+	response := core.ToolResponse{
+		Success: true,
+		Data:    weather,
+	}
+	json.NewEncoder(rw).Encode(response)
 
 	// Log the response data
 	w.Logger.InfoWithContext(ctx, "Current weather request completed", map[string]interface{}{

@@ -3,8 +3,8 @@ module github.com/itsneelabh/gomind/examples/stock-market-tool
 go 1.25
 
 require (
-	github.com/itsneelabh/gomind/core v0.6.6
-	github.com/itsneelabh/gomind/telemetry v0.6.6
+	github.com/itsneelabh/gomind/core v0.6.7
+	github.com/itsneelabh/gomind/telemetry v0.6.7
 )
 
 require (
