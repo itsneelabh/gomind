@@ -457,6 +457,53 @@ cleanup() {
     log_success "Cleanup complete"
 }
 
+# Check if a service is available (local or K8s port-forward)
+check_service_available() {
+    local port=$1
+    local name=$2
+    if nc -z localhost "$port" 2>/dev/null; then
+        log_success "$name already available on port $port"
+        return 0
+    fi
+    return 1
+}
+
+# Check if Redis is available (local, Docker, or K8s)
+check_redis_available() {
+    # Check local Redis
+    if redis-cli ping 2>/dev/null | grep -q PONG; then
+        log_success "Redis available (local)"
+        export REDIS_URL="redis://localhost:6379"
+        return 0
+    fi
+
+    # Check Docker Redis
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q gomind-redis; then
+        log_success "Redis available (Docker: gomind-redis)"
+        export REDIS_URL="redis://localhost:6379"
+        return 0
+    fi
+
+    # Check K8s Redis via port-forward or service
+    if nc -z localhost 6379 2>/dev/null; then
+        log_success "Redis available on port 6379 (existing connection)"
+        export REDIS_URL="redis://localhost:6379"
+        return 0
+    fi
+
+    return 1
+}
+
+# Ensure Redis is available, starting it only if needed
+ensure_redis() {
+    if check_redis_available; then
+        return 0
+    fi
+
+    log_info "Redis not found, starting..."
+    setup_redis
+}
+
 # Run the application
 run_app() {
     echo "Starting Research Agent with Resilience..."
@@ -482,6 +529,78 @@ run_app() {
     export PORT=${PORT:-8093}
 
     ./research-agent-resilience
+}
+
+# Run all components locally (smart - reuses existing infrastructure)
+run_all() {
+    log_info "Starting all components for local development..."
+    echo ""
+
+    # Track what we started (for cleanup on exit)
+    local started_pids=()
+
+    # Trap to cleanup background processes on exit
+    cleanup_local() {
+        echo ""
+        log_info "Shutting down..."
+        for pid in "${started_pids[@]}"; do
+            kill "$pid" 2>/dev/null || true
+        done
+        log_success "All components stopped"
+    }
+    trap cleanup_local EXIT INT TERM
+
+    # 1. Ensure Redis is available
+    ensure_redis
+
+    # 2. Load environment
+    setup_env
+
+    # 3. Build all components
+    build_all
+
+    # 4. Start grocery-store-api if not already running
+    if check_service_available 8081 "grocery-store-api"; then
+        log_info "Using existing grocery-store-api on port 8081"
+    else
+        log_info "Starting grocery-store-api on port 8081..."
+        (cd "$GROCERY_API_DIR" && PORT=8081 ./grocery-store-api) &
+        started_pids+=($!)
+        sleep 2
+    fi
+
+    # 5. Start grocery-tool if not already running
+    if check_service_available 8083 "grocery-tool"; then
+        log_info "Using existing grocery-tool on port 8083"
+    else
+        if [ -f "$GROCERY_TOOL_DIR/grocery-tool" ]; then
+            log_info "Starting grocery-tool on port 8083..."
+            (cd "$GROCERY_TOOL_DIR" && PORT=8083 REDIS_URL="${REDIS_URL:-redis://localhost:6379}" ./grocery-tool) &
+            started_pids+=($!)
+            sleep 2
+        else
+            log_warn "grocery-tool not found, skipping (tool discovery may be limited)"
+        fi
+    fi
+
+    # 6. Verify services are up
+    echo ""
+    log_info "Service Status:"
+    if nc -z localhost 8081 2>/dev/null; then
+        echo "  ✓ grocery-store-api: http://localhost:8081"
+    else
+        echo "  ✗ grocery-store-api: NOT RUNNING"
+    fi
+    if nc -z localhost 8083 2>/dev/null; then
+        echo "  ✓ grocery-tool:      http://localhost:8083"
+    else
+        echo "  - grocery-tool:      NOT RUNNING (optional)"
+    fi
+    echo "  → agent:             http://localhost:8093 (starting...)"
+    echo ""
+
+    # 7. Run the agent in foreground
+    run_app
 }
 
 # Main setup
@@ -512,12 +631,15 @@ Usage: $0 <command>
 
 Local Development Commands:
   setup      Setup the local development environment (default)
-  run        Setup and run the application locally
+  run        Setup and run the agent only (assumes dependencies running)
+  run-all    Build and run ALL components locally (recommended)
+             - Reuses existing Redis/services if available
+             - Starts grocery-store-api + grocery-tool + agent
   redis      Setup Redis only
-  build      Build the application only
+  build      Build the agent only
+  build-all  Build all components (agent + mock-services)
 
 Kubernetes Deployment Commands:
-  build-all  Build all components (agent + mock-services)
   docker     Build Docker images for all components
   deploy     Build, load to Kind, and deploy to Kubernetes
   forward    Set up port forwards to Kubernetes services
@@ -525,7 +647,7 @@ Kubernetes Deployment Commands:
   cleanup    Remove all deployed resources
 
 Examples:
-  $0 run          # Quick start: run locally
+  $0 run-all      # Quick start: run everything locally
   $0 deploy       # Full deployment to Kubernetes
   $0 forward      # Port forward after deployment
   $0 test         # Run resilience test
@@ -539,6 +661,10 @@ case "${1:-setup}" in
         ;;
     run)
         main run
+        ;;
+    run-all)
+        check_prerequisites
+        run_all
         ;;
     redis)
         setup_redis
