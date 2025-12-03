@@ -16,23 +16,55 @@ Building on the foundation of `agent-example`, this example adds:
 
 ## Quick Start
 
-### One-Click Setup
+### Recommended: Run Everything Locally
 
 ```bash
-./setup.sh run
+./setup.sh run-all
 ```
 
-This will:
-1. Check prerequisites (Go, Docker)
-2. Start Redis via Docker
-3. Build the application
-4. Run the agent on port 8093
+This command:
+1. Detects and **reuses** existing infrastructure (Redis, services)
+2. Only starts what's missing
+3. Builds and runs all components:
+   - `grocery-store-api` (port 8081) - Mock API with error injection
+   - `grocery-tool` (port 8083) - GoMind tool wrapper
+   - `research-agent-resilience` (port 8093) - The resilient agent
+
+### All Setup Commands
+
+| Command | Description |
+|---------|-------------|
+| `./setup.sh run-all` | **Recommended** - Build and run everything locally |
+| `./setup.sh run` | Setup and run agent only (assumes dependencies running) |
+| `./setup.sh deploy` | Full Kubernetes deployment |
+| `./setup.sh forward` | Port-forward K8s services to localhost |
+| `./setup.sh test` | Run resilience test scenario |
+| `./setup.sh build-all` | Build all components without running |
+| `./setup.sh cleanup` | Remove all K8s resources |
+
+### Smart Infrastructure Detection
+
+The `run-all` command intelligently detects existing services:
+
+```bash
+# If Redis is already running (local, Docker, or K8s port-forward):
+[SUCCESS] Redis available (Docker: gomind-redis)
+
+# If grocery-store-api is already running:
+[SUCCESS] grocery-store-api already available on port 8081
+[INFO] Using existing grocery-store-api on port 8081
+```
+
+This means you can:
+- Run multiple examples sharing the same Redis
+- Use `./setup.sh forward` first, then `run-all` reuses the K8s services
+- Mix local and K8s deployments seamlessly
 
 ### Manual Setup
 
 ```bash
 # 1. Start Redis (if not running)
-docker run -d -p 6379:6379 redis:7-alpine
+docker run -d --name gomind-redis -p 6379:6379 redis:7-alpine
 
 # 2. Set environment variables
 export REDIS_URL="redis://localhost:6379"
