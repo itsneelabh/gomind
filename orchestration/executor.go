@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
 )
 
 // SmartExecutor handles intelligent execution of routing plans
@@ -27,13 +28,19 @@ type SmartExecutor struct {
 // NewSmartExecutor creates a new smart executor
 func NewSmartExecutor(catalog *AgentCatalog) *SmartExecutor {
 	maxConcurrency := 5
+
+	// Create a traced HTTP client that automatically propagates trace context
+	// to downstream services via W3C TraceContext headers.
+	// This enables distributed tracing across the orchestration workflow.
+	// Per FRAMEWORK_DESIGN_PRINCIPLES.md, orchestration is allowed to import telemetry.
+	tracedClient := telemetry.NewTracedHTTPClient(nil)
+	tracedClient.Timeout = 30 * time.Second
+
 	return &SmartExecutor{
 		catalog:        catalog,
 		maxConcurrency: maxConcurrency,
 		semaphore:      make(chan struct{}, maxConcurrency),
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		httpClient:     tracedClient,
 	}
 }
 
@@ -598,13 +605,15 @@ type SimpleExecutor struct {
 
 // NewExecutor creates a new executor (backward compatibility)
 func NewExecutor() *SimpleExecutor {
+	// Create a traced HTTP client for distributed tracing support
+	tracedClient := telemetry.NewTracedHTTPClient(nil)
+	tracedClient.Timeout = 30 * time.Second
+
 	return &SimpleExecutor{
 		SmartExecutor: &SmartExecutor{
 			maxConcurrency: 5,
 			semaphore:      make(chan struct{}, 5),
-			httpClient: &http.Client{
-				Timeout: 30 * time.Second,
-			},
+			httpClient:     tracedClient,
 		},
 	}
 }

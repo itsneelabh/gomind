@@ -569,7 +569,7 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 	}
 
 	// Create handler with middleware stack
-	// Order: CORS -> Logging -> Recovery -> Handler
+	// Order (innermost to outermost): Handler -> Recovery -> Logging -> CORS -> Custom Middleware
 	var handler http.Handler = t.mux
 
 	// Always wrap with panic recovery middleware (innermost - catches panics from handler)
@@ -578,9 +578,23 @@ func (t *BaseTool) Start(ctx context.Context, port int) error {
 	// Add request/response logging middleware
 	handler = LoggingMiddleware(t.Logger, t.Config.Development.Enabled)(handler)
 
-	// Add CORS middleware if enabled (outermost - handles preflight requests)
+	// Add CORS middleware if enabled
 	if t.Config.HTTP.CORS.Enabled {
 		handler = CORSMiddleware(&t.Config.HTTP.CORS)(handler)
+	}
+
+	// Apply custom middleware (outermost - applied last, executed first)
+	// This enables application-level injection of telemetry middleware (e.g., tracing)
+	// without core importing telemetry - following framework design principles.
+	// Middleware is applied in reverse order so first middleware in the list is outermost.
+	for i := len(t.Config.HTTP.Middleware) - 1; i >= 0; i-- {
+		handler = t.Config.HTTP.Middleware[i](handler)
+	}
+
+	if len(t.Config.HTTP.Middleware) > 0 {
+		t.Logger.Info("Custom middleware applied", map[string]interface{}{
+			"middleware_count": len(t.Config.HTTP.Middleware),
+		})
 	}
 
 	t.server = &http.Server{

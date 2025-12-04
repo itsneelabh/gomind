@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -82,6 +83,18 @@ type HTTPConfig struct {
 	EnableHealthCheck bool          `json:"enable_health_check" env:"GOMIND_HTTP_HEALTH_CHECK" default:"true"`
 	HealthCheckPath   string        `json:"health_check_path" env:"GOMIND_HTTP_HEALTH_PATH" default:"/health"`
 	CORS              CORSConfig    `json:"cors"`
+
+	// Middleware is a list of custom middleware functions to apply to the HTTP handler.
+	// These are applied in order, with the first middleware being the outermost.
+	// This allows applications to inject telemetry middleware (e.g., tracing) without
+	// core importing telemetry - following the framework's modular architecture.
+	//
+	// Example usage:
+	//   core.WithMiddleware(telemetry.TracingMiddleware("my-service"))
+	//
+	// Note: This field is excluded from JSON serialization as middleware functions
+	// cannot be serialized.
+	Middleware []func(http.Handler) http.Handler `json:"-"`
 }
 
 // CORSConfig contains Cross-Origin Resource Sharing (CORS) configuration.
@@ -1028,6 +1041,38 @@ func WithCORSDefaults() Option {
 		c.HTTP.CORS.AllowedMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"}
 		c.HTTP.CORS.AllowedHeaders = []string{"*"}
 		c.HTTP.CORS.AllowCredentials = true
+		return nil
+	}
+}
+
+// WithMiddleware adds custom HTTP middleware to the handler chain.
+// Middleware functions wrap the HTTP handler, with earlier middleware being outermost.
+//
+// This enables application-level injection of telemetry middleware (e.g., tracing)
+// without the core module importing telemetry - following framework design principles.
+//
+// The middleware is applied AFTER the built-in middleware (CORS, Logging, Recovery),
+// making custom middleware the outermost layer in the chain.
+//
+// Example:
+//
+//	// In your tool's main.go, add tracing middleware
+//	framework, _ := core.NewFramework(tool,
+//	    core.WithName("weather-tool"),
+//	    core.WithMiddleware(
+//	        telemetry.TracingMiddleware("weather-tool"),
+//	    ),
+//	)
+//
+// Multiple middleware can be added in a single call - they are applied in order:
+//
+//	core.WithMiddleware(
+//	    telemetry.TracingMiddleware("my-service"),  // Outermost
+//	    myCustomAuthMiddleware,                      // Inner
+//	)
+func WithMiddleware(middleware ...func(http.Handler) http.Handler) Option {
+	return func(c *Config) error {
+		c.HTTP.Middleware = append(c.HTTP.Middleware, middleware...)
 		return nil
 	}
 }
