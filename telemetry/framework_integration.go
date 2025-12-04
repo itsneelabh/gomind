@@ -63,9 +63,23 @@ func (f *FrameworkMetricsRegistry) EmitWithContext(ctx context.Context, name str
 }
 
 // GetBaggage implements core.MetricsRegistry
+// Returns W3C Baggage plus OpenTelemetry trace context (trace_id, span_id) for log correlation.
 func (f *FrameworkMetricsRegistry) GetBaggage(ctx context.Context) map[string]string {
-	// GetBaggage returns Baggage type (map[string]string), so direct conversion works
-	return GetBaggage(ctx)
+	// Start with W3C Baggage (custom key-value pairs)
+	result := GetBaggage(ctx)
+	if result == nil {
+		result = make(map[string]string)
+	}
+
+	// Add OpenTelemetry trace context for log correlation
+	// This enables logs to include trace_id and span_id automatically
+	tc := GetTraceContext(ctx)
+	if tc.TraceID != "" {
+		result["trace_id"] = tc.TraceID
+		result["span_id"] = tc.SpanID
+	}
+
+	return result
 }
 
 // Gauge implements core.MetricsRegistry
