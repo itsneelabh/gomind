@@ -184,12 +184,18 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 	logger.Debug("Setting global OpenTelemetry providers", map[string]interface{}{
 		"trace_provider":  "configured",
 		"metric_provider": "configured",
-		"propagator":      "TraceContext",
+		"propagator":      "TraceContext + Baggage (W3C)",
 	})
 
 	otel.SetTracerProvider(tp)
 	otel.SetMeterProvider(mp)
-	otel.SetTextMapPropagator(propagation.TraceContext{})
+	// Use composite propagator for both trace context and baggage propagation
+	// TraceContext: W3C traceparent/tracestate headers for distributed tracing
+	// Baggage: W3C baggage header for user-defined context propagation
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
 	// Create metric instruments
 	logger.Debug("Initializing metric instruments", map[string]interface{}{
