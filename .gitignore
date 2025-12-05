@@ -64,3 +64,6 @@ __debug_bin
 # Air live reload
 .air.toml
 tmp/DEVELOPER_FRIENDLY_UPDATES.md
+
+# Implementation plans (internal documentation)
+examples/agent-with-telemetry/IMPLEMENTATION_PLAN.md

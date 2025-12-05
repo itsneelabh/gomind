@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
 )
 
 // WorkflowExecutor handles service calls for workflow steps
@@ -25,12 +26,13 @@ type WorkflowHTTPClient struct {
 	httpClient *http.Client
 }
 
-// NewWorkflowHTTPClient creates a new HTTP client for workflows
+// NewWorkflowHTTPClient creates a new HTTP client for workflows.
+// Uses TracedHTTPClient for distributed tracing context propagation.
 func NewWorkflowHTTPClient() *WorkflowHTTPClient {
+	tracedClient := telemetry.NewTracedHTTPClient(nil)
+	tracedClient.Timeout = 30 * time.Second
 	return &WorkflowHTTPClient{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		httpClient: tracedClient,
 	}
 }
 

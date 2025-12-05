@@ -10,8 +10,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	
+
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
 )
 
 // CapabilityProvider defines the interface for providing agent/tool capabilities to the orchestrator
@@ -113,11 +114,13 @@ func NewServiceCapabilityProvider(config *ServiceCapabilityConfig) *ServiceCapab
 		config.Timeout = 30 * time.Second
 	}
 
+	// Use TracedHTTPClient for distributed tracing context propagation
+	tracedClient := telemetry.NewTracedHTTPClient(nil)
+	tracedClient.Timeout = config.Timeout
+
 	return &ServiceCapabilityProvider{
-		endpoint: config.Endpoint,
-		client: &http.Client{
-			Timeout: config.Timeout,
-		},
+		endpoint:       config.Endpoint,
+		client:         tracedClient,
 		timeout:        config.Timeout,
 		topK:           config.TopK,
 		threshold:      config.Threshold,

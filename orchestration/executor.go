@@ -6,12 +6,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
 	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+)
+
+// contextKey is a custom type for context keys to avoid collisions
+type executorContextKey string
+
+// Context keys for step execution
+const (
+	// dependencyResultsKey stores results from dependent steps for template interpolation
+	dependencyResultsKey executorContextKey = "dependency_results"
+)
+
+// Pre-compiled regex patterns for template substitution (performance optimization)
+// Compiling once at package level avoids repeated compilation overhead
+var (
+	// stepOutputTemplatePattern matches {{stepId.fieldPath}} for step output references
+	// Examples: {{geocode.latitude}}, {{weather.data.temp}}
+	stepOutputTemplatePattern = regexp.MustCompile(`\{\{(\w+)\.(\w+(?:\.\w+)*)\}\}`)
 )
 
 // SmartExecutor handles intelligent execution of routing plans
@@ -60,12 +80,23 @@ func (e *SmartExecutor) SetLogger(logger core.Logger) {
 func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
 	startTime := time.Now()
 
+	// Get trace context for log correlation
+	tc := telemetry.GetTraceContext(ctx)
+
+	// Add span event for plan execution start
+	telemetry.AddSpanEvent(ctx, "plan_execution_started",
+		attribute.String("plan_id", plan.PlanID),
+		attribute.Int("step_count", len(plan.Steps)),
+	)
+
 	if e.logger != nil {
 		e.logger.Debug("Starting plan execution", map[string]interface{}{
 			"operation":       "execute_plan",
 			"plan_id":         plan.PlanID,
 			"step_count":      len(plan.Steps),
 			"max_concurrency": e.maxConcurrency,
+			"trace_id":        tc.TraceID,
+			"span_id":         tc.SpanID,
 		})
 	}
 
@@ -254,14 +285,26 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 			failedSteps++
 		}
 	}
+
+	// Add span event for plan execution completion
+	telemetry.AddSpanEvent(ctx, "plan_execution_completed",
+		attribute.String("plan_id", plan.PlanID),
+		attribute.Bool("success", result.Success),
+		attribute.Int("failed_steps", failedSteps),
+		attribute.Int("total_steps", len(plan.Steps)),
+		attribute.Int64("duration_ms", result.TotalDuration.Milliseconds()),
+	)
+
 	if e.logger != nil {
 		e.logger.Info("Plan execution finished", map[string]interface{}{
-			"operation":      "execute_plan_complete",
-			"plan_id":        plan.PlanID,
-			"success":        result.Success,
-			"failed_steps":   failedSteps,
-			"total_steps":    len(plan.Steps),
-			"duration_ms":    result.TotalDuration.Milliseconds(),
+			"operation":    "execute_plan_complete",
+			"plan_id":      plan.PlanID,
+			"success":      result.Success,
+			"failed_steps": failedSteps,
+			"total_steps":  len(plan.Steps),
+			"duration_ms":  result.TotalDuration.Milliseconds(),
+			"trace_id":     tc.TraceID,
+			"span_id":      tc.SpanID,
 		})
 	}
 
@@ -302,31 +345,225 @@ func (e *SmartExecutor) findReadySteps(plan *RoutingPlan, executed map[string]bo
 	return ready
 }
 
-// buildStepContext creates context with dependency results
+// buildStepContext creates context with dependency results for template interpolation
 func (e *SmartExecutor) buildStepContext(ctx context.Context, step RoutingStep, results map[string]*StepResult) context.Context {
-	// Add dependency results to context for reference
-	type contextKey string
-	const dependencyKey contextKey = "dependencies"
-
-	deps := make(map[string]interface{})
+	// Add dependency results to context for template interpolation
+	// The results are stored as parsed JSON so templates like {{stepId.field}} can be resolved
+	deps := make(map[string]map[string]interface{})
 	for _, depID := range step.DependsOn {
-		if result, ok := results[depID]; ok {
-			deps[depID] = result.Response
+		if result, ok := results[depID]; ok && result.Response != "" {
+			// Parse the JSON response to enable field access in templates
+			var parsed map[string]interface{}
+			if err := json.Unmarshal([]byte(result.Response), &parsed); err != nil {
+				// Log parsing failure - this could indicate a non-JSON response from a tool
+				if e.logger != nil {
+					e.logger.Warn("Failed to parse dependency response as JSON for template interpolation", map[string]interface{}{
+						"step_id":      step.StepID,
+						"dependency":   depID,
+						"error":        err.Error(),
+						"response_len": len(result.Response),
+					})
+				}
+				// Continue without this dependency - templates referencing it will be unresolved
+			} else {
+				deps[depID] = parsed
+			}
 		}
 	}
 
-	return context.WithValue(ctx, dependencyKey, deps)
+	return context.WithValue(ctx, dependencyResultsKey, deps)
+}
+
+// interpolateParameters substitutes template placeholders in parameters with values from dependency results.
+// Templates use the format {{stepId.fieldPath}} where:
+//   - stepId: The ID of a dependent step whose result should be used
+//   - fieldPath: Dot-separated path to a field in the step's JSON response (e.g., "latitude" or "data.temp")
+//
+// Example: {"lat": "{{geocode.latitude}}"} becomes {"lat": 35.6762} after geocode step completes
+func (e *SmartExecutor) interpolateParameters(
+	params map[string]interface{},
+	depResults map[string]map[string]interface{},
+) map[string]interface{} {
+	if params == nil {
+		return nil
+	}
+
+	interpolated := make(map[string]interface{})
+	for key, value := range params {
+		if strVal, ok := value.(string); ok {
+			interpolated[key] = e.substituteTemplates(strVal, depResults)
+		} else {
+			interpolated[key] = value
+		}
+	}
+
+	return interpolated
+}
+
+// substituteTemplates replaces template placeholders with actual values from step results.
+// Supports patterns like {{stepId.field}} and {{stepId.nested.field}}.
+// If the entire string is a single template that resolves to a non-string value (e.g., number),
+// the actual type is preserved rather than converting to string.
+//
+// Template Resolution Rules:
+//   - Templates referencing non-existent steps are left unchanged (logged as warning)
+//   - Templates referencing non-existent fields are left unchanged (logged as warning)
+//   - Numeric values (float64, int) are preserved when template is the entire string
+//   - Complex types (maps, slices) are converted to string representation
+func (e *SmartExecutor) substituteTemplates(
+	template string,
+	depResults map[string]map[string]interface{},
+) interface{} {
+	// Use pre-compiled regex for performance (avoids re-compilation on each call)
+	matches := stepOutputTemplatePattern.FindAllStringSubmatch(template, -1)
+	if len(matches) == 0 {
+		return template // No templates found, return as-is
+	}
+
+	// Special case: if the entire string is a single template, preserve the value's type
+	// This allows numeric values to remain as numbers instead of being converted to strings
+	// Critical for parameters like latitude/longitude that must be numbers, not strings
+	if len(matches) == 1 && matches[0][0] == template {
+		stepID := matches[0][1]
+		fieldPath := matches[0][2]
+
+		stepData, stepExists := depResults[stepID]
+		if !stepExists {
+			// Step not found in dependencies - this is likely a configuration error
+			if e.logger != nil {
+				e.logger.Warn("Template references non-existent step dependency", map[string]interface{}{
+					"template":        template,
+					"referenced_step": stepID,
+					"available_deps":  getDepResultKeys(depResults),
+				})
+			}
+			return template
+		}
+
+		value := extractFieldValue(stepData, fieldPath)
+		if value == nil {
+			// Field not found in step response
+			if e.logger != nil {
+				e.logger.Warn("Template references non-existent field in step response", map[string]interface{}{
+					"template":         template,
+					"step_id":          stepID,
+					"field_path":       fieldPath,
+					"available_fields": getFieldKeys(stepData),
+				})
+			}
+			return template
+		}
+
+		// Validate that the resolved value is a primitive type suitable for HTTP parameters
+		switch v := value.(type) {
+		case float64, int, int64, string, bool:
+			return value // Safe primitive types
+		case map[string]interface{}, []interface{}:
+			// Complex types - convert to JSON string for safety
+			if e.logger != nil {
+				e.logger.Debug("Template resolved to complex type, converting to JSON", map[string]interface{}{
+					"template":   template,
+					"value_type": fmt.Sprintf("%T", v),
+				})
+			}
+			jsonBytes, err := json.Marshal(v)
+			if err != nil {
+				return template // Fall back to original on marshal error
+			}
+			return string(jsonBytes)
+		default:
+			return value // Other types pass through
+		}
+	}
+
+	// Multiple templates or template is part of a larger string - substitute as strings
+	result := template
+	for _, match := range matches {
+		fullMatch := match[0]
+		stepID := match[1]
+		fieldPath := match[2]
+
+		stepData, stepExists := depResults[stepID]
+		if !stepExists {
+			if e.logger != nil {
+				e.logger.Warn("Template references non-existent step dependency", map[string]interface{}{
+					"template":        fullMatch,
+					"referenced_step": stepID,
+				})
+			}
+			continue // Leave template unresolved
+		}
+
+		value := extractFieldValue(stepData, fieldPath)
+		if value != nil {
+			result = strings.Replace(result, fullMatch, fmt.Sprintf("%v", value), 1)
+		} else if e.logger != nil {
+			e.logger.Warn("Template references non-existent field", map[string]interface{}{
+				"template":   fullMatch,
+				"step_id":    stepID,
+				"field_path": fieldPath,
+			})
+		}
+	}
+
+	return result
+}
+
+// getDepResultKeys returns the step IDs available in dependency results (for logging)
+func getDepResultKeys(m map[string]map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// getFieldKeys returns the field names available in a step result (for logging)
+func getFieldKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// extractFieldValue extracts a value from a nested map using a dot-separated path.
+// For example, extractFieldValue(data, "location.lat") returns data["location"]["lat"]
+func extractFieldValue(data map[string]interface{}, fieldPath string) interface{} {
+	parts := strings.Split(fieldPath, ".")
+	current := interface{}(data)
+
+	for _, part := range parts {
+		if m, ok := current.(map[string]interface{}); ok {
+			current = m[part]
+		} else {
+			return nil // Path not found
+		}
+	}
+
+	return current
 }
 
 // executeStep executes a single routing step
 func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepResult {
 	startTime := time.Now()
 
+	// Get trace context for log correlation
+	tc := telemetry.GetTraceContext(ctx)
+
+	// Add span event for step execution start
+	telemetry.AddSpanEvent(ctx, "step_execution_started",
+		attribute.String("step_id", step.StepID),
+		attribute.String("agent_name", step.AgentName),
+	)
+
 	if e.logger != nil {
 		e.logger.Debug("Starting step execution", map[string]interface{}{
 			"operation":  "step_execution_start",
 			"step_id":    step.StepID,
 			"agent_name": step.AgentName,
+			"trace_id":   tc.TraceID,
+			"span_id":    tc.SpanID,
 		})
 	}
 
@@ -342,15 +579,19 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	// Get agent info from catalog
 	agentInfo := e.findAgentByName(step.AgentName)
 	if agentInfo == nil {
+		err := fmt.Errorf("agent %s not found in catalog", step.AgentName)
+		telemetry.RecordSpanError(ctx, err)
 		if e.logger != nil {
 			e.logger.Error("Agent not found in catalog", map[string]interface{}{
 				"operation":  "agent_discovery",
 				"step_id":    step.StepID,
 				"agent_name": step.AgentName,
+				"trace_id":   tc.TraceID,
+				"span_id":    tc.SpanID,
 			})
 		}
 		result.Success = false
-		result.Error = fmt.Sprintf("agent %s not found in catalog", step.AgentName)
+		result.Error = err.Error()
 		result.EndTime = time.Now()
 		result.Duration = time.Since(startTime)
 		return result
@@ -377,15 +618,36 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		parameters = params
 	}
 
+	// Interpolate template parameters with dependency results
+	// This enables templates like {{geocode.latitude}} to be replaced with actual values
+	if depResults, ok := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{}); ok && len(depResults) > 0 {
+		interpolated := e.interpolateParameters(parameters, depResults)
+		if interpolated != nil {
+			if e.logger != nil {
+				e.logger.Debug("Template parameters interpolated", map[string]interface{}{
+					"operation":    "parameter_interpolation",
+					"step_id":      step.StepID,
+					"original":     parameters,
+					"interpolated": interpolated,
+				})
+			}
+			parameters = interpolated
+		}
+	}
+
 	// Find the capability endpoint
 	endpoint := e.findCapabilityEndpoint(agentInfo, capability)
 	if endpoint == "" {
+		err := fmt.Errorf("capability %s not found for agent %s", capability, step.AgentName)
+		telemetry.RecordSpanError(ctx, err)
 		if e.logger != nil {
 			e.logger.Error("Capability endpoint not found", map[string]interface{}{
-				"operation":   "capability_resolution",
-				"step_id":     step.StepID,
-				"agent_name":  step.AgentName,
-				"capability":  capability,
+				"operation":  "capability_resolution",
+				"step_id":    step.StepID,
+				"agent_name": step.AgentName,
+				"capability": capability,
+				"trace_id":   tc.TraceID,
+				"span_id":    tc.SpanID,
 				"available_capabilities": func() []string {
 					caps := make([]string, len(agentInfo.Capabilities))
 					for i, cap := range agentInfo.Capabilities {
@@ -396,7 +658,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			})
 		}
 		result.Success = false
-		result.Error = fmt.Sprintf("capability %s not found for agent %s", capability, step.AgentName)
+		result.Error = err.Error()
 		result.EndTime = time.Now()
 		result.Duration = time.Since(startTime)
 		return result
@@ -491,14 +753,29 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	result.EndTime = time.Now()
 	result.Duration = time.Since(startTime)
 
+	// Add span event for step completion
+	telemetry.AddSpanEvent(ctx, "step_execution_completed",
+		attribute.String("step_id", step.StepID),
+		attribute.String("agent_name", step.AgentName),
+		attribute.Bool("success", result.Success),
+		attribute.Int64("duration_ms", result.Duration.Milliseconds()),
+	)
+
+	// Record error on span if step failed
+	if !result.Success && result.Error != "" {
+		telemetry.RecordSpanError(ctx, fmt.Errorf("step %s failed: %s", step.StepID, result.Error))
+	}
+
 	if e.logger != nil {
 		e.logger.Debug("Step execution completed", map[string]interface{}{
-			"operation":     "step_execution_complete",
-			"step_id":       step.StepID,
-			"agent_name":    step.AgentName,
-			"success":       result.Success,
-			"duration_ms":   result.Duration.Milliseconds(),
-			"error":         result.Error,
+			"operation":   "step_execution_complete",
+			"step_id":     step.StepID,
+			"agent_name":  step.AgentName,
+			"success":     result.Success,
+			"duration_ms": result.Duration.Milliseconds(),
+			"error":       result.Error,
+			"trace_id":    tc.TraceID,
+			"span_id":     tc.SpanID,
 		})
 	}
 

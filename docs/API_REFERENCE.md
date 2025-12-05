@@ -601,6 +601,10 @@ WithRedisURL(url string)           // Redis connection
 WithRedisDiscovery(url string)     // Shorthand for Redis setup
 WithDiscoveryCacheEnabled(bool)    // Cache discovery results
 WithMockDiscovery(bool)            // Use mock for testing
+
+// Background retry for Redis connection failures (opt-in)
+WithDiscoveryRetry(bool)           // Enable background retry on failure
+WithDiscoveryRetryInterval(d)      // Set initial retry interval (default: 30s)
 ```
 
 **AI Integration:**
@@ -776,6 +780,57 @@ go func() {
 // 3. Unregister on shutdown
 defer registry.Unregister(ctx, info.ID)
 ```
+
+#### Background Redis Retry
+
+GoMind provides an intelligent background retry mechanism for handling Redis connection failures during service startup. This is particularly useful in Kubernetes environments where Redis may not be immediately available.
+
+**Key features:**
+- **Opt-in by default** - Backward compatible, must be explicitly enabled
+- **Exponential backoff** - Retry intervals double on each failure (30s → 60s → 120s → 240s → 300s cap)
+- **Automatic re-registration** - When Redis becomes available, service is automatically registered
+- **Thread-safe** - Registry references are updated atomically
+
+**Configuration:**
+```go
+// Enable via environment variables
+// export GOMIND_DISCOVERY_RETRY=true
+// export GOMIND_DISCOVERY_RETRY_INTERVAL=30s
+
+// Or via code configuration
+config := core.NewConfig(
+    core.WithRedisURL("redis://redis:6379"),
+    core.WithDiscoveryRetry(true),
+    core.WithDiscoveryRetryInterval(30 * time.Second),
+)
+```
+
+**How it works:**
+1. Service attempts initial Redis connection during startup
+2. If connection fails and retry is enabled, service starts normally (without discovery)
+3. Background goroutine attempts reconnection at configured intervals
+4. On successful reconnection, service is registered and heartbeat begins
+5. Parent component's registry reference is updated via callback
+
+**Example - Kubernetes Deployment:**
+```yaml
+env:
+  - name: REDIS_URL
+    value: "redis://redis:6379"
+  - name: GOMIND_DISCOVERY_RETRY
+    value: "true"
+  - name: GOMIND_DISCOVERY_RETRY_INTERVAL
+    value: "30s"
+```
+
+**When to use:**
+- Kubernetes environments where Redis may start after your service
+- Systems with intermittent Redis connectivity
+- Services that should remain functional even without discovery
+
+**When NOT to use:**
+- Development environments (use mock discovery instead)
+- When Redis availability is a hard requirement
 
 #### Memory Interface
 
@@ -1673,6 +1728,169 @@ telemetry.RecordLatency("order.processing",
 )
 ```
 
+### Distributed Tracing
+
+HTTP instrumentation for automatic trace context propagation across service boundaries.
+
+#### TracingMiddleware
+
+Wrap HTTP handlers to automatically extract and propagate W3C TraceContext headers.
+
+```go
+func TracingMiddleware(serviceName string) func(http.Handler) http.Handler
+func TracingMiddlewareWithConfig(serviceName string, config *TracingMiddlewareConfig) func(http.Handler) http.Handler
+```
+
+**What it does:**
+- Extracts `traceparent` and `tracestate` headers from incoming requests
+- Creates a span for each HTTP request
+- Records HTTP metrics (status codes, latency)
+- Propagates trace context to handler code via `context.Context`
+
+**TracingMiddlewareConfig options:**
+- `ExcludedPaths` - Paths to skip tracing (e.g., `/health`, `/metrics`)
+- `SpanNameFormatter` - Custom function to generate span names
+
+**Example - Basic Usage:**
+```go
+// Initialize telemetry FIRST
+telemetry.Initialize(telemetry.Config{
+    ServiceName: "my-service",
+    Endpoint:    "http://otel-collector:4318",
+})
+defer telemetry.Shutdown(context.Background())
+
+// Create handlers
+mux := http.NewServeMux()
+mux.HandleFunc("/api/users", handleUsers)
+
+// Wrap with tracing middleware
+tracedHandler := telemetry.TracingMiddleware("my-service")(mux)
+http.ListenAndServe(":8080", tracedHandler)
+```
+
+**Example - With Configuration:**
+```go
+config := &telemetry.TracingMiddlewareConfig{
+    // Don't trace health checks
+    ExcludedPaths: []string{"/health", "/metrics", "/ready"},
+
+    // Custom span names
+    SpanNameFormatter: func(op string, r *http.Request) string {
+        return r.Method + " " + r.URL.Path
+    },
+}
+
+tracedHandler := telemetry.TracingMiddlewareWithConfig("my-service", config)(mux)
+```
+
+#### NewTracedHTTPClient
+
+Create an HTTP client that automatically propagates trace context to downstream services.
+
+```go
+func NewTracedHTTPClient(baseTransport http.RoundTripper) *http.Client
+func NewTracedHTTPClientWithTransport(transport *http.Transport) *http.Client
+```
+
+**What it does:**
+- Injects `traceparent` and `tracestate` headers into outgoing requests
+- Creates child spans for each HTTP call
+- Enables distributed tracing across service boundaries
+
+**Example - Basic Usage:**
+```go
+// Create once, reuse for all requests (connection pooling)
+client := telemetry.NewTracedHTTPClient(nil)
+
+func callDownstreamService(ctx context.Context) error {
+    // Context carries trace information
+    req, _ := http.NewRequestWithContext(ctx, "GET", "http://other-service/api/data", nil)
+
+    // Trace headers automatically injected
+    resp, err := client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    // Process response...
+    return nil
+}
+```
+
+**Example - With Custom Transport:**
+```go
+// Production configuration with connection pooling
+transport := &http.Transport{
+    MaxIdleConns:        100,
+    MaxIdleConnsPerHost: 10,
+    IdleConnTimeout:     90 * time.Second,
+}
+
+client := telemetry.NewTracedHTTPClientWithTransport(transport)
+```
+
+**Best practices:**
+- Create `TracedHTTPClient` once and reuse (connection pooling)
+- Always pass `context.Context` from incoming request to outgoing calls
+- Initialize telemetry before creating traced clients
+
+#### End-to-End Tracing Example
+
+Complete example showing trace propagation across services:
+
+```go
+// === Service A (API Gateway) ===
+func main() {
+    telemetry.Initialize(telemetry.Config{ServiceName: "api-gateway"})
+    defer telemetry.Shutdown(context.Background())
+
+    // Create traced client for calling Service B
+    serviceB := telemetry.NewTracedHTTPClient(nil)
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/request", func(w http.ResponseWriter, r *http.Request) {
+        ctx := r.Context()  // Contains trace from middleware
+
+        // Call Service B - trace context propagates automatically
+        req, _ := http.NewRequestWithContext(ctx, "GET", "http://service-b/process", nil)
+        resp, _ := serviceB.Do(req)
+        defer resp.Body.Close()
+
+        // Respond...
+    })
+
+    // Wrap with tracing middleware
+    traced := telemetry.TracingMiddleware("api-gateway")(mux)
+    http.ListenAndServe(":8080", traced)
+}
+
+// === Service B ===
+func main() {
+    telemetry.Initialize(telemetry.Config{ServiceName: "service-b"})
+    defer telemetry.Shutdown(context.Background())
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("/process", func(w http.ResponseWriter, r *http.Request) {
+        ctx := r.Context()  // Trace context from Service A!
+
+        // Metrics are correlated with the trace
+        telemetry.EmitWithContext(ctx, "service-b.processed", 1)
+
+        w.WriteHeader(http.StatusOK)
+    })
+
+    traced := telemetry.TracingMiddleware("service-b")(mux)
+    http.ListenAndServe(":8081", traced)
+}
+
+// Result in Jaeger/Tempo:
+// Trace abc123:
+// ├── api-gateway: /api/request (100ms)
+// │   └── service-b: /process (50ms)
+```
+
 ---
 
 ## Orchestration Module
@@ -2172,6 +2390,10 @@ GoMind supports configuration through environment variables:
 - `GOMIND_LOG_LEVEL` - Logging level (error/warn/info/debug)
 - `GOMIND_LOG_FORMAT` - Log format (json/text)
 - `GOMIND_DEV_MODE` - Development mode (true/false)
+
+### Discovery Retry Configuration
+- `GOMIND_DISCOVERY_RETRY` - Enable background Redis retry on connection failure (true/false, default: false)
+- `GOMIND_DISCOVERY_RETRY_INTERVAL` - Initial retry interval (e.g., "30s", "1m", default: 30s)
 
 ### Schema Discovery & Validation
 - `GOMIND_VALIDATE_PAYLOADS` - Enable Phase 3 schema validation (true/false, default: false)
