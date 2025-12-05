@@ -235,6 +235,14 @@ func (b *BaseClient) LogRequest(provider, model, prompt string) {
 		"max_tokens":    b.DefaultMaxTokens,
 		"temperature":   b.DefaultTemperature,
 	})
+
+	// Log full prompt content at DEBUG level for troubleshooting
+	b.Logger.Debug("AI request prompt content", map[string]interface{}{
+		"operation": "ai_request_content",
+		"provider":  provider,
+		"model":     model,
+		"prompt":    prompt,
+	})
 }
 
 // LogResponse logs API responses
@@ -249,6 +257,17 @@ func (b *BaseClient) LogResponse(provider, model string, tokens core.TokenUsage,
 		"duration_ms":       duration.Milliseconds(),
 		"tokens_per_second": float64(tokens.TotalTokens) / duration.Seconds(),
 		"status":            "success",
+	})
+}
+
+// LogResponseContent logs the full response content at DEBUG level
+func (b *BaseClient) LogResponseContent(provider, model, content string) {
+	b.Logger.Debug("AI response content", map[string]interface{}{
+		"operation":        "ai_response_content",
+		"provider":         provider,
+		"model":            model,
+		"response":         content,
+		"response_length":  len(content),
 	})
 }
 

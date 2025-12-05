@@ -145,7 +145,8 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	
 	// Log response
 	c.LogResponse("bedrock", result.Model, result.Usage, time.Since(startTime))
-	
+	c.LogResponseContent("bedrock", result.Model, result.Content)
+
 	return result, nil
 }
 

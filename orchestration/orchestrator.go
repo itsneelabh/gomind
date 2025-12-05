@@ -215,12 +215,26 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	}
 
 	if o.logger != nil {
+		// Extract tools and build plan summary for INFO level
+		toolsUsed := o.extractAgentsFromPlan(plan)
+		parallelGroups := countParallelGroups(plan)
+
 		o.logger.Info("Plan generated successfully", map[string]interface{}{
-			"operation":  "plan_generation",
+			"operation":        "plan_generation",
+			"request_id":       requestID,
+			"plan_id":          plan.PlanID,
+			"step_count":       len(plan.Steps),
+			"tools_selected":   toolsUsed,
+			"parallel_groups":  parallelGroups,
+			"generation_time_ms": time.Since(startTime).Milliseconds(),
+		})
+
+		// Log full plan structure at DEBUG level
+		o.logger.Debug("Plan structure details", map[string]interface{}{
+			"operation":  "plan_structure",
 			"request_id": requestID,
 			"plan_id":    plan.PlanID,
-			"step_count": len(plan.Steps),
-			"generation_time_ms": time.Since(startTime).Milliseconds(),
+			"steps":      formatPlanSteps(plan),
 		})
 	}
 
@@ -504,11 +518,27 @@ func (o *AIOrchestrator) validatePlan(plan *RoutingPlan) error {
 	if o.discovery == nil {
 		return fmt.Errorf("discovery service not configured")
 	}
-	
+
+	if o.logger != nil {
+		o.logger.Debug("Validating execution plan", map[string]interface{}{
+			"operation":  "plan_validation",
+			"plan_id":    plan.PlanID,
+			"step_count": len(plan.Steps),
+		})
+	}
+
 	for _, step := range plan.Steps {
 		// Check if agent exists
 		agents, err := o.discovery.FindService(context.Background(), step.AgentName)
 		if err != nil || len(agents) == 0 {
+			if o.logger != nil {
+				o.logger.Debug("Agent not found during validation", map[string]interface{}{
+					"operation":  "capability_validation",
+					"step_id":    step.StepID,
+					"agent_name": step.AgentName,
+					"status":     "agent_not_found",
+				})
+			}
 			return fmt.Errorf("agent %s not found", step.AgentName)
 		}
 
@@ -520,12 +550,25 @@ func (o *AIOrchestrator) validatePlan(plan *RoutingPlan) error {
 			}
 
 			found := false
-			for _, cap := range agentInfo.Capabilities {
+			availableCaps := make([]string, len(agentInfo.Capabilities))
+			for i, cap := range agentInfo.Capabilities {
+				availableCaps[i] = cap.Name
 				if cap.Name == capName {
 					found = true
-					break
 				}
 			}
+
+			if o.logger != nil {
+				o.logger.Debug("Capability validation", map[string]interface{}{
+					"operation":              "capability_validation",
+					"step_id":                step.StepID,
+					"agent_name":             step.AgentName,
+					"requested_capability":   capName,
+					"available_capabilities": availableCaps,
+					"found":                  found,
+				})
+			}
+
 			if !found {
 				return fmt.Errorf("capability %s not found for agent %s", capName, step.AgentName)
 			}
@@ -544,6 +587,15 @@ func (o *AIOrchestrator) validatePlan(plan *RoutingPlan) error {
 				return fmt.Errorf("dependency %s not found for step %s", dep, step.StepID)
 			}
 		}
+	}
+
+	if o.logger != nil {
+		o.logger.Info("Plan validation successful", map[string]interface{}{
+			"operation":  "plan_validation",
+			"plan_id":    plan.PlanID,
+			"step_count": len(plan.Steps),
+			"status":     "valid",
+		})
 	}
 
 	return nil
@@ -712,5 +764,89 @@ func getMapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// countParallelGroups counts how many parallel execution groups exist in the plan
+// Steps with no dependencies or the same dependencies can run in parallel
+func countParallelGroups(plan *RoutingPlan) int {
+	if plan == nil || len(plan.Steps) == 0 {
+		return 0
+	}
+
+	// Build dependency levels
+	levels := make(map[string]int)
+	maxLevel := 0
+
+	// First pass: assign level 0 to steps with no dependencies
+	for _, step := range plan.Steps {
+		if len(step.DependsOn) == 0 {
+			levels[step.StepID] = 0
+		}
+	}
+
+	// Iteratively assign levels based on dependencies
+	changed := true
+	for changed {
+		changed = false
+		for _, step := range plan.Steps {
+			if _, ok := levels[step.StepID]; ok {
+				continue // Already assigned
+			}
+
+			// Check if all dependencies have levels assigned
+			allDepsAssigned := true
+			maxDepLevel := 0
+			for _, dep := range step.DependsOn {
+				if depLevel, ok := levels[dep]; ok {
+					if depLevel > maxDepLevel {
+						maxDepLevel = depLevel
+					}
+				} else {
+					allDepsAssigned = false
+					break
+				}
+			}
+
+			if allDepsAssigned {
+				levels[step.StepID] = maxDepLevel + 1
+				if levels[step.StepID] > maxLevel {
+					maxLevel = levels[step.StepID]
+				}
+				changed = true
+			}
+		}
+	}
+
+	return maxLevel + 1 // +1 because levels are 0-indexed
+}
+
+// formatPlanSteps formats plan steps for DEBUG logging
+func formatPlanSteps(plan *RoutingPlan) []map[string]interface{} {
+	if plan == nil {
+		return nil
+	}
+
+	steps := make([]map[string]interface{}, len(plan.Steps))
+	for i, step := range plan.Steps {
+		stepInfo := map[string]interface{}{
+			"step_id":    step.StepID,
+			"agent_name": step.AgentName,
+			"depends_on": step.DependsOn,
+		}
+
+		// Add capability if present in metadata
+		if cap, ok := step.Metadata["capability"].(string); ok {
+			stepInfo["capability"] = cap
+		}
+
+		// Add parameters if present
+		if params, ok := step.Metadata["parameters"].(map[string]interface{}); ok {
+			stepInfo["parameters"] = params
+		}
+
+		steps[i] = stepInfo
+	}
+
+	return steps
 }
 

@@ -324,21 +324,47 @@ func (e *SmartExecutor) findReadySteps(plan *RoutingPlan, executed map[string]bo
 
 		// Check if all dependencies are satisfied
 		allDepsReady := true
+		blockedBy := ""
+		blockReason := ""
+
 		for _, dep := range step.DependsOn {
 			if !executed[dep] {
 				allDepsReady = false
+				blockedBy = dep
+				blockReason = "not_executed"
 				break
 			}
 			// Check if dependency was successful
 			if result, ok := results[dep]; ok && !result.Success {
 				// Skip steps whose dependencies failed
 				allDepsReady = false
+				blockedBy = dep
+				blockReason = "failed"
 				break
 			}
 		}
 
 		if allDepsReady {
 			ready = append(ready, step)
+			if e.logger != nil {
+				e.logger.Debug("Step ready for execution", map[string]interface{}{
+					"operation":    "dependency_resolution",
+					"step_id":      step.StepID,
+					"agent_name":   step.AgentName,
+					"dependencies": step.DependsOn,
+					"status":       "ready",
+				})
+			}
+		} else if e.logger != nil {
+			e.logger.Debug("Step blocked by dependency", map[string]interface{}{
+				"operation":    "dependency_resolution",
+				"step_id":      step.StepID,
+				"agent_name":   step.AgentName,
+				"blocked_by":   blockedBy,
+				"block_reason": blockReason,
+				"dependencies": step.DependsOn,
+				"status":       "blocked",
+			})
 		}
 	}
 
@@ -814,6 +840,17 @@ func (e *SmartExecutor) callAgent(ctx context.Context, url string, parameters ma
 		return "", fmt.Errorf("failed to marshal parameters: %w", err)
 	}
 
+	// Log request details at DEBUG level
+	if e.logger != nil {
+		e.logger.Debug("HTTP request to agent", map[string]interface{}{
+			"operation":   "agent_http_request",
+			"url":         url,
+			"method":      "POST",
+			"body_length": len(body),
+			"parameters":  parameters,
+		})
+	}
+
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -856,7 +893,20 @@ func (e *SmartExecutor) callAgent(ctx context.Context, url string, parameters ma
 		return "", fmt.Errorf("failed to marshal response: %w", err)
 	}
 
-	return string(responseBytes), nil
+	responseStr := string(responseBytes)
+
+	// Log response content at DEBUG level
+	if e.logger != nil {
+		e.logger.Debug("HTTP response from agent", map[string]interface{}{
+			"operation":       "agent_http_response",
+			"url":             url,
+			"status_code":     resp.StatusCode,
+			"response_length": len(responseStr),
+			"response":        result, // Log parsed response for readability
+		})
+	}
+
+	return responseStr, nil
 }
 
 // ExecuteStep executes a single routing step (interface method)

@@ -152,6 +152,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	// Log response
 	c.LogResponse("gemini", result.Model, result.Usage, time.Since(startTime))
+	c.LogResponseContent("gemini", result.Model, result.Content)
 
 	return result, nil
 }
