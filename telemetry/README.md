@@ -20,6 +20,8 @@ Welcome to the observability powerhouse of GoMind! Think of this guide as your f
 - [📈 Advanced Patterns](#-advanced-patterns)
 - [🎯 Best Practices Summary](#-best-practices-summary)
 - [🏁 Quick Reference](#-quick-reference)
+- [🌐 Distributed Tracing](#-distributed-tracing)
+  - [📖 Comprehensive Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md)
 - [🎉 Summary](#-summary)
 
 ## 🎯 What Is Telemetry and Why Should You Care?
@@ -1234,6 +1236,228 @@ if !health.Initialized {
     // Telemetry not working
 }
 ```
+
+## 🌐 Distributed Tracing
+
+Distributed tracing allows you to follow a request as it flows through multiple services. The telemetry module provides HTTP instrumentation that automatically propagates trace context using W3C TraceContext headers.
+
+### The Journey of a Request
+
+Imagine a user request that touches three services:
+
+```
+User → API Gateway → Weather Service → Database
+```
+
+Without distributed tracing, when something goes wrong, you have three separate log files with no way to connect them. With distributed tracing, you can see the entire journey as a single trace:
+
+```
+Trace ID: abc123
+├── API Gateway (100ms)
+│   ├── Weather Service (80ms)
+│   │   └── Database Query (20ms)
+│   └── Response formatting (5ms)
+└── Total: 105ms
+```
+
+### Server-Side: Tracing Middleware
+
+Wrap your HTTP handlers with `TracingMiddleware` to automatically:
+- Extract trace context from incoming requests
+- Create spans for each request
+- Record HTTP metrics (status codes, latency)
+- Propagate context to your handler code
+
+```go
+package main
+
+import (
+    "net/http"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func main() {
+    // Initialize telemetry FIRST
+    telemetry.Initialize(telemetry.Config{
+        ServiceName: "weather-service",
+        Endpoint:    "http://otel-collector:4318",
+    })
+    defer telemetry.Shutdown(context.Background())
+
+    // Create your handlers
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/weather", handleWeather)
+    mux.HandleFunc("/health", handleHealth)
+
+    // Wrap with tracing middleware
+    tracedHandler := telemetry.TracingMiddleware("weather-service")(mux)
+
+    http.ListenAndServe(":8080", tracedHandler)
+}
+```
+
+### Excluding Paths from Tracing
+
+Health checks and metrics endpoints shouldn't create traces (they're noisy!):
+
+```go
+config := &telemetry.TracingMiddlewareConfig{
+    ExcludedPaths: []string{"/health", "/metrics", "/ready", "/live"},
+}
+
+tracedHandler := telemetry.TracingMiddlewareWithConfig("my-service", config)(mux)
+```
+
+### Custom Span Names
+
+By default, spans are named `HTTP GET /api/weather`. Customize this:
+
+```go
+config := &telemetry.TracingMiddlewareConfig{
+    SpanNameFormatter: func(operation string, r *http.Request) string {
+        // Create semantic span names
+        return r.Method + " " + getRoutePattern(r)  // "GET /api/users/:id"
+    },
+}
+```
+
+### Client-Side: Traced HTTP Client
+
+When calling other services, use `NewTracedHTTPClient` to automatically propagate trace context:
+
+```go
+// Create once, reuse for all requests
+client := telemetry.NewTracedHTTPClient(nil)
+
+func callWeatherService(ctx context.Context, city string) (*Weather, error) {
+    // Context carries trace information
+    req, _ := http.NewRequestWithContext(ctx, "GET",
+        "http://weather-service/api/weather?city="+city, nil)
+
+    // Trace headers (traceparent, tracestate) are automatically injected
+    resp, err := client.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+
+    // Parse response...
+}
+```
+
+### With Custom Transport Settings
+
+For production, configure connection pooling:
+
+```go
+transport := &http.Transport{
+    MaxIdleConns:        100,
+    MaxIdleConnsPerHost: 10,
+    IdleConnTimeout:     90 * time.Second,
+}
+
+client := telemetry.NewTracedHTTPClientWithTransport(transport)
+```
+
+### Complete Example: Multi-Service Tracing
+
+Here's how tracing flows across services:
+
+```go
+// === API Gateway (service 1) ===
+func handleUserRequest(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()  // Contains incoming trace context
+
+    // Call downstream services - context propagates automatically
+    weather, _ := weatherClient.GetWeather(ctx, "NYC")
+    news, _ := newsClient.GetNews(ctx, "NYC")
+
+    // Combine and respond
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "weather": weather,
+        "news":    news,
+    })
+}
+
+// === Weather Service (service 2) ===
+func handleWeather(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()  // Trace context from gateway!
+
+    // This span is a child of the gateway's span
+    telemetry.Counter("weather.requests", "city", r.URL.Query().Get("city"))
+
+    // Fetch data and respond...
+}
+
+// === In Jaeger/Grafana Tempo ===
+// You'll see a single trace spanning both services:
+//
+// api-gateway: handleUserRequest (150ms)
+// ├── weather-service: handleWeather (50ms)
+// └── news-service: handleNews (80ms)
+```
+
+### Environment Configuration
+
+Configure tracing via environment variables:
+
+```bash
+# Required for trace collection
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+
+# Service identification in traces
+OTEL_SERVICE_NAME=weather-service
+
+# Sampling (production should use lower rates)
+OTEL_TRACES_SAMPLER=traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1  # Sample 10% of traces
+```
+
+### Kubernetes Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weather-service
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: weather-service:latest
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector:4318"
+        - name: OTEL_SERVICE_NAME
+          value: "weather-service"
+```
+
+### Tracing Best Practices
+
+**DO:**
+- Initialize telemetry before creating traced middleware/clients
+- Exclude health/metrics endpoints from tracing
+- Use semantic span names that match your routing patterns
+- Reuse `TracedHTTPClient` instances (connection pooling)
+- Always pass `context.Context` through your call chain
+
+**DON'T:**
+- Create new traced clients for each request
+- Trace every single internal operation (too noisy)
+- Forget to call `telemetry.Shutdown()` (traces may be lost)
+- Use tracing without an OTEL Collector (nowhere for traces to go!)
+
+### 📖 Comprehensive Distributed Tracing Guide
+
+For a complete deep-dive into distributed tracing with GoMind, including:
+- **Trace-Log Correlation** - Connecting traces to logs for easier debugging
+- **Complete Multi-Service Examples** - Based on actual working examples in `examples/agent-with-telemetry/`
+- **Infrastructure Setup** - OTEL Collector, Jaeger, and Grafana configuration
+- **Troubleshooting Guide** - Common problems and solutions
+- **Best Practices** - Production-ready patterns
+
+See the **[Distributed Tracing and Log Correlation Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md)**.
 
 ## 🎉 Summary
 
