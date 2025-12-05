@@ -144,6 +144,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	// Log response
 	c.LogResponse("anthropic", result.Model, result.Usage, time.Since(startTime))
+	c.LogResponseContent("anthropic", result.Model, result.Content)
 
 	return result, nil
 }

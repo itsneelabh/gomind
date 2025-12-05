@@ -128,6 +128,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	// Log response
 	c.LogResponse("openai", result.Model, result.Usage, time.Since(startTime))
+	c.LogResponseContent("openai", result.Model, result.Content)
 
 	return result, nil
 }
