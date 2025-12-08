@@ -30,8 +30,9 @@ const (
 // Compiling once at package level avoids repeated compilation overhead
 var (
 	// stepOutputTemplatePattern matches {{stepId.fieldPath}} for step output references
-	// Examples: {{geocode.latitude}}, {{weather.data.temp}}
-	stepOutputTemplatePattern = regexp.MustCompile(`\{\{(\w+)\.(\w+(?:\.\w+)*)\}\}`)
+	// Examples: {{geocode.latitude}}, {{weather.data.temp}}, {{country-info.data.currency.code}}
+	// Note: Step IDs can contain hyphens (e.g., country-info), so we use [\w-]+ for the step ID
+	stepOutputTemplatePattern = regexp.MustCompile(`\{\{([\w-]+)\.([\w-]+(?:\.[\w-]+)*)\}\}`)
 )
 
 // SmartExecutor handles intelligent execution of routing plans
