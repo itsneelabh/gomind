@@ -191,12 +191,16 @@ type OrchestratorConfig struct {
 	MetricsEnabled    bool              `json:"metrics_enabled"`
 	CacheEnabled      bool              `json:"cache_enabled"`
 	CacheTTL          time.Duration     `json:"cache_ttl"`
-	
+
 	// CapabilityProvider configuration
 	CapabilityProviderType string                  `json:"capability_provider_type"` // "default" or "service"
 	CapabilityService      ServiceCapabilityConfig `json:"capability_service"`       // Service provider config
 	EnableFallback         bool                    `json:"enable_fallback"`          // Graceful degradation
-	
+
+	// PromptBuilder configuration (extensible prompt customization)
+	// Use omitempty to maintain backwards compatibility with existing JSON consumers
+	PromptConfig PromptConfig `json:"prompt_config,omitempty"`
+
 	// Telemetry configuration (uses framework telemetry)
 	EnableTelemetry bool `json:"enable_telemetry"`
 }

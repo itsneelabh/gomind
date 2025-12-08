@@ -22,6 +22,10 @@ type AIOrchestrator struct {
 	// Capability provider for flexible capability discovery
 	capabilityProvider CapabilityProvider
 
+	// Prompt builder for extensible prompt customization (Layer 1-3)
+	// If nil, uses the hardcoded default prompt for backwards compatibility
+	promptBuilder PromptBuilder
+
 	// Observability (follows framework design principles)
 	telemetry core.Telemetry // For metrics and tracing
 	logger    core.Logger    // For structured logging
@@ -130,6 +134,24 @@ func (o *AIOrchestrator) SetLogger(logger core.Logger) {
 		o.catalog.SetLogger(logger)
 	}
 	// TODO: Add synthesizer.SetLogger(logger) when synthesizer supports logging interface
+}
+
+// SetPromptBuilder allows runtime injection of a custom prompt builder.
+// This follows the existing pattern used by SetCapabilityProvider.
+//
+// Use cases:
+//   - Layer 1: DefaultPromptBuilder with additional type rules
+//   - Layer 2: TemplatePromptBuilder for structural customization
+//   - Layer 3: Custom PromptBuilder for full control (compliance, audit logging)
+func (o *AIOrchestrator) SetPromptBuilder(builder PromptBuilder) {
+	if builder != nil {
+		o.promptBuilder = builder
+		if o.logger != nil {
+			o.logger.Info("PromptBuilder updated at runtime", map[string]interface{}{
+				"operation": "set_prompt_builder",
+			})
+		}
+	}
 }
 
 // catalogRefreshLoop periodically refreshes the agent catalog
@@ -412,6 +434,7 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 }
 
 // buildPlanningPrompt constructs the prompt for the LLM using capability provider
+// and optional PromptBuilder for customization
 func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string) (string, error) {
 	// Start telemetry span if available
 	var span core.Span
@@ -421,12 +444,12 @@ func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string
 	} else {
 		span = &core.NoOpSpan{}
 	}
-	
+
 	// Check if capability provider is available
 	if o.capabilityProvider == nil {
 		return "", fmt.Errorf("capability provider not configured")
 	}
-	
+
 	// Get capabilities from provider
 	capabilityInfo, err := o.capabilityProvider.GetCapabilities(ctx, request, nil)
 	if err != nil {
@@ -448,6 +471,31 @@ func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string
 		span.SetAttribute("capability_info_size", len(capabilityInfo))
 	}
 
+	// Use PromptBuilder if available (Layer 1-3 customization)
+	if o.promptBuilder != nil {
+		input := PromptInput{
+			CapabilityInfo: capabilityInfo,
+			Request:        request,
+			Metadata:       nil, // Can be extended to pass request metadata
+		}
+		prompt, err := o.promptBuilder.BuildPlanningPrompt(ctx, input)
+		if err != nil {
+			if o.logger != nil {
+				o.logger.Warn("PromptBuilder failed, falling back to default prompt", map[string]interface{}{
+					"operation": "prompt_builder_fallback",
+					"error":     err.Error(),
+				})
+			}
+			// Fall through to default prompt
+		} else {
+			if span != nil {
+				span.SetAttribute("prompt_builder_used", true)
+			}
+			return prompt, nil
+		}
+	}
+
+	// Default hardcoded prompt (backwards compatibility)
 	return fmt.Sprintf(`You are an AI orchestrator managing a multi-agent system.
 
 %s
@@ -469,19 +517,29 @@ Create an execution plan in JSON format with the following structure:
       "metadata": {
         "capability": "capability-name",
         "parameters": {
-          "param1": "value1"
+          "string_param": "text value",
+          "number_param": 42.5,
+          "integer_param": 10,
+          "boolean_param": true
         }
       }
     }
   ]
 }
 
+CRITICAL - Parameter Type Rules:
+- Parameters with type "number" or "float64" MUST be JSON numbers (e.g., 35.6897), NOT strings (e.g., "35.6897")
+- Parameters with type "integer" or "int" MUST be JSON integers (e.g., 10), NOT strings (e.g., "10")
+- Parameters with type "boolean" or "bool" MUST be JSON booleans (e.g., true), NOT strings (e.g., "true")
+- Parameters with type "string" should be JSON strings (e.g., "value")
+
 Important:
 1. Only use agents and capabilities that exist in the catalog
-2. Ensure parameter names match exactly what the capability expects
+2. Ensure parameter names AND TYPES match exactly what the capability expects
 3. Order steps based on dependencies
 4. Include all necessary steps to fulfill the request
 5. Be specific in instructions
+6. For coordinates (lat/lon), use numeric values like 35.6897 not "35.6897"
 
 Response (JSON only, no explanation):`, capabilityInfo, request), nil
 }
