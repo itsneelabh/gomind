@@ -410,6 +410,12 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 		registry.Histogram("discovery.health_check.duration_ms", duration,
 			"namespace", r.namespace,
 		)
+		// Record timestamp of last successful health check for freshness monitoring
+		// This allows operators to see "time since last health check" in dashboards
+		registry.Gauge("discovery.last_health_check_timestamp", float64(time.Now().Unix()),
+			"namespace", r.namespace,
+			"service_name", info.Name,
+		)
 	}
 
 	if r.logger != nil {
