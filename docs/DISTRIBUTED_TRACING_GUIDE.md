@@ -1092,6 +1092,14 @@ http://localhost:16686/trace/fee30b72efcbefd21fddf9cd56d2c8c9
    }
    ```
 
+6. **Inject telemetry into components that create spans:**
+   ```go
+   // Enable orchestrators to create child spans linked to parent requests
+   if provider := telemetry.GetTelemetryProvider(); provider != nil {
+       orchestrator.SetTelemetry(provider)
+   }
+   ```
+
 ### DON'T
 
 1. **Don't forget `context.Background()` for background tasks:**
@@ -1297,6 +1305,7 @@ log.Printf("Message trace_id=%s span_id=%s", tc.TraceID, tc.SpanID)
 | `telemetry.AddSpanEvent(ctx, name, attrs...)` | Add named events to the current span |
 | `telemetry.RecordSpanError(ctx, err)` | Record an error on the current span |
 | `telemetry.SetSpanAttributes(ctx, attrs...)` | Add attributes to the current span |
+| `telemetry.GetTelemetryProvider()` | Returns `core.Telemetry` for injecting into orchestrators |
 | `telemetry.TracingMiddlewareConfig` | Configure path exclusions, span names |
 
 ### Telemetry Profiles
