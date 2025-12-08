@@ -402,3 +402,27 @@ func GetRegistry() *Registry {
 	}
 	return r.(*Registry)
 }
+
+// GetTelemetryProvider returns the OTelProvider as core.Telemetry interface.
+// Use this to inject telemetry into components that need span creation, such as
+// the orchestration module.
+//
+// Example:
+//
+//	// After telemetry.Initialize()
+//	if provider := telemetry.GetTelemetryProvider(); provider != nil {
+//	    orchestrator.SetTelemetry(provider)
+//	}
+//
+// Returns nil if telemetry is not initialized.
+func GetTelemetryProvider() core.Telemetry {
+	r := globalRegistry.Load()
+	if r == nil {
+		return nil
+	}
+	registry := r.(*Registry)
+	if registry.provider == nil {
+		return nil
+	}
+	return registry.provider
+}
