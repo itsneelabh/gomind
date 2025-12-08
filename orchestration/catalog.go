@@ -288,6 +288,11 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 			}
 			// JSON decode failed, fallback to basic capabilities from registration
 			capabilities = c.convertBasicCapabilities(service.Capabilities)
+		} else {
+			// HTTP succeeded - enrich capabilities with InputSummary from registration
+			// This ensures LLM receives type information even when /api/capabilities
+			// returns empty parameters (Phase 2 field hints from registration take precedence)
+			capabilities = c.enrichCapabilitiesWithInputSummary(capabilities, service.Capabilities)
 		}
 	}
 
@@ -299,6 +304,8 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 }
 
 // convertBasicCapabilities converts simple capability names to enhanced format
+// This function extracts Phase 2 field hints (InputSummary) and converts them
+// to Parameters so the LLM receives proper type information for payload generation.
 func (c *AgentCatalog) convertBasicCapabilities(caps []core.Capability) []EnhancedCapability {
 	enhanced := make([]EnhancedCapability, len(caps))
 	for i, cap := range caps {
@@ -314,8 +321,93 @@ func (c *AgentCatalog) convertBasicCapabilities(caps []core.Capability) []Enhanc
 		if enhanced[i].Description == "" {
 			enhanced[i].Description = fmt.Sprintf("Capability: %s", cap.Name)
 		}
+
+		// Convert Phase 2 field hints (InputSummary) to Parameters
+		// This ensures the LLM receives type information for accurate payload generation
+		if cap.InputSummary != nil {
+			params := make([]Parameter, 0)
+
+			// Add required fields
+			for _, field := range cap.InputSummary.RequiredFields {
+				params = append(params, Parameter{
+					Name:        field.Name,
+					Type:        field.Type,
+					Required:    true,
+					Description: field.Description,
+					Default:     field.Example, // Use example as default hint
+				})
+			}
+
+			// Add optional fields
+			for _, field := range cap.InputSummary.OptionalFields {
+				params = append(params, Parameter{
+					Name:        field.Name,
+					Type:        field.Type,
+					Required:    false,
+					Description: field.Description,
+					Default:     field.Example,
+				})
+			}
+
+			enhanced[i].Parameters = params
+		}
 	}
 	return enhanced
+}
+
+// enrichCapabilitiesWithInputSummary merges InputSummary from service registration
+// into capabilities fetched from HTTP endpoint when parameters are empty.
+// This ensures the LLM receives type information even when /api/capabilities
+// returns capabilities without parameter details.
+func (c *AgentCatalog) enrichCapabilitiesWithInputSummary(httpCaps []EnhancedCapability, registrationCaps []core.Capability) []EnhancedCapability {
+	// Build a lookup map from registration capabilities by name
+	regCapMap := make(map[string]*core.Capability)
+	for i := range registrationCaps {
+		regCapMap[registrationCaps[i].Name] = &registrationCaps[i]
+	}
+
+	// Enrich each HTTP capability with InputSummary if parameters are empty
+	for i := range httpCaps {
+		if len(httpCaps[i].Parameters) == 0 {
+			// Look up corresponding registration capability
+			if regCap, ok := regCapMap[httpCaps[i].Name]; ok && regCap.InputSummary != nil {
+				params := make([]Parameter, 0)
+
+				// Add required fields
+				for _, field := range regCap.InputSummary.RequiredFields {
+					params = append(params, Parameter{
+						Name:        field.Name,
+						Type:        field.Type,
+						Required:    true,
+						Description: field.Description,
+						Default:     field.Example,
+					})
+				}
+
+				// Add optional fields
+				for _, field := range regCap.InputSummary.OptionalFields {
+					params = append(params, Parameter{
+						Name:        field.Name,
+						Type:        field.Type,
+						Required:    false,
+						Description: field.Description,
+						Default:     field.Example,
+					})
+				}
+
+				httpCaps[i].Parameters = params
+
+				if c.logger != nil {
+					c.logger.Debug("Enriched capability with InputSummary from registration", map[string]interface{}{
+						"capability":      httpCaps[i].Name,
+						"parameters_added": len(params),
+					})
+				}
+			}
+		}
+	}
+
+	return httpCaps
 }
 
 // getAllServices gets all services from discovery using the new Discover API
