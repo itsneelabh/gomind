@@ -14,11 +14,15 @@ type OrchestratorDependencies struct {
 	// Required dependencies
 	Discovery core.Discovery
 	AIClient  core.AIClient
-	
+
 	// Optional dependencies (can be nil)
 	CircuitBreaker core.CircuitBreaker // For sophisticated resilience patterns
 	Logger         core.Logger         // For structured logging
 	Telemetry      core.Telemetry      // For observability
+
+	// Optional: Custom prompt building (Layer 3)
+	// If nil, DefaultPromptBuilder is used based on config.PromptConfig
+	PromptBuilder PromptBuilder
 }
 
 // CreateOrchestrator creates an orchestrator with proper module integration and dependency injection
@@ -97,6 +101,53 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 	}
 
 	orchestrator.SetLogger(deps.Logger)
+
+	// Initialize prompt builder based on configuration
+	// Priority: 1) Injected builder (Layer 3), 2) Template (Layer 2), 3) Default (Layer 1)
+	if deps.PromptBuilder != nil {
+		// Layer 3: Custom builder injected by application
+		orchestrator.SetPromptBuilder(deps.PromptBuilder)
+		factoryLogger.Info("Using custom PromptBuilder", map[string]interface{}{
+			"operation":    "prompt_builder_initialization",
+			"builder_type": "custom",
+		})
+	} else if config.PromptConfig.TemplateFile != "" || config.PromptConfig.Template != "" {
+		// Layer 2: Template-based customization
+		builder, err := NewTemplatePromptBuilder(&config.PromptConfig)
+		if err != nil {
+			// Graceful degradation to DefaultPromptBuilder
+			factoryLogger.Warn("Failed to create TemplatePromptBuilder, using default", map[string]interface{}{
+				"operation":     "prompt_builder_initialization",
+				"error":         err.Error(),
+				"template_file": config.PromptConfig.TemplateFile,
+			})
+			defaultBuilder, _ := NewDefaultPromptBuilder(&config.PromptConfig)
+			defaultBuilder.SetLogger(deps.Logger)
+			defaultBuilder.SetTelemetry(deps.Telemetry)
+			orchestrator.SetPromptBuilder(defaultBuilder)
+		} else {
+			builder.SetLogger(deps.Logger)
+			builder.SetTelemetry(deps.Telemetry)
+			orchestrator.SetPromptBuilder(builder)
+			factoryLogger.Info("Using TemplatePromptBuilder", map[string]interface{}{
+				"operation":     "prompt_builder_initialization",
+				"builder_type":  "template",
+				"template_file": config.PromptConfig.TemplateFile,
+			})
+		}
+	} else {
+		// Layer 1: Default with optional type rule extensions
+		defaultBuilder, _ := NewDefaultPromptBuilder(&config.PromptConfig)
+		defaultBuilder.SetLogger(deps.Logger)
+		defaultBuilder.SetTelemetry(deps.Telemetry)
+		orchestrator.SetPromptBuilder(defaultBuilder)
+		factoryLogger.Info("Using DefaultPromptBuilder", map[string]interface{}{
+			"operation":        "prompt_builder_initialization",
+			"builder_type":     "default",
+			"additional_rules": len(config.PromptConfig.AdditionalTypeRules),
+			"domain":           config.PromptConfig.Domain,
+		})
+	}
 
 	factoryLogger.Info("Orchestrator created successfully", map[string]interface{}{
 		"operation": "orchestrator_creation_complete",

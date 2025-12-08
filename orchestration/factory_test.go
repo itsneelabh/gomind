@@ -445,3 +445,321 @@ func TestWithLogger(t *testing.T) {
 }
 
 // Mocks are now in test_mocks.go to avoid duplication
+
+// =============================================================================
+// PromptBuilder Factory Integration Tests
+// =============================================================================
+
+// TestCreateOrchestrator_PromptBuilder_Layer1_Default tests that factory creates
+// DefaultPromptBuilder when no template or custom builder is provided
+func TestCreateOrchestrator_PromptBuilder_Layer1_Default(t *testing.T) {
+	deps := OrchestratorDependencies{
+		Discovery: NewMockDiscovery(),
+		AIClient:  NewMockAIClient(),
+		Logger:    &mockLogger{},
+	}
+
+	config := DefaultConfig()
+	// No template file, no template string, no custom builder
+	// Should use DefaultPromptBuilder (Layer 1)
+
+	orchestrator, err := CreateOrchestrator(config, deps)
+	if err != nil {
+		t.Fatalf("Failed to create orchestrator: %v", err)
+	}
+
+	if orchestrator.promptBuilder == nil {
+		t.Fatal("Expected promptBuilder to be set")
+	}
+
+	// Verify it's a DefaultPromptBuilder
+	_, ok := orchestrator.promptBuilder.(*DefaultPromptBuilder)
+	if !ok {
+		t.Errorf("Expected DefaultPromptBuilder, got %T", orchestrator.promptBuilder)
+	}
+}
+
+// TestCreateOrchestrator_PromptBuilder_Layer1_WithTypeRules tests DefaultPromptBuilder
+// with additional type rules
+func TestCreateOrchestrator_PromptBuilder_Layer1_WithTypeRules(t *testing.T) {
+	deps := OrchestratorDependencies{
+		Discovery: NewMockDiscovery(),
+		AIClient:  NewMockAIClient(),
+		Logger:    &mockLogger{},
+	}
+
+	config := DefaultConfig()
+	config.PromptConfig = PromptConfig{
+		Domain: "healthcare",
+		AdditionalTypeRules: []TypeRule{
+			{
+				TypeNames: []string{"patient_id"},
+				JsonType:  "JSON strings",
+				Example:   `"P12345"`,
+			},
+		},
+	}
+
+	orchestrator, err := CreateOrchestrator(config, deps)
+	if err != nil {
+		t.Fatalf("Failed to create orchestrator: %v", err)
+	}
+
+	if orchestrator.promptBuilder == nil {
+		t.Fatal("Expected promptBuilder to be set")
+	}
+
+	// Verify it's a DefaultPromptBuilder with additional rules
+	builder, ok := orchestrator.promptBuilder.(*DefaultPromptBuilder)
+	if !ok {
+		t.Fatalf("Expected DefaultPromptBuilder, got %T", orchestrator.promptBuilder)
+	}
+
+	// Should have default rules + 1 additional rule
+	rules := builder.GetTypeRules()
+	if len(rules) < 7 { // 6 default + 1 additional
+		t.Errorf("Expected at least 7 type rules, got %d", len(rules))
+	}
+
+	// Verify domain is set
+	cfg := builder.GetConfig()
+	if cfg.Domain != "healthcare" {
+		t.Errorf("Expected domain 'healthcare', got '%s'", cfg.Domain)
+	}
+}
+
+// TestCreateOrchestrator_PromptBuilder_Layer2_Template tests that factory creates
+// TemplatePromptBuilder when template is provided
+func TestCreateOrchestrator_PromptBuilder_Layer2_Template(t *testing.T) {
+	deps := OrchestratorDependencies{
+		Discovery: NewMockDiscovery(),
+		AIClient:  NewMockAIClient(),
+		Logger:    &mockLogger{},
+	}
+
+	config := DefaultConfig()
+	config.PromptConfig = PromptConfig{
+		Template: `You are orchestrating: {{.Request}}
+Available: {{.CapabilityInfo}}
+{{.TypeRules}}`,
+	}
+
+	orchestrator, err := CreateOrchestrator(config, deps)
+	if err != nil {
+		t.Fatalf("Failed to create orchestrator: %v", err)
+	}
+
+	if orchestrator.promptBuilder == nil {
+		t.Fatal("Expected promptBuilder to be set")
+	}
+
+	// Verify it's a TemplatePromptBuilder
+	_, ok := orchestrator.promptBuilder.(*TemplatePromptBuilder)
+	if !ok {
+		t.Errorf("Expected TemplatePromptBuilder, got %T", orchestrator.promptBuilder)
+	}
+}
+
+// TestCreateOrchestrator_PromptBuilder_Layer2_TemplateFile tests template file loading
+func TestCreateOrchestrator_PromptBuilder_Layer2_TemplateFile(t *testing.T) {
+	// Create a temporary template file
+	tmpFile, err := os.CreateTemp("", "prompt-template-*.tmpl")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	templateContent := `You are an AI orchestrator.
+Request: {{.Request}}
+Capabilities: {{.CapabilityInfo}}
+{{.TypeRules}}`
+	if _, err := tmpFile.WriteString(templateContent); err != nil {
+		t.Fatalf("Failed to write template: %v", err)
+	}
+	tmpFile.Close()
+
+	deps := OrchestratorDependencies{
+		Discovery: NewMockDiscovery(),
+		AIClient:  NewMockAIClient(),
+		Logger:    &mockLogger{},
+	}
+
+	config := DefaultConfig()
+	config.PromptConfig = PromptConfig{
+		TemplateFile: tmpFile.Name(),
+	}
+
+	orchestrator, err := CreateOrchestrator(config, deps)
+	if err != nil {
+		t.Fatalf("Failed to create orchestrator: %v", err)
+	}
+
+	if orchestrator.promptBuilder == nil {
+		t.Fatal("Expected promptBuilder to be set")
+	}
+
+	// Verify it's a TemplatePromptBuilder
+	builder, ok := orchestrator.promptBuilder.(*TemplatePromptBuilder)
+	if !ok {
+		t.Errorf("Expected TemplatePromptBuilder, got %T", orchestrator.promptBuilder)
+	}
+
+	// Verify fallback is also initialized
+	if builder.GetFallback() == nil {
+		t.Error("Expected fallback builder to be set")
+	}
+}
+
+// TestCreateOrchestrator_PromptBuilder_Layer3_Custom tests custom builder injection
+func TestCreateOrchestrator_PromptBuilder_Layer3_Custom(t *testing.T) {
+	customBuilder := &mockPromptBuilder{
+		buildFunc: func(ctx context.Context, input PromptInput) (string, error) {
+			return "Custom prompt: " + input.Request, nil
+		},
+	}
+
+	deps := OrchestratorDependencies{
+		Discovery:     NewMockDiscovery(),
+		AIClient:      NewMockAIClient(),
+		Logger:        &mockLogger{},
+		PromptBuilder: customBuilder,
+	}
+
+	config := DefaultConfig()
+	// Even if template is set, custom builder takes precedence
+	config.PromptConfig = PromptConfig{
+		Template: "This should be ignored",
+	}
+
+	orchestrator, err := CreateOrchestrator(config, deps)
+	if err != nil {
+		t.Fatalf("Failed to create orchestrator: %v", err)
+	}
+
+	if orchestrator.promptBuilder == nil {
+		t.Fatal("Expected promptBuilder to be set")
+	}
+
+	// Verify it's our custom builder (Layer 3 takes precedence)
+	if orchestrator.promptBuilder != customBuilder {
+		t.Errorf("Expected custom builder, got %T", orchestrator.promptBuilder)
+	}
+}
+
+// TestCreateOrchestrator_PromptBuilder_GracefulDegradation tests fallback when
+// template fails to load
+func TestCreateOrchestrator_PromptBuilder_GracefulDegradation(t *testing.T) {
+	deps := OrchestratorDependencies{
+		Discovery: NewMockDiscovery(),
+		AIClient:  NewMockAIClient(),
+		Logger:    &mockLogger{},
+	}
+
+	config := DefaultConfig()
+	config.PromptConfig = PromptConfig{
+		TemplateFile: "/nonexistent/path/template.tmpl", // File doesn't exist
+	}
+
+	// Should gracefully degrade to DefaultPromptBuilder, not error
+	orchestrator, err := CreateOrchestrator(config, deps)
+	if err != nil {
+		t.Fatalf("Expected graceful degradation, got error: %v", err)
+	}
+
+	if orchestrator.promptBuilder == nil {
+		t.Fatal("Expected promptBuilder to be set (fallback)")
+	}
+
+	// Should fall back to DefaultPromptBuilder
+	_, ok := orchestrator.promptBuilder.(*DefaultPromptBuilder)
+	if !ok {
+		t.Errorf("Expected DefaultPromptBuilder fallback, got %T", orchestrator.promptBuilder)
+	}
+}
+
+// TestCreateOrchestrator_PromptBuilder_InvalidTemplate tests graceful degradation
+// when template has syntax errors
+func TestCreateOrchestrator_PromptBuilder_InvalidTemplate(t *testing.T) {
+	deps := OrchestratorDependencies{
+		Discovery: NewMockDiscovery(),
+		AIClient:  NewMockAIClient(),
+		Logger:    &mockLogger{},
+	}
+
+	config := DefaultConfig()
+	config.PromptConfig = PromptConfig{
+		Template: "{{.Invalid syntax here", // Invalid template
+	}
+
+	// Should gracefully degrade to DefaultPromptBuilder
+	orchestrator, err := CreateOrchestrator(config, deps)
+	if err != nil {
+		t.Fatalf("Expected graceful degradation, got error: %v", err)
+	}
+
+	if orchestrator.promptBuilder == nil {
+		t.Fatal("Expected promptBuilder to be set (fallback)")
+	}
+
+	// Should fall back to DefaultPromptBuilder
+	_, ok := orchestrator.promptBuilder.(*DefaultPromptBuilder)
+	if !ok {
+		t.Errorf("Expected DefaultPromptBuilder fallback, got %T", orchestrator.promptBuilder)
+	}
+}
+
+// TestCreateOrchestrator_PromptBuilder_DependencyInjection tests that logger and
+// telemetry are properly injected into PromptBuilder
+func TestCreateOrchestrator_PromptBuilder_DependencyInjection(t *testing.T) {
+	mockLog := &mockLogger{}
+	mockTel := &mockTelemetry{}
+
+	deps := OrchestratorDependencies{
+		Discovery: NewMockDiscovery(),
+		AIClient:  NewMockAIClient(),
+		Logger:    mockLog,
+		Telemetry: mockTel,
+	}
+
+	config := DefaultConfig()
+	config.PromptConfig = PromptConfig{
+		Domain: "finance",
+	}
+
+	orchestrator, err := CreateOrchestrator(config, deps)
+	if err != nil {
+		t.Fatalf("Failed to create orchestrator: %v", err)
+	}
+
+	// Build a prompt to verify dependencies work
+	builder, ok := orchestrator.promptBuilder.(*DefaultPromptBuilder)
+	if !ok {
+		t.Fatalf("Expected DefaultPromptBuilder, got %T", orchestrator.promptBuilder)
+	}
+
+	// The builder should have logger set (we can verify by building a prompt)
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), PromptInput{
+		CapabilityInfo: "Test capabilities",
+		Request:        "Test request",
+	})
+	if err != nil {
+		t.Errorf("BuildPlanningPrompt failed: %v", err)
+	}
+
+	// Prompt should include finance domain section
+	if !stringContains(prompt, "FINANCE DOMAIN") {
+		t.Error("Expected finance domain section in prompt")
+	}
+}
+
+// mockPromptBuilder implements PromptBuilder for testing
+type mockPromptBuilder struct {
+	buildFunc func(ctx context.Context, input PromptInput) (string, error)
+}
+
+func (m *mockPromptBuilder) BuildPlanningPrompt(ctx context.Context, input PromptInput) (string, error) {
+	if m.buildFunc != nil {
+		return m.buildFunc(ctx, input)
+	}
+	return "mock prompt", nil
+}
