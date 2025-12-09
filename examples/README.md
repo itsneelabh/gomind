@@ -1072,7 +1072,7 @@ RUN go mod download
 COPY *.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o service .
 
-# Stage 2: Runtime (tools: ~21-32MB, agents: ~29-51MB depending on telemetry)
+# Stage 2: Runtime (tools: ~15-26MB, agents: ~24-44MB depending on telemetry)
 FROM alpine:latest
 RUN adduser -D -u 1001 appuser
 WORKDIR /app
