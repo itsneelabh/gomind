@@ -478,6 +478,53 @@ cmd_status() {
 }
 
 ################################################################################
+# Rollout Command
+################################################################################
+
+cmd_rollout() {
+    print_header "Rolling Out Deployment"
+
+    local rebuild=false
+
+    # Check for --build flag
+    if [ "$2" = "--build" ] || [ "$2" = "build" ]; then
+        rebuild=true
+    fi
+
+    # Load env to update secrets
+    load_env
+
+    # Update secrets from .env
+    print_info "Updating secrets from .env..."
+    setup_api_keys
+
+    # Rebuild if requested
+    if [ "$rebuild" = true ]; then
+        print_info "Rebuilding Docker image..."
+        cmd_docker_build
+
+        if command -v kind &> /dev/null && kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
+            print_info "Loading image into kind cluster..."
+            kind load docker-image "$APP_NAME:latest" --name "$CLUSTER_NAME"
+            print_success "Image loaded"
+        fi
+    fi
+
+    # Restart deployment
+    print_info "Restarting deployment..."
+    kubectl rollout restart deployment/"$APP_NAME" -n "$NAMESPACE"
+
+    print_info "Waiting for rollout to complete..."
+    if kubectl rollout status deployment/"$APP_NAME" -n "$NAMESPACE" --timeout=120s; then
+        print_success "Rollout complete!"
+    else
+        print_error "Rollout failed"
+        kubectl logs -n "$NAMESPACE" -l app="$APP_NAME" --tail=20
+        exit 1
+    fi
+}
+
+################################################################################
 # Cleanup Commands
 ################################################################################
 
@@ -574,6 +621,8 @@ ${YELLOW}PORT FORWARDING:${NC}
 ${YELLOW}MONITORING COMMANDS:${NC}
     ${GREEN}logs${NC}                View application logs
     ${GREEN}status${NC}              Show deployment status
+    ${GREEN}rollout${NC}             Restart deployment to pick up new secrets/config
+                        Use --build flag to rebuild Docker image first
 
 ${YELLOW}CLEANUP COMMANDS:${NC}
     ${GREEN}clean${NC}               Remove application deployment
@@ -662,6 +711,9 @@ main() {
             ;;
         status)
             cmd_status
+            ;;
+        rollout)
+            cmd_rollout "$@"
             ;;
         clean)
             cmd_clean

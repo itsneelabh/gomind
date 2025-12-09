@@ -374,6 +374,50 @@ cmd_status() {
     kubectl get events -n "${NAMESPACE}" --sort-by='.lastTimestamp' | tail -10
 }
 
+# Rollout - restart deployment to pick up new secrets/config
+cmd_rollout() {
+    print_header "Rolling Out Deployment"
+
+    local rebuild=false
+
+    # Check for --build flag
+    if [ "$2" = "--build" ] || [ "$2" = "build" ]; then
+        rebuild=true
+    fi
+
+    # Load env to update secrets
+    load_env
+
+    # Update secrets from .env
+    print_info "Updating secrets from .env..."
+    setup_api_keys
+
+    # Rebuild if requested
+    if [ "$rebuild" = true ]; then
+        print_info "Rebuilding Docker image..."
+        cmd_docker_build
+
+        if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
+            print_info "Loading image into kind cluster..."
+            kind load docker-image geocoding-tool:latest --name "${CLUSTER_NAME}"
+            print_success "Image loaded"
+        fi
+    fi
+
+    # Restart deployment
+    print_info "Restarting deployment..."
+    kubectl rollout restart deployment/geocoding-tool -n "${NAMESPACE}"
+
+    print_info "Waiting for rollout to complete..."
+    if kubectl rollout status deployment/geocoding-tool -n "${NAMESPACE}" --timeout=120s; then
+        print_success "Rollout complete!"
+    else
+        print_error "Rollout failed"
+        kubectl logs -n "${NAMESPACE}" -l app=geocoding-tool --tail=20
+        exit 1
+    fi
+}
+
 # Clean tool only (remove deployment but keep cluster)
 cmd_clean() {
     print_header "Cleaning Tool Deployment"
@@ -463,6 +507,8 @@ cmd_help() {
     echo "  forward-all   Port forward all services (tool + Grafana + Prometheus + Jaeger)"
     echo "  logs          View application logs"
     echo "  status        Show deployment status"
+    echo "  rollout       Restart deployment to pick up new secrets/config"
+    echo "                Use --build flag to rebuild Docker image first"
     echo "  help          Show this help message"
     echo ""
     echo "Configuration:"
@@ -537,6 +583,9 @@ case "${1:-help}" in
         ;;
     status)
         cmd_status
+        ;;
+    rollout)
+        cmd_rollout "$@"
         ;;
     clean)
         cmd_clean

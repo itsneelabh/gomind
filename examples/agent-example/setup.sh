@@ -477,6 +477,51 @@ cmd_status() {
     fi
 }
 
+cmd_rollout() {
+    print_header
+    print_step "Rolling out deployment..."
+
+    local rebuild=false
+
+    # Check for --build flag
+    if [ "$2" = "--build" ] || [ "$2" = "build" ]; then
+        rebuild=true
+    fi
+
+    # Load env to update secrets
+    load_env
+
+    # Update secrets from .env
+    print_step "Updating secrets from .env..."
+    setup_api_keys
+
+    # Rebuild if requested
+    if [ "$rebuild" = true ]; then
+        print_step "Rebuilding Docker image..."
+        docker build -t "$APP_NAME:latest" "$SCRIPT_DIR"
+
+        if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+            print_step "Loading image into kind cluster..."
+            kind load docker-image "$APP_NAME:latest" --name $CLUSTER_NAME
+            print_success "Image loaded"
+        fi
+    fi
+
+    # Restart deployment
+    print_step "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    print_step "Waiting for rollout to complete..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        print_success "Rollout complete!"
+    else
+        print_error "Rollout failed"
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+    echo ""
+}
+
 cmd_clean() {
     print_header
     print_step "Removing agent deployment..."
@@ -552,6 +597,8 @@ ${BLUE}Testing & Monitoring:${NC}
   ${YELLOW}forward-all${NC}        Port forward all services (agent + monitoring)
   ${YELLOW}logs${NC}               View agent logs
   ${YELLOW}status${NC}             Check deployment status
+  ${YELLOW}rollout${NC}            Restart deployment to pick up new secrets/config
+                     Use --build flag to rebuild Docker image first
 
 ${BLUE}Cleanup Commands:${NC}
   ${YELLOW}clean${NC}              Remove agent deployment only
@@ -638,6 +685,9 @@ case "${1:-help}" in
         ;;
     status)
         cmd_status
+        ;;
+    rollout)
+        cmd_rollout "$@"
         ;;
     clean)
         cmd_clean

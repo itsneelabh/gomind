@@ -542,6 +542,51 @@ test_orchestration() {
     log_success "Orchestration test complete!"
 }
 
+# Rollout - restart deployment to pick up new secrets/config
+rollout() {
+    print_header
+    log_info "Rolling out deployment..."
+
+    local rebuild=false
+
+    # Check for --build flag
+    if [ "$2" = "--build" ] || [ "$2" = "build" ]; then
+        rebuild=true
+    fi
+
+    # Load env to update secrets
+    load_env
+
+    # Update secrets from .env
+    log_info "Updating secrets from .env..."
+    setup_k8s_secrets
+
+    # Rebuild if requested
+    if [ "$rebuild" = true ]; then
+        log_info "Rebuilding Docker image..."
+        build_docker
+
+        if command -v kind &> /dev/null; then
+            log_info "Loading image into kind cluster..."
+            load_to_kind
+            log_success "Image loaded"
+        fi
+    fi
+
+    # Restart deployment
+    log_info "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    log_info "Waiting for rollout to complete..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        log_success "Rollout complete!"
+    else
+        log_error "Rollout failed"
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+}
+
 # Cleanup
 cleanup() {
     log_info "Cleaning up..."
@@ -737,6 +782,8 @@ Kubernetes Deployment Commands:
   forward        Port forward agent only
   forward-all    Port forward agent + monitoring (recommended)
   test           Run the orchestration test scenario
+  rollout        Restart deployment to pick up new secrets/config
+                 Use --build flag to rebuild Docker image first
   cleanup        Remove all deployed resources (agent only)
   cleanup-all    Delete Kind cluster and all resources
 
@@ -865,6 +912,9 @@ case "${1:-setup}" in
         ;;
     cleanup)
         cleanup
+        ;;
+    rollout)
+        rollout "$@"
         ;;
     cleanup-all)
         cleanup_all

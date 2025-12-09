@@ -380,6 +380,64 @@ cmd_status() {
     kubectl get svc -n $NAMESPACE -l app=$APP_NAME
 }
 
+# Rollout - restart deployment to pick up new secrets/config
+cmd_rollout() {
+    print_header "Rolling Out Deployment"
+
+    local rebuild=false
+
+    # Check for --build flag
+    if [ "$2" = "--build" ] || [ "$2" = "build" ]; then
+        rebuild=true
+    fi
+
+    # Load env to update secrets
+    load_env
+
+    # Update secrets from .env
+    print_info "Updating secrets from .env..."
+    if [ -n "$FINNHUB_API_KEY" ] && [ "$FINNHUB_API_KEY" != "your-finnhub-api-key-here" ]; then
+        kubectl create secret generic stock-tool-secrets \
+            --from-literal=FINNHUB_API_KEY="${FINNHUB_API_KEY}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        print_success "Finnhub API key updated"
+    fi
+
+    if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$GROQ_API_KEY" ]; then
+        kubectl create secret generic ai-provider-keys \
+            --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+            --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+            --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        print_success "AI API keys updated"
+    fi
+
+    # Rebuild if requested
+    if [ "$rebuild" = true ]; then
+        print_info "Rebuilding Docker image..."
+        cmd_docker_build
+
+        if command -v kind &> /dev/null; then
+            print_info "Loading image into kind cluster..."
+            kind load docker-image $APP_NAME:latest --name "$CLUSTER_NAME"
+            print_success "Image loaded"
+        fi
+    fi
+
+    # Restart deployment
+    print_info "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    print_info "Waiting for rollout to complete..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        print_success "Rollout complete!"
+    else
+        print_error "Rollout failed"
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+}
+
 # Clean up deployment only
 cmd_clean() {
     print_header "Cleaning Up Deployment"
@@ -439,6 +497,8 @@ cmd_help() {
     echo "  forward-all   Port forward tool + Grafana + Prometheus + Jaeger"
     echo "  logs          View tool logs"
     echo "  status        Check deployment status"
+    echo "  rollout       Restart deployment to pick up new secrets/config"
+    echo "                Use --build flag to rebuild Docker image first"
     echo ""
     echo "Cleanup Commands:"
     echo "  clean         Remove stock tool deployment only"
@@ -515,6 +575,9 @@ case "${1:-help}" in
         ;;
     status)
         cmd_status
+        ;;
+    rollout)
+        cmd_rollout "$@"
         ;;
     clean)
         cmd_clean

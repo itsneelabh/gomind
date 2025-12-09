@@ -847,6 +847,50 @@ cmd_status() {
     kubectl get pods -n $NAMESPACE -l "app in (redis,prometheus,grafana,otel-collector,jaeger)"
 }
 
+# Rollout - restart deployment to pick up new secrets/config
+cmd_rollout() {
+    print_header "Rolling Out Deployment"
+
+    local rebuild=false
+
+    # Check for --build flag
+    if [ "$2" = "--build" ] || [ "$2" = "build" ]; then
+        rebuild=true
+    fi
+
+    # Load env to update secrets
+    load_env
+
+    # Update secrets from .env
+    print_info "Updating secrets from .env..."
+    setup_k8s_secrets
+
+    # Rebuild if requested
+    if [ "$rebuild" = true ]; then
+        print_info "Rebuilding Docker images..."
+        build_docker
+
+        if command -v kind &> /dev/null; then
+            print_info "Loading images into kind cluster..."
+            load_to_kind
+            print_success "Images loaded"
+        fi
+    fi
+
+    # Restart deployment
+    print_info "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    print_info "Waiting for rollout to complete..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        print_success "Rollout complete!"
+    else
+        print_error "Rollout failed"
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+}
+
 # Build the agent (standardized)
 cmd_build() {
     print_header "Building Agent"
@@ -916,6 +960,8 @@ STANDARDIZED 1-CLICK DEPLOYMENT COMMANDS:
   forward       Port forward the agent service only
   forward-all   Port forward agent + monitoring dashboards
   test          Run resilience test scenario
+  rollout       Restart deployment to pick up new secrets/config
+                Use --build flag to rebuild Docker image first
   clean         Remove agent deployment only
   clean-all     Delete Kind cluster and all resources
 
@@ -1006,6 +1052,9 @@ case "${1:-help}" in
         ;;
     status)
         cmd_status
+        ;;
+    rollout)
+        cmd_rollout "$@"
         ;;
     # Legacy commands (kept for compatibility)
     setup)

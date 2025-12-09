@@ -347,6 +347,50 @@ cmd_status() {
     kubectl get pods -n $NAMESPACE -l "app in (prometheus,grafana,otel-collector,jaeger)"
 }
 
+# Rollout - restart deployment to pick up new secrets/config
+cmd_rollout() {
+    print_header "Rolling Out Deployment"
+
+    local rebuild=false
+
+    # Check for --build flag
+    if [ "$2" = "--build" ] || [ "$2" = "build" ]; then
+        rebuild=true
+    fi
+
+    # Load env to update secrets
+    load_env
+
+    # Update secrets from .env
+    print_info "Updating secrets from .env..."
+    setup_api_keys
+
+    # Rebuild if requested
+    if [ "$rebuild" = true ]; then
+        print_info "Rebuilding Docker image..."
+        cmd_docker_build
+
+        if command -v kind &> /dev/null; then
+            print_info "Loading image into kind cluster..."
+            kind load docker-image $APP_NAME:latest --name "$CLUSTER_NAME"
+            print_success "Image loaded"
+        fi
+    fi
+
+    # Restart deployment
+    print_info "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    print_info "Waiting for rollout to complete..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        print_success "Rollout complete!"
+    else
+        print_error "Rollout failed"
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+}
+
 # Clean up agent only
 cmd_clean() {
     print_header "Cleaning Up Agent"
@@ -399,6 +443,8 @@ cmd_help() {
     echo "  forward-all   Port forward agent + monitoring dashboards"
     echo "  logs          View agent logs"
     echo "  status        Check deployment status"
+    echo "  rollout       Restart deployment to pick up new secrets/config"
+    echo "                Use --build flag to rebuild Docker image first"
     echo "  clean         Remove agent deployment only"
     echo "  clean-all     Delete Kind cluster and all resources"
     echo "  help          Show this help message"
@@ -455,6 +501,9 @@ case "${1:-help}" in
         ;;
     status)
         cmd_status
+        ;;
+    rollout)
+        cmd_rollout "$@"
         ;;
     clean)
         cmd_clean
