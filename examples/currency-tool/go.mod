@@ -3,9 +3,10 @@ module github.com/itsneelabh/gomind/examples/currency-tool
 go 1.25
 
 require (
-	github.com/itsneelabh/gomind/core v0.7.4
-	github.com/itsneelabh/gomind/telemetry v0.7.4
+	github.com/itsneelabh/gomind/core v0.7.5
+	github.com/itsneelabh/gomind/telemetry v0.7.5
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0
+	go.opentelemetry.io/otel v1.38.0
 )
 
 require (
@@ -20,7 +21,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
-	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.38.0 // indirect

@@ -7,11 +7,21 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // handleStockQuote processes stock quote requests
 func (s *StockTool) handleStockQuote(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "stock_quote"),
+	)
 
 	s.Logger.InfoWithContext(ctx, "Processing stock quote request", map[string]interface{}{
 		"method": r.Method,
@@ -34,6 +44,12 @@ func (s *StockTool) handleStockQuote(rw http.ResponseWriter, r *http.Request) {
 		"symbol": req.Symbol,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_finnhub_api",
+		attribute.String("symbol", req.Symbol),
+		attribute.String("api", "stock_quote"),
+	)
+
 	// Try to get real data from Finnhub API
 	startTime := time.Now()
 	quote, err := s.client.GetStockQuote(ctx, req.Symbol)
@@ -42,6 +58,10 @@ func (s *StockTool) handleStockQuote(rw http.ResponseWriter, r *http.Request) {
 	var response StockQuoteResponse
 
 	if err != nil || quote == nil {
+		// Record error on span for Jaeger visibility
+		if err != nil {
+			telemetry.RecordSpanError(ctx, err)
+		}
 		// Fallback to mock data if API fails
 		s.Logger.WarnWithContext(ctx, "Finnhub API call failed, using mock data", map[string]interface{}{
 			"error":       err,
@@ -77,6 +97,14 @@ func (s *StockTool) handleStockQuote(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(rw).Encode(response)
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "stock_quote_retrieved",
+		attribute.String("symbol", req.Symbol),
+		attribute.Float64("current_price", response.CurrentPrice),
+		attribute.Float64("change", response.Change),
+		attribute.String("source", response.Source),
+	)
+
 	s.Logger.InfoWithContext(ctx, "Stock quote request completed", map[string]interface{}{
 		"symbol":        req.Symbol,
 		"current_price": response.CurrentPrice,
@@ -88,6 +116,13 @@ func (s *StockTool) handleStockQuote(rw http.ResponseWriter, r *http.Request) {
 // handleCompanyProfile processes company profile requests
 func (s *StockTool) handleCompanyProfile(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "company_profile"),
+	)
 
 	s.Logger.InfoWithContext(ctx, "Processing company profile request", map[string]interface{}{
 		"method": r.Method,
@@ -108,6 +143,12 @@ func (s *StockTool) handleCompanyProfile(rw http.ResponseWriter, r *http.Request
 		"symbol": req.Symbol,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_finnhub_api",
+		attribute.String("symbol", req.Symbol),
+		attribute.String("api", "company_profile"),
+	)
+
 	// Try to get real data from Finnhub API
 	startTime := time.Now()
 	profile, err := s.client.GetCompanyProfile(ctx, req.Symbol)
@@ -116,6 +157,10 @@ func (s *StockTool) handleCompanyProfile(rw http.ResponseWriter, r *http.Request
 	var response CompanyProfileResponse
 
 	if err != nil || profile == nil {
+		// Record error on span for Jaeger visibility
+		if err != nil {
+			telemetry.RecordSpanError(ctx, err)
+		}
 		// Fallback to mock data if API fails
 		s.Logger.WarnWithContext(ctx, "Finnhub API call failed, using mock data", map[string]interface{}{
 			"error":       err,
@@ -147,6 +192,15 @@ func (s *StockTool) handleCompanyProfile(rw http.ResponseWriter, r *http.Request
 	rw.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(rw).Encode(response)
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "company_profile_retrieved",
+		attribute.String("symbol", req.Symbol),
+		attribute.String("name", response.Name),
+		attribute.String("industry", response.Industry),
+		attribute.Float64("market_cap", response.MarketCapitalization),
+		attribute.String("source", response.Source),
+	)
+
 	s.Logger.InfoWithContext(ctx, "Company profile request completed", map[string]interface{}{
 		"symbol":     req.Symbol,
 		"name":       response.Name,
@@ -159,6 +213,13 @@ func (s *StockTool) handleCompanyProfile(rw http.ResponseWriter, r *http.Request
 // handleCompanyNews processes company news requests
 func (s *StockTool) handleCompanyNews(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "company_news"),
+	)
 
 	s.Logger.InfoWithContext(ctx, "Processing company news request", map[string]interface{}{
 		"method": r.Method,
@@ -181,6 +242,14 @@ func (s *StockTool) handleCompanyNews(rw http.ResponseWriter, r *http.Request) {
 		"to":     req.To,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_finnhub_api",
+		attribute.String("symbol", req.Symbol),
+		attribute.String("api", "company_news"),
+		attribute.String("from", req.From),
+		attribute.String("to", req.To),
+	)
+
 	// Try to get real data from Finnhub API
 	startTime := time.Now()
 	newsItems, err := s.client.GetCompanyNews(ctx, req.Symbol, req.From, req.To)
@@ -189,6 +258,8 @@ func (s *StockTool) handleCompanyNews(rw http.ResponseWriter, r *http.Request) {
 	var response CompanyNewsResponse
 
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		// Fallback to mock data if API fails
 		s.Logger.WarnWithContext(ctx, "Finnhub API call failed, using mock data", map[string]interface{}{
 			"error":       err.Error(),
@@ -234,6 +305,13 @@ func (s *StockTool) handleCompanyNews(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(rw).Encode(response)
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "company_news_retrieved",
+		attribute.String("symbol", req.Symbol),
+		attribute.Int("news_count", len(response.News)),
+		attribute.String("source", response.Source),
+	)
+
 	s.Logger.InfoWithContext(ctx, "Company news request completed", map[string]interface{}{
 		"symbol":     req.Symbol,
 		"news_count": len(response.News),
@@ -244,6 +322,13 @@ func (s *StockTool) handleCompanyNews(rw http.ResponseWriter, r *http.Request) {
 // handleMarketNews processes market news requests
 func (s *StockTool) handleMarketNews(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "market_news"),
+	)
 
 	s.Logger.InfoWithContext(ctx, "Processing market news request", map[string]interface{}{
 		"method": r.Method,
@@ -262,6 +347,12 @@ func (s *StockTool) handleMarketNews(rw http.ResponseWriter, r *http.Request) {
 		"category": req.Category,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_finnhub_api",
+		attribute.String("category", req.Category),
+		attribute.String("api", "market_news"),
+	)
+
 	// Try to get real data from Finnhub API
 	startTime := time.Now()
 	newsItems, err := s.client.GetMarketNews(ctx, req.Category)
@@ -270,6 +361,8 @@ func (s *StockTool) handleMarketNews(rw http.ResponseWriter, r *http.Request) {
 	var response MarketNewsResponse
 
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		// Fallback to mock data if API fails
 		s.Logger.WarnWithContext(ctx, "Finnhub API call failed, using mock data", map[string]interface{}{
 			"error":       err.Error(),
@@ -308,6 +401,13 @@ func (s *StockTool) handleMarketNews(rw http.ResponseWriter, r *http.Request) {
 
 	rw.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(rw).Encode(response)
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "market_news_retrieved",
+		attribute.String("category", req.Category),
+		attribute.Int("news_count", len(response.News)),
+		attribute.String("source", response.Source),
+	)
 
 	s.Logger.InfoWithContext(ctx, "Market news request completed", map[string]interface{}{
 		"category":   req.Category,

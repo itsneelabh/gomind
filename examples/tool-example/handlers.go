@@ -8,11 +8,20 @@ import (
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // handleCurrentWeather processes current weather requests
 func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "current_weather"),
+	)
 
 	// Log the request (framework auto-injects logger)
 	// Using context-aware logging for distributed tracing and request correlation
@@ -36,6 +45,12 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 		"units":    req.Units,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_weather_api",
+		attribute.String("location", req.Location),
+		attribute.String("units", req.Units),
+	)
+
 	// Try to get real weather data from API
 	startTime := time.Now()
 	weather, err := w.fetchRealWeatherData(ctx, req.Location, req.Units)
@@ -44,6 +59,9 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 	rw.Header().Set("Content-Type", "application/json")
 
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
+
 		// Return structured error instead of mock data
 		// This allows agents to understand the error and potentially fix/retry
 		toolErr := w.classifyError(err, req.Location)
@@ -89,6 +107,14 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 	}
 	json.NewEncoder(rw).Encode(response)
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "weather_retrieved",
+		attribute.String("location", req.Location),
+		attribute.Float64("temperature", weather.Temperature),
+		attribute.String("condition", weather.Condition),
+		attribute.String("source", weather.Source),
+	)
+
 	// Log the response data
 	w.Logger.InfoWithContext(ctx, "Current weather request completed", map[string]interface{}{
 		"location":    req.Location,
@@ -102,6 +128,13 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 // handleForecast processes forecast requests
 func (w *WeatherTool) handleForecast(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "forecast"),
+	)
 
 	w.Logger.InfoWithContext(ctx, "Processing forecast request", map[string]interface{}{
 		"method": r.Method,
@@ -145,6 +178,13 @@ func (w *WeatherTool) handleForecast(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(rw).Encode(response)
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "forecast_retrieved",
+		attribute.String("location", req.Location),
+		attribute.Int("days", req.Days),
+		attribute.Int("forecast_count", len(forecasts)),
+	)
+
 	// Log the response summary
 	w.Logger.InfoWithContext(ctx, "Forecast request completed", map[string]interface{}{
 		"location":      req.Location,
@@ -156,6 +196,13 @@ func (w *WeatherTool) handleForecast(rw http.ResponseWriter, r *http.Request) {
 // handleAlerts processes weather alert requests
 func (w *WeatherTool) handleAlerts(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "alerts"),
+	)
 
 	location := r.URL.Query().Get("location")
 	if location == "" {
@@ -186,6 +233,13 @@ func (w *WeatherTool) handleAlerts(rw http.ResponseWriter, r *http.Request) {
 
 	rw.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(rw).Encode(response)
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "alerts_retrieved",
+		attribute.String("location", location),
+		attribute.Int("alert_count", len(alerts)),
+		attribute.Bool("has_alerts", len(alerts) > 0),
+	)
 
 	// Log the response summary
 	w.Logger.InfoWithContext(ctx, "Weather alerts request completed", map[string]interface{}{

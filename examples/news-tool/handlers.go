@@ -9,10 +9,18 @@ import (
 	"strings"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func (n *NewsTool) handleSearchNews(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+	)
 
 	if n.apiKey == "" {
 		n.sendError(w, "GNews API key not configured. Get one at https://gnews.io/", http.StatusServiceUnavailable, ErrCodeAPIKeyMissing)
@@ -44,8 +52,17 @@ func (n *NewsTool) handleSearchNews(w http.ResponseWriter, r *http.Request) {
 		"language":    req.Language,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_gnews_api",
+		attribute.String("query", req.Query),
+		attribute.Int("max_results", req.MaxResults),
+		attribute.String("language", req.Language),
+	)
+
 	result, err := n.callGNewsSearch(ctx, req)
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		n.Logger.ErrorWithContext(ctx, "GNews API failed", map[string]interface{}{
 			"error": err.Error(),
 			"query": req.Query,
@@ -62,6 +79,13 @@ func (n *NewsTool) handleSearchNews(w http.ResponseWriter, r *http.Request) {
 		"query":          req.Query,
 		"articles_found": len(result.Articles),
 	})
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "news_retrieved",
+		attribute.String("query", req.Query),
+		attribute.Int("articles_found", len(result.Articles)),
+		attribute.Int("total_articles", result.TotalArticles),
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(core.ToolResponse{

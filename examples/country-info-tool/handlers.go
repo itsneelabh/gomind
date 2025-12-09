@@ -9,10 +9,18 @@ import (
 	"strings"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func (c *CountryTool) handleCountryInfo(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+	)
 
 	var req CountryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -29,8 +37,15 @@ func (c *CountryTool) handleCountryInfo(w http.ResponseWriter, r *http.Request) 
 		"country": req.Country,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_restcountries_api",
+		attribute.String("country", req.Country),
+	)
+
 	result, err := c.callRestCountries(ctx, req.Country)
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		c.Logger.ErrorWithContext(ctx, "RestCountries API failed", map[string]interface{}{
 			"error":   err.Error(),
 			"country": req.Country,
@@ -47,6 +62,14 @@ func (c *CountryTool) handleCountryInfo(w http.ResponseWriter, r *http.Request) 
 		"country":    result.Name,
 		"population": result.Population,
 	})
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "country_info_retrieved",
+		attribute.String("country", result.Name),
+		attribute.Int64("population", int64(result.Population)),
+		attribute.String("capital", result.Capital),
+		attribute.String("region", result.Region),
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(core.ToolResponse{

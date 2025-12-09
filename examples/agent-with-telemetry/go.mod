@@ -4,9 +4,10 @@ go 1.25
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/itsneelabh/gomind/ai v0.7.4
-	github.com/itsneelabh/gomind/core v0.7.4
-	github.com/itsneelabh/gomind/telemetry v0.7.4
+	github.com/itsneelabh/gomind/ai v0.7.5
+	github.com/itsneelabh/gomind/core v0.7.5
+	github.com/itsneelabh/gomind/telemetry v0.7.5
+	go.opentelemetry.io/otel v1.38.0
 )
 
 require (
@@ -21,7 +22,6 @@ require (
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.58.0 // indirect
-	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.38.0 // indirect

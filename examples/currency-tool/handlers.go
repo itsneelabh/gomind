@@ -8,10 +8,19 @@ import (
 	"strings"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 func (c *CurrencyTool) handleConvert(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "convert"),
+	)
 
 	c.Logger.InfoWithContext(ctx, "Processing currency conversion", map[string]interface{}{
 		"method": r.Method,
@@ -43,8 +52,17 @@ func (c *CurrencyTool) handleConvert(w http.ResponseWriter, r *http.Request) {
 		"amount": req.Amount,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_frankfurter_api",
+		attribute.String("from", req.From),
+		attribute.String("to", req.To),
+		attribute.Float64("amount", req.Amount),
+	)
+
 	result, err := c.callFrankfurterConvert(ctx, req.From, req.To, req.Amount)
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		c.Logger.ErrorWithContext(ctx, "Frankfurter API call failed", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -64,6 +82,15 @@ func (c *CurrencyTool) handleConvert(w http.ResponseWriter, r *http.Request) {
 		"rate":   result.Rate,
 	})
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "currency_converted",
+		attribute.String("from", req.From),
+		attribute.String("to", req.To),
+		attribute.Float64("amount", req.Amount),
+		attribute.Float64("result", result.Result),
+		attribute.Float64("rate", result.Rate),
+	)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(core.ToolResponse{
 		Success: true,
@@ -73,6 +100,13 @@ func (c *CurrencyTool) handleConvert(w http.ResponseWriter, r *http.Request) {
 
 func (c *CurrencyTool) handleRates(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "rates"),
+	)
 
 	c.Logger.InfoWithContext(ctx, "Processing exchange rates request", map[string]interface{}{
 		"method": r.Method,
@@ -97,8 +131,16 @@ func (c *CurrencyTool) handleRates(w http.ResponseWriter, r *http.Request) {
 		"currencies": req.Currencies,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_frankfurter_api",
+		attribute.String("base", req.Base),
+		attribute.Int("currencies_count", len(req.Currencies)),
+	)
+
 	result, err := c.callFrankfurterRates(ctx, req.Base, req.Currencies)
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		c.Logger.ErrorWithContext(ctx, "Frankfurter API call failed", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -114,6 +156,12 @@ func (c *CurrencyTool) handleRates(w http.ResponseWriter, r *http.Request) {
 		"base":        req.Base,
 		"rates_count": len(result.Rates),
 	})
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "exchange_rates_retrieved",
+		attribute.String("base", req.Base),
+		attribute.Int("rates_count", len(result.Rates)),
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(core.ToolResponse{

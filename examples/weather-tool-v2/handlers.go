@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // handleWeatherForecast processes weather forecast requests
@@ -18,6 +20,12 @@ func (w *WeatherTool) handleWeatherForecast(rw http.ResponseWriter, r *http.Requ
 		"method": r.Method,
 		"path":   r.URL.Path,
 	})
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+	)
 
 	var req WeatherRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -46,6 +54,14 @@ func (w *WeatherTool) handleWeatherForecast(rw http.ResponseWriter, r *http.Requ
 		"days": days,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_external_api",
+		attribute.String("api", "open-meteo"),
+		attribute.Float64("lat", req.Latitude),
+		attribute.Float64("lon", req.Longitude),
+		attribute.Int("days", days),
+	)
+
 	// Call Open-Meteo API
 	result, err := w.callOpenMeteoForecast(ctx, req.Latitude, req.Longitude, days)
 	if err != nil {
@@ -54,6 +70,8 @@ func (w *WeatherTool) handleWeatherForecast(rw http.ResponseWriter, r *http.Requ
 			"lat":   req.Latitude,
 			"lon":   req.Longitude,
 		})
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		w.sendError(rw, "Weather service unavailable", http.StatusServiceUnavailable, ErrCodeServiceUnavailable)
 		return
 	}
@@ -63,6 +81,12 @@ func (w *WeatherTool) handleWeatherForecast(rw http.ResponseWriter, r *http.Requ
 		"lon":           req.Longitude,
 		"forecast_days": len(result.Forecast),
 	})
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "forecast_retrieved",
+		attribute.Int("forecast_days", len(result.Forecast)),
+		attribute.String("condition", result.Condition),
+	)
 
 	rw.Header().Set("Content-Type", "application/json")
 	response := core.ToolResponse{
@@ -80,6 +104,12 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 		"method": r.Method,
 		"path":   r.URL.Path,
 	})
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+	)
 
 	var req WeatherRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -101,6 +131,13 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 		"lon": req.Longitude,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_external_api",
+		attribute.String("api", "open-meteo"),
+		attribute.Float64("lat", req.Latitude),
+		attribute.Float64("lon", req.Longitude),
+	)
+
 	// Call Open-Meteo API for current weather
 	result, err := w.callOpenMeteoCurrent(ctx, req.Latitude, req.Longitude)
 	if err != nil {
@@ -109,6 +146,8 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 			"lat":   req.Latitude,
 			"lon":   req.Longitude,
 		})
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		w.sendError(rw, "Weather service unavailable", http.StatusServiceUnavailable, ErrCodeServiceUnavailable)
 		return
 	}
@@ -119,6 +158,12 @@ func (w *WeatherTool) handleCurrentWeather(rw http.ResponseWriter, r *http.Reque
 		"temperature": result.CurrentTemp,
 		"condition":   result.Condition,
 	})
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "weather_retrieved",
+		attribute.Float64("temperature", result.CurrentTemp),
+		attribute.String("condition", result.Condition),
+	)
 
 	rw.Header().Set("Content-Type", "application/json")
 	response := core.ToolResponse{

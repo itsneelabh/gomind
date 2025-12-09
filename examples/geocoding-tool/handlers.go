@@ -11,11 +11,20 @@ import (
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // handleGeocode processes forward geocoding requests (location -> coordinates)
 func (g *GeocodingTool) handleGeocode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "geocode"),
+	)
 
 	g.Logger.InfoWithContext(ctx, "Processing geocode request", map[string]interface{}{
 		"method": r.Method,
@@ -40,6 +49,12 @@ func (g *GeocodingTool) handleGeocode(w http.ResponseWriter, r *http.Request) {
 		"location": req.Location,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_nominatim_api",
+		attribute.String("location", req.Location),
+		attribute.String("api", "nominatim-search"),
+	)
+
 	// Rate limit: Nominatim requires max 1 request per second
 	// In production, use a proper rate limiter
 	time.Sleep(100 * time.Millisecond)
@@ -47,6 +62,8 @@ func (g *GeocodingTool) handleGeocode(w http.ResponseWriter, r *http.Request) {
 	// Call Nominatim API
 	result, err := g.callNominatimSearch(ctx, req.Location)
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		g.Logger.ErrorWithContext(ctx, "Nominatim API call failed", map[string]interface{}{
 			"error":    err.Error(),
 			"location": req.Location,
@@ -62,6 +79,14 @@ func (g *GeocodingTool) handleGeocode(w http.ResponseWriter, r *http.Request) {
 		"display_name": result.DisplayName,
 	})
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "geocode_completed",
+		attribute.String("location", req.Location),
+		attribute.Float64("latitude", result.Latitude),
+		attribute.Float64("longitude", result.Longitude),
+		attribute.String("country", result.Country),
+	)
+
 	w.Header().Set("Content-Type", "application/json")
 	response := core.ToolResponse{
 		Success: true,
@@ -73,6 +98,13 @@ func (g *GeocodingTool) handleGeocode(w http.ResponseWriter, r *http.Request) {
 // handleReverseGeocode processes reverse geocoding requests (coordinates -> location)
 func (g *GeocodingTool) handleReverseGeocode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "reverse_geocode"),
+	)
 
 	g.Logger.InfoWithContext(ctx, "Processing reverse geocode request", map[string]interface{}{
 		"method": r.Method,
@@ -103,12 +135,21 @@ func (g *GeocodingTool) handleReverseGeocode(w http.ResponseWriter, r *http.Requ
 		"lon": req.Longitude,
 	})
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_nominatim_api",
+		attribute.Float64("latitude", req.Latitude),
+		attribute.Float64("longitude", req.Longitude),
+		attribute.String("api", "nominatim-reverse"),
+	)
+
 	// Rate limit: Nominatim requires max 1 request per second
 	time.Sleep(100 * time.Millisecond)
 
 	// Call Nominatim reverse API
 	result, err := g.callNominatimReverse(ctx, req.Latitude, req.Longitude)
 	if err != nil {
+		// Record error on span for Jaeger visibility
+		telemetry.RecordSpanError(ctx, err)
 		g.Logger.ErrorWithContext(ctx, "Nominatim reverse API call failed", map[string]interface{}{
 			"error": err.Error(),
 			"lat":   req.Latitude,
@@ -123,6 +164,14 @@ func (g *GeocodingTool) handleReverseGeocode(w http.ResponseWriter, r *http.Requ
 		"lon":          req.Longitude,
 		"display_name": result.DisplayName,
 	})
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "reverse_geocode_completed",
+		attribute.Float64("latitude", req.Latitude),
+		attribute.Float64("longitude", req.Longitude),
+		attribute.String("display_name", result.DisplayName),
+		attribute.String("country", result.Country),
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	response := core.ToolResponse{

@@ -8,12 +8,19 @@ import (
 
 	"github.com/itsneelabh/gomind/core"
 	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // handleResearchTopic demonstrates intelligent orchestration with comprehensive telemetry
 func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Request) {
 	startTime := time.Now()
 	ctx := req.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", req.Method),
+		attribute.String("path", req.URL.Path),
+	)
 
 	// Track overall operation duration with deferred call
 	// This ensures the metric is emitted even if the function returns early
@@ -62,6 +69,11 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 
 	// NEW: Track discovery metrics
 	telemetry.Gauge("agent.tools.discovered", float64(len(tools)))
+
+	// Add span event for tools discovered
+	telemetry.AddSpanEvent(ctx, "tools_discovered",
+		attribute.Int("tool_count", len(tools)),
+	)
 
 	// Log discovered tools with their names
 	toolNames := make([]string, 0, len(tools))
@@ -223,6 +235,14 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 
 	rw.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(rw).Encode(response)
+
+	// Add completion span event
+	telemetry.AddSpanEvent(ctx, "research_completed",
+		attribute.String("topic", request.Topic),
+		attribute.Int("tools_used", len(toolsUsed)),
+		attribute.Int("results_count", len(results)),
+		attribute.Float64("confidence", response.Confidence),
+	)
 
 	r.Logger.Info("Research topic completed", map[string]interface{}{
 		"topic":           request.Topic,

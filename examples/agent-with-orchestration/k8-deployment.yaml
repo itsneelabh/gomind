@@ -1,0 +1,246 @@
+# Kubernetes Deployment for Travel Research Agent with Orchestration
+# Agent Namespace: gomind-examples
+# Infrastructure Namespace: default
+# Port: 8094
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: travel-research-agent-config
+  namespace: gomind-examples
+  labels:
+    app: travel-research-agent
+    component: agent
+    framework: gomind
+data:
+  # Environment configuration
+  APP_ENV: "production"
+  PORT: "8094"
+  NAMESPACE: "gomind-examples"
+
+  # Framework configuration
+  DEV_MODE: "false"
+  GOMIND_LOG_LEVEL: "debug"
+  GOMIND_DEBUG: "true"
+  GOMIND_VALIDATE_PAYLOADS: "false"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: travel-research-agent
+  namespace: gomind-examples
+  labels:
+    app: travel-research-agent
+    component: agent
+    framework: gomind
+    version: v1
+    module: orchestration
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: travel-research-agent
+  template:
+    metadata:
+      labels:
+        app: travel-research-agent
+        component: agent
+        framework: gomind
+        version: v1
+        module: orchestration
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8094"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: default
+
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+
+      containers:
+      - name: agent
+        image: travel-research-agent:latest
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 8094
+          protocol: TCP
+
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: travel-research-agent-config
+        - secretRef:
+            name: ai-provider-keys
+            optional: true
+
+        # Additional environment variables
+        env:
+        - name: GOMIND_AGENT_NAME
+          value: "travel-research-agent"
+        - name: REDIS_URL
+          value: "redis://redis.gomind-examples:6379"
+        - name: GOMIND_REDIS_URL  # For backward compatibility
+          value: "redis://redis.gomind-examples:6379"
+        # Redis Registration Resilience (handles Redis startup race conditions)
+        - name: GOMIND_DISCOVERY_RETRY
+          value: "true"
+        - name: GOMIND_DISCOVERY_RETRY_INTERVAL
+          value: "30s"
+        - name: GOMIND_DEV_MODE
+          value: "false"
+        # Logging Configuration
+        - name: GOMIND_LOG_FORMAT
+          value: "json"
+        # Orchestration configuration
+        - name: GOMIND_ORCHESTRATOR_MODE
+          value: "autonomous"
+        # K8s service discovery configuration (CRITICAL for proper registration)
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "travel-research-agent-service"
+        - name: GOMIND_K8S_SERVICE_PORT
+          value: "80"
+        - name: GOMIND_K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: GOMIND_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        # Telemetry Configuration
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.gomind-examples:4318"
+
+        # Resource limits
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Startup probe (for slow-starting applications)
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 12
+
+        # Security context for container
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: travel-research-agent-service
+  namespace: gomind-examples
+  labels:
+    app: travel-research-agent
+    component: agent
+    framework: gomind
+    gomind.framework/type: agent
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8094
+    protocol: TCP
+  selector:
+    app: travel-research-agent
+
+---
+# Horizontal Pod Autoscaler (optional - uncomment to enable)
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: travel-research-agent-hpa
+#   namespace: gomind-examples
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: travel-research-agent
+#   minReplicas: 2
+#   maxReplicas: 10
+#   metrics:
+#   - type: Resource
+#     resource:
+#       name: cpu
+#       target:
+#         type: Utilization
+#         averageUtilization: 70
+#   - type: Resource
+#     resource:
+#       name: memory
+#       target:
+#         type: Utilization
+#         averageUtilization: 80
+
+---
+# PodDisruptionBudget (optional - uncomment for production)
+# apiVersion: policy/v1
+# kind: PodDisruptionBudget
+# metadata:
+#   name: travel-research-agent-pdb
+#   namespace: gomind-examples
+# spec:
+#   minAvailable: 1
+#   selector:
+#     matchLabels:
+#       app: travel-research-agent
