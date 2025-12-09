@@ -378,6 +378,7 @@ kubectl apply -f tool-example/k8-deployment.yaml
 - OpenTelemetry integration and trace visualization
 - User and tenant context tracking
 - Performance monitoring across microservices
+- **See Also:** [Distributed Tracing Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md) for comprehensive tracing patterns
 
 #### [error_handling](error_handling/) - Framework Error Consistency
 - Structured error types and sentinel error patterns
@@ -1071,7 +1072,7 @@ RUN go mod download
 COPY *.go ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o service .
 
-# Stage 2: Runtime (results in ~16MB image)
+# Stage 2: Runtime (tools: ~21-32MB, agents: ~29-51MB depending on telemetry)
 FROM alpine:latest
 RUN adduser -D -u 1001 appuser
 WORKDIR /app
@@ -1211,6 +1212,7 @@ When working with AI assistants (Claude, Copilot, etc.), use these prompts:
 - **[Setup Script](setup-kind-demo.sh)** - Automated demo environment
 - **[API Keys Guide](setup-api-keys.sh)** - Automated API key configuration
 - **[Cloud Deployment](CLOUD_DEPLOYMENT_GUIDE.md)** - Production deployment guide
+- **[Distributed Tracing Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md)** - End-to-end request tracing and log correlation
 - **[Individual Examples](.)** - Each example has its own README
 - **[Framework Core](../core/)** - Core framework documentation
 - **[AI Integration](../ai/)** - AI provider configuration
