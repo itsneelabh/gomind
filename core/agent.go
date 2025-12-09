@@ -763,7 +763,9 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 	}
 
 	// Create handler with middleware stack
-	// Order: CORS -> Logging -> Recovery -> Handler
+	// Order (outermost to innermost): CORS -> User Middleware -> Logging -> Recovery -> Handler
+	// User middleware (e.g., TracingMiddleware) is placed after CORS to avoid tracing preflight requests,
+	// and before logging so traces can capture the full request lifecycle.
 	var handler http.Handler = b.mux
 
 	// Always wrap with panic recovery middleware (innermost - catches panics from handler)
@@ -771,6 +773,12 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 
 	// Add request/response logging middleware
 	handler = LoggingMiddleware(b.Logger, b.Config.Development.Enabled)(handler)
+
+	// Apply user-provided middleware (e.g., telemetry.TracingMiddleware)
+	// These are applied in reverse order so the first middleware in the slice is outermost
+	for i := len(b.Config.HTTP.Middleware) - 1; i >= 0; i-- {
+		handler = b.Config.HTTP.Middleware[i](handler)
+	}
 
 	// Add CORS middleware if enabled (outermost - handles preflight requests)
 	if b.Config.HTTP.CORS.Enabled {
