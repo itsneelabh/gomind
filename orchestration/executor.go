@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"runtime/debug"
 	"strings"
@@ -55,7 +56,16 @@ func NewSmartExecutor(catalog *AgentCatalog) *SmartExecutor {
 	// This enables distributed tracing across the orchestration workflow.
 	// Per FRAMEWORK_DESIGN_PRINCIPLES.md, orchestration is allowed to import telemetry.
 	tracedClient := telemetry.NewTracedHTTPClient(nil)
-	tracedClient.Timeout = 30 * time.Second
+
+	// Configurable timeout: GOMIND_ORCHESTRATION_TIMEOUT (default: 60s)
+	// For long-running AI workflows, set to higher values (e.g., "5m", "10m")
+	timeout := 60 * time.Second
+	if envTimeout := os.Getenv("GOMIND_ORCHESTRATION_TIMEOUT"); envTimeout != "" {
+		if parsed, err := time.ParseDuration(envTimeout); err == nil {
+			timeout = parsed
+		}
+	}
+	tracedClient.Timeout = timeout
 
 	return &SmartExecutor{
 		catalog:        catalog,

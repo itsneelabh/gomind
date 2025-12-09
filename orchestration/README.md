@@ -792,6 +792,19 @@ if metrics.ComponentCallsFailed > 10 {
 
 ## 🛠️ Configuration
 
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOMIND_ORCHESTRATION_TIMEOUT` | `60s` | HTTP client timeout for tool/agent calls. For long-running AI workflows, set higher values (e.g., `5m`, `10m`). Uses Go duration format. |
+
+```bash
+# Example: Allow 5 minutes for AI-heavy workflows
+export GOMIND_ORCHESTRATION_TIMEOUT=5m
+```
+
+### Programmatic Configuration
+
 ```go
 config := &orchestration.OrchestratorConfig{
     // Routing mode

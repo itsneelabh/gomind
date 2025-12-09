@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"time"
 
@@ -30,7 +31,17 @@ type WorkflowHTTPClient struct {
 // Uses TracedHTTPClient for distributed tracing context propagation.
 func NewWorkflowHTTPClient() *WorkflowHTTPClient {
 	tracedClient := telemetry.NewTracedHTTPClient(nil)
-	tracedClient.Timeout = 30 * time.Second
+
+	// Configurable timeout: GOMIND_ORCHESTRATION_TIMEOUT (default: 60s)
+	// For long-running AI workflows, set to higher values (e.g., "5m", "10m")
+	timeout := 60 * time.Second
+	if envTimeout := os.Getenv("GOMIND_ORCHESTRATION_TIMEOUT"); envTimeout != "" {
+		if parsed, err := time.ParseDuration(envTimeout); err == nil {
+			timeout = parsed
+		}
+	}
+	tracedClient.Timeout = timeout
+
 	return &WorkflowHTTPClient{
 		httpClient: tracedClient,
 	}

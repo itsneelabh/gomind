@@ -584,6 +584,7 @@ config := core.NewConfig(
 // Set: GOMIND_NAME=weather-service
 // Set: GOMIND_PORT=8080
 // Set: REDIS_URL=redis://localhost:6379
+// Set: GOMIND_ORCHESTRATION_TIMEOUT=5m  // For long-running AI workflows
 config := core.DefaultConfig() // Reads from env
 
 // 3. File-based (complex configs)

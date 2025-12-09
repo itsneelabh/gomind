@@ -279,6 +279,12 @@ These environment variables **must** be set for the framework to function:
 | `core.EnvNamespace` | `NAMESPACE` | `"default"` | Kubernetes namespace (auto-detected in K8s) |
 | `core.EnvServiceName` | `GOMIND_K8S_SERVICE_NAME` | Auto-detected | Service name in Kubernetes |
 
+#### Orchestration Configuration
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `GOMIND_ORCHESTRATION_TIMEOUT` | `60s` | HTTP client timeout for orchestrator tool/agent calls. For long-running AI workflows, set higher values (e.g., `5m`, `10m`). Uses Go duration format. |
+
 #### Feature Flags (Opt-In)
 
 | Constant | Environment Variable | Default | Description |
