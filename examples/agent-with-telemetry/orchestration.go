@@ -100,6 +100,13 @@ Return JSON with this exact format:
 
 Select the single best match.`, topic, catalog.String())
 
+	// DEBUG: Log the AI prompt for tool selection
+	r.Logger.Debug("AI tool selection prompt", map[string]interface{}{
+		"topic":       topic,
+		"tool_count":  len(tools),
+		"prompt":      prompt,
+	})
+
 	response, err := r.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
 		Temperature: 0.3,
 		MaxTokens:   200,
@@ -111,6 +118,14 @@ Select the single best match.`, topic, catalog.String())
 		})
 		return nil
 	}
+
+	// DEBUG: Log the AI response for tool selection
+	r.Logger.Debug("AI tool selection response", map[string]interface{}{
+		"topic":             topic,
+		"response":          response.Content,
+		"prompt_tokens":     response.Usage.PromptTokens,
+		"completion_tokens": response.Usage.CompletionTokens,
+	})
 
 	// Parse AI response
 	var selection struct {
@@ -900,6 +915,13 @@ Please provide:
 
 Keep the response concise and focused.`
 
+	// DEBUG: Log the AI analysis prompt
+	r.Logger.Debug("AI analysis prompt", map[string]interface{}{
+		"topic":        topic,
+		"result_count": len(results),
+		"prompt":       prompt,
+	})
+
 	response, err := r.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
 		Temperature: 0.4,
 		MaxTokens:   800,
@@ -910,6 +932,14 @@ Keep the response concise and focused.`
 		})
 		return ""
 	}
+
+	// DEBUG: Log the AI analysis response
+	r.Logger.Debug("AI analysis response", map[string]interface{}{
+		"topic":             topic,
+		"response":          response.Content,
+		"prompt_tokens":     response.Usage.PromptTokens,
+		"completion_tokens": response.Usage.CompletionTokens,
+	})
 
 	return response.Content
 }
@@ -1046,6 +1076,14 @@ func (r *ResearchAgent) generateToolPayloadWithAI(ctx context.Context, topic str
 		})
 	}
 
+	// DEBUG: Log the AI prompt for payload generation
+	r.Logger.Debug("AI payload generation prompt", map[string]interface{}{
+		"tool":       tool.Name,
+		"capability": capability.Name,
+		"topic":      topic,
+		"prompt":     prompt,
+	})
+
 	// Call AI to generate the payload
 	response, err := r.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
 		Temperature: 0.1, // Low temperature for consistent, structured output
@@ -1054,6 +1092,15 @@ func (r *ResearchAgent) generateToolPayloadWithAI(ctx context.Context, topic str
 	if err != nil {
 		return nil, fmt.Errorf("AI payload generation failed: %w", err)
 	}
+
+	// DEBUG: Log the AI response for payload generation
+	r.Logger.Debug("AI payload generation response", map[string]interface{}{
+		"tool":              tool.Name,
+		"capability":        capability.Name,
+		"response":          response.Content,
+		"prompt_tokens":     response.Usage.PromptTokens,
+		"completion_tokens": response.Usage.CompletionTokens,
+	})
 
 	// Parse AI response as JSON, stripping markdown code blocks if present
 	var payload map[string]interface{}

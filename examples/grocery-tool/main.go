@@ -177,5 +177,9 @@ func initTelemetry(serviceName string) {
 		return
 	}
 
+	// Enable framework integration - this allows core components (redis_registry, discovery)
+	// to emit metrics like discovery.registrations, discovery.health_checks, etc.
+	telemetry.EnableFrameworkIntegration(nil)
+
 	log.Printf("Telemetry initialized for %s", serviceName)
 }

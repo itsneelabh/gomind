@@ -41,9 +41,9 @@ data:
         const_labels:
           cluster: "gomind-examples"
 
-      # Export traces to Jaeger
+      # Export traces to Jaeger via OTLP gRPC
       otlp/jaeger:
-        endpoint: http://jaeger-collector:4318
+        endpoint: jaeger-collector:4317
         tls:
           insecure: true
 

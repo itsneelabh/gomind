@@ -1,0 +1,218 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/itsneelabh/gomind/core"
+)
+
+func (c *CurrencyTool) handleConvert(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	c.Logger.InfoWithContext(ctx, "Processing currency conversion", map[string]interface{}{
+		"method": r.Method,
+		"path":   r.URL.Path,
+	})
+
+	var req ConvertRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.sendError(w, "Invalid request format", http.StatusBadRequest, ErrCodeInvalidRequest)
+		return
+	}
+
+	// Validate input
+	if req.From == "" || req.To == "" {
+		c.sendError(w, "Both 'from' and 'to' currencies are required", http.StatusBadRequest, ErrCodeInvalidRequest)
+		return
+	}
+	if req.Amount <= 0 {
+		c.sendError(w, "Amount must be greater than 0", http.StatusBadRequest, ErrCodeInvalidRequest)
+		return
+	}
+
+	req.From = strings.ToUpper(req.From)
+	req.To = strings.ToUpper(req.To)
+
+	c.Logger.InfoWithContext(ctx, "Converting currency", map[string]interface{}{
+		"from":   req.From,
+		"to":     req.To,
+		"amount": req.Amount,
+	})
+
+	result, err := c.callFrankfurterConvert(ctx, req.From, req.To, req.Amount)
+	if err != nil {
+		c.Logger.ErrorWithContext(ctx, "Frankfurter API call failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		if strings.Contains(err.Error(), "not found") {
+			c.sendError(w, err.Error(), http.StatusBadRequest, ErrCodeInvalidCurrency)
+		} else {
+			c.sendError(w, "Currency service unavailable", http.StatusServiceUnavailable, ErrCodeServiceUnavailable)
+		}
+		return
+	}
+
+	c.Logger.InfoWithContext(ctx, "Currency conversion successful", map[string]interface{}{
+		"from":   req.From,
+		"to":     req.To,
+		"amount": req.Amount,
+		"result": result.Result,
+		"rate":   result.Rate,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(core.ToolResponse{
+		Success: true,
+		Data:    result,
+	})
+}
+
+func (c *CurrencyTool) handleRates(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	c.Logger.InfoWithContext(ctx, "Processing exchange rates request", map[string]interface{}{
+		"method": r.Method,
+		"path":   r.URL.Path,
+	})
+
+	var req RatesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.sendError(w, "Invalid request format", http.StatusBadRequest, ErrCodeInvalidRequest)
+		return
+	}
+
+	if req.Base == "" {
+		c.sendError(w, "Base currency is required", http.StatusBadRequest, ErrCodeInvalidRequest)
+		return
+	}
+
+	req.Base = strings.ToUpper(req.Base)
+
+	c.Logger.InfoWithContext(ctx, "Fetching exchange rates", map[string]interface{}{
+		"base":       req.Base,
+		"currencies": req.Currencies,
+	})
+
+	result, err := c.callFrankfurterRates(ctx, req.Base, req.Currencies)
+	if err != nil {
+		c.Logger.ErrorWithContext(ctx, "Frankfurter API call failed", map[string]interface{}{
+			"error": err.Error(),
+		})
+		if strings.Contains(err.Error(), "not found") {
+			c.sendError(w, err.Error(), http.StatusBadRequest, ErrCodeInvalidCurrency)
+		} else {
+			c.sendError(w, "Currency service unavailable", http.StatusServiceUnavailable, ErrCodeServiceUnavailable)
+		}
+		return
+	}
+
+	c.Logger.InfoWithContext(ctx, "Exchange rates retrieved", map[string]interface{}{
+		"base":        req.Base,
+		"rates_count": len(result.Rates),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(core.ToolResponse{
+		Success: true,
+		Data:    result,
+	})
+}
+
+func (c *CurrencyTool) callFrankfurterConvert(ctx context.Context, from, to string, amount float64) (*ConvertResponse, error) {
+	// https://api.frankfurter.dev/latest?amount=1000&from=USD&to=JPY
+	reqURL := fmt.Sprintf("%s/latest?amount=%.2f&from=%s&to=%s",
+		FrankfurterBaseURL, amount, from, to)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "GoMind-CurrencyTool/1.0")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("currency not found")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp FrankfurterResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	rate, ok := apiResp.Rates[to]
+	if !ok {
+		return nil, fmt.Errorf("target currency %s not found in response", to)
+	}
+
+	return &ConvertResponse{
+		From:   from,
+		To:     to,
+		Amount: amount,
+		Result: rate,
+		Rate:   rate / amount,
+		Date:   apiResp.Date,
+	}, nil
+}
+
+func (c *CurrencyTool) callFrankfurterRates(ctx context.Context, base string, currencies []string) (*RatesResponse, error) {
+	reqURL := fmt.Sprintf("%s/latest?from=%s", FrankfurterBaseURL, base)
+
+	if len(currencies) > 0 {
+		reqURL += "&to=" + strings.Join(currencies, ",")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "GoMind-CurrencyTool/1.0")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("base currency not found")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp FrankfurterResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &RatesResponse{
+		Base:  base,
+		Date:  apiResp.Date,
+		Rates: apiResp.Rates,
+	}, nil
+}
+
+func (c *CurrencyTool) sendError(w http.ResponseWriter, message string, status int, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(core.ToolResponse{
+		Success: false,
+		Error: &core.ToolError{
+			Code:      code,
+			Message:   message,
+			Retryable: strings.Contains(code, "UNAVAILABLE"),
+		},
+	})
+}
