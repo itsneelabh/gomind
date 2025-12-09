@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // ============================================================================
@@ -153,6 +155,13 @@ func (g *GroceryTool) writeToolSuccess(w http.ResponseWriter, data interface{}) 
 func (g *GroceryTool) handleListProducts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "list_products"),
+	)
+
 	g.Logger.InfoWithContext(ctx, "Processing list_products request (proxy to API)", map[string]interface{}{
 		"api_url": g.apiBaseURL,
 	})
@@ -177,9 +186,16 @@ func (g *GroceryTool) handleListProducts(w http.ResponseWriter, r *http.Request)
 		path += "?category=" + req.Category
 	}
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_grocery_api",
+		attribute.String("path", path),
+		attribute.String("category", req.Category),
+	)
+
 	// Make API request
 	resp, err := g.makeAPIRequest(ctx, "GET", path, nil)
 	if err != nil {
+		telemetry.RecordSpanError(ctx, err)
 		g.Logger.ErrorWithContext(ctx, "API request failed", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -196,6 +212,7 @@ func (g *GroceryTool) handleListProducts(w http.ResponseWriter, r *http.Request)
 	// Handle error responses
 	if resp.StatusCode != http.StatusOK {
 		toolErr := g.handleAPIError(resp)
+		telemetry.RecordSpanError(ctx, fmt.Errorf("%s: %s", toolErr.Code, toolErr.Message))
 		g.Logger.WarnWithContext(ctx, "API returned error", map[string]interface{}{
 			"status": resp.StatusCode,
 			"code":   toolErr.Code,
@@ -230,6 +247,12 @@ func (g *GroceryTool) handleListProducts(w http.ResponseWriter, r *http.Request)
 		Category: req.Category,
 	}
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "products_listed",
+		attribute.Int("count", len(products)),
+		attribute.String("category", req.Category),
+	)
+
 	g.Logger.InfoWithContext(ctx, "list_products completed", map[string]interface{}{
 		"count":    len(products),
 		"category": req.Category,
@@ -241,6 +264,13 @@ func (g *GroceryTool) handleListProducts(w http.ResponseWriter, r *http.Request)
 // handleGetProduct proxies get_product to the API
 func (g *GroceryTool) handleGetProduct(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "get_product"),
+	)
 
 	g.Logger.InfoWithContext(ctx, "Processing get_product request (proxy to API)", nil)
 
@@ -255,10 +285,17 @@ func (g *GroceryTool) handleGetProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Make API request
+	// Add span event before API call
 	path := fmt.Sprintf("/products/%d", req.ProductID)
+	telemetry.AddSpanEvent(ctx, "calling_grocery_api",
+		attribute.String("path", path),
+		attribute.Int("product_id", req.ProductID),
+	)
+
+	// Make API request
 	resp, err := g.makeAPIRequest(ctx, "GET", path, nil)
 	if err != nil {
+		telemetry.RecordSpanError(ctx, err)
 		g.Logger.ErrorWithContext(ctx, "API request failed", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -275,6 +312,7 @@ func (g *GroceryTool) handleGetProduct(w http.ResponseWriter, r *http.Request) {
 	// Handle error responses
 	if resp.StatusCode != http.StatusOK {
 		toolErr := g.handleAPIError(resp)
+		telemetry.RecordSpanError(ctx, fmt.Errorf("%s: %s", toolErr.Code, toolErr.Message))
 		g.Logger.WarnWithContext(ctx, "API returned error", map[string]interface{}{
 			"status":     resp.StatusCode,
 			"code":       toolErr.Code,
@@ -296,6 +334,12 @@ func (g *GroceryTool) handleGetProduct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "product_retrieved",
+		attribute.Int("product_id", req.ProductID),
+		attribute.String("name", product.Name),
+	)
+
 	g.Logger.InfoWithContext(ctx, "get_product completed", map[string]interface{}{
 		"product_id": req.ProductID,
 		"name":       product.Name,
@@ -308,11 +352,25 @@ func (g *GroceryTool) handleGetProduct(w http.ResponseWriter, r *http.Request) {
 func (g *GroceryTool) handleCreateCart(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "create_cart"),
+	)
+
 	g.Logger.InfoWithContext(ctx, "Processing create_cart request (proxy to API)", nil)
+
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_grocery_api",
+		attribute.String("path", "/carts"),
+		attribute.String("method", "POST"),
+	)
 
 	// Make API request
 	resp, err := g.makeAPIRequest(ctx, "POST", "/carts", nil)
 	if err != nil {
+		telemetry.RecordSpanError(ctx, err)
 		g.Logger.ErrorWithContext(ctx, "API request failed", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -329,6 +387,7 @@ func (g *GroceryTool) handleCreateCart(w http.ResponseWriter, r *http.Request) {
 	// Handle error responses
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		toolErr := g.handleAPIError(resp)
+		telemetry.RecordSpanError(ctx, fmt.Errorf("%s: %s", toolErr.Code, toolErr.Message))
 		g.Logger.WarnWithContext(ctx, "API returned error", map[string]interface{}{
 			"status": resp.StatusCode,
 			"code":   toolErr.Code,
@@ -349,6 +408,11 @@ func (g *GroceryTool) handleCreateCart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "cart_created",
+		attribute.String("cart_id", cart.CartID),
+	)
+
 	g.Logger.InfoWithContext(ctx, "create_cart completed", map[string]interface{}{
 		"cart_id": cart.CartID,
 	})
@@ -363,6 +427,13 @@ func (g *GroceryTool) handleCreateCart(w http.ResponseWriter, r *http.Request) {
 // handleAddToCart proxies add_to_cart to the API
 func (g *GroceryTool) handleAddToCart(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Add span event for Jaeger visibility
+	telemetry.AddSpanEvent(ctx, "request_received",
+		attribute.String("method", r.Method),
+		attribute.String("path", r.URL.Path),
+		attribute.String("operation", "add_to_cart"),
+	)
 
 	g.Logger.InfoWithContext(ctx, "Processing add_to_cart request (proxy to API)", nil)
 
@@ -411,8 +482,17 @@ func (g *GroceryTool) handleAddToCart(w http.ResponseWriter, r *http.Request) {
 		"quantity":  req.Quantity,
 	}
 
+	// Add span event before API call
+	telemetry.AddSpanEvent(ctx, "calling_grocery_api",
+		attribute.String("path", path),
+		attribute.String("cart_id", req.CartID),
+		attribute.Int("product_id", req.ProductID),
+		attribute.Int("quantity", req.Quantity),
+	)
+
 	resp, err := g.makeAPIRequest(ctx, "POST", path, apiReq)
 	if err != nil {
+		telemetry.RecordSpanError(ctx, err)
 		g.Logger.ErrorWithContext(ctx, "API request failed", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -429,6 +509,7 @@ func (g *GroceryTool) handleAddToCart(w http.ResponseWriter, r *http.Request) {
 	// Handle error responses
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		toolErr := g.handleAPIError(resp)
+		telemetry.RecordSpanError(ctx, fmt.Errorf("%s: %s", toolErr.Code, toolErr.Message))
 		g.Logger.WarnWithContext(ctx, "API returned error", map[string]interface{}{
 			"status":  resp.StatusCode,
 			"code":    toolErr.Code,
@@ -449,6 +530,14 @@ func (g *GroceryTool) handleAddToCart(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+
+	// Add success span event
+	telemetry.AddSpanEvent(ctx, "item_added_to_cart",
+		attribute.String("cart_id", req.CartID),
+		attribute.Int("product_id", req.ProductID),
+		attribute.Int("quantity", req.Quantity),
+		attribute.Int("item_id", item.ID),
+	)
 
 	g.Logger.InfoWithContext(ctx, "add_to_cart completed", map[string]interface{}{
 		"cart_id":    req.CartID,

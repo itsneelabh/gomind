@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# GoMind Agent Example - One-Click Setup Script
-# This script sets up everything needed to run the agent example locally
+# GoMind Agent Example - Standardized Setup Script
+# One-click deployment with standardized cmd_* pattern
 
 set -e  # Exit on error
 
@@ -10,15 +10,19 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
 # Configuration
 CLUSTER_NAME="gomind-demo-$(whoami)"
 NAMESPACE="gomind-examples"
 APP_NAME="research-agent"
+PORT=${PORT:-8090}
+REDIS_URL=${REDIS_URL:-redis://redis.${NAMESPACE}:6379}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+K8_INFRA_DIR="$(cd "$SCRIPT_DIR/../k8-deployment" && pwd)"
 
-# Functions
+# Print functions
 print_header() {
     echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║     GoMind Agent Example Setup         ║${NC}"
@@ -42,9 +46,8 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+# Load environment variables
 load_env() {
-    print_step "Loading environment variables..."
-
     if [ -f "$SCRIPT_DIR/.env" ]; then
         set -a
         source "$SCRIPT_DIR/.env"
@@ -60,9 +63,9 @@ load_env() {
     else
         print_warning "No .env file found"
     fi
-    echo ""
 }
 
+# Check if command exists
 check_command() {
     if ! command -v $1 &> /dev/null; then
         print_error "$1 is not installed"
@@ -72,22 +75,79 @@ check_command() {
     fi
 }
 
+# Check prerequisites
 check_prerequisites() {
     print_step "Checking prerequisites..."
-
+    check_command "go" "https://go.dev/doc/install"
     check_command "docker" "https://docs.docker.com/get-docker/"
     check_command "kind" "https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
     check_command "kubectl" "https://kubernetes.io/docs/tasks/tools/"
-
     print_success "All prerequisites installed"
     echo ""
 }
 
-create_kind_cluster() {
-    print_step "Setting up Kind cluster ($CLUSTER_NAME)..."
+#########################################
+# COMMAND FUNCTIONS
+#########################################
+
+cmd_build() {
+    print_header
+    print_step "Building agent binary..."
+
+    cd "$SCRIPT_DIR"
+    go build -o "$APP_NAME" .
+
+    print_success "Binary built: $SCRIPT_DIR/$APP_NAME"
+    echo ""
+}
+
+cmd_run() {
+    print_header
+    load_env
+
+    print_step "Building and running agent locally..."
+
+    # Build first
+    cd "$SCRIPT_DIR"
+    go build -o "$APP_NAME" .
+    print_success "Binary built"
+
+    # Check for API keys
+    if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
+        print_warning "No AI API keys found in .env file"
+        echo "Add at least one API key to enable AI features"
+        echo ""
+    fi
+
+    # Run locally
+    print_step "Starting agent on port $PORT..."
+    echo ""
+    echo -e "${GREEN}Agent running at: http://localhost:$PORT${NC}"
+    echo -e "${GREEN}Health check: http://localhost:$PORT/health${NC}"
+    echo ""
+
+    export PORT="$PORT"
+    export REDIS_URL="$REDIS_URL"
+
+    "./$APP_NAME"
+}
+
+cmd_docker_build() {
+    print_header
+    print_step "Building Docker image..."
+
+    docker build -t "$APP_NAME:latest" "$SCRIPT_DIR"
+
+    print_success "Docker image built: $APP_NAME:latest"
+    echo ""
+}
+
+cmd_cluster() {
+    print_header
+    print_step "Creating Kind cluster ($CLUSTER_NAME)..."
 
     if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
-        print_success "Cluster $CLUSTER_NAME already exists, reusing it"
+        print_success "Cluster $CLUSTER_NAME already exists"
     else
         cat <<EOF | kind create cluster --name $CLUSTER_NAME --config=-
 kind: Cluster
@@ -95,108 +155,51 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
   extraPortMappings:
-  - containerPort: 30080
-    hostPort: 8080
-    protocol: TCP
   - containerPort: 30090
     hostPort: 8090
+    protocol: TCP
+  - containerPort: 30000
+    hostPort: 3000
+    protocol: TCP
+  - containerPort: 30909
+    hostPort: 9090
+    protocol: TCP
+  - containerPort: 31686
+    hostPort: 16686
     protocol: TCP
 EOF
         print_success "Kind cluster created"
     fi
 
     kubectl config use-context kind-$CLUSTER_NAME
+    print_success "Context switched to kind-$CLUSTER_NAME"
     echo ""
 }
 
-setup_namespace() {
-    print_step "Creating namespace..."
-    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-    print_success "Namespace ready"
+cmd_infra() {
+    print_header
+    print_step "Deploying infrastructure components..."
     echo ""
-}
 
-install_redis() {
-    print_step "Setting up Redis..."
-
-    # Check if Redis already exists in the namespace
-    if kubectl get deployment redis -n $NAMESPACE >/dev/null 2>&1; then
-        print_success "Redis already running in $NAMESPACE"
-        return 0
+    if [ ! -f "$K8_INFRA_DIR/setup-infrastructure.sh" ]; then
+        print_error "Infrastructure setup script not found at: $K8_INFRA_DIR/setup-infrastructure.sh"
+        exit 1
     fi
 
-    kubectl apply -f - <<EOF
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: redis-pvc
-  namespace: $NAMESPACE
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis
-  namespace: $NAMESPACE
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-      - name: redis
-        image: redis:7-alpine
-        ports:
-        - containerPort: 6379
-        volumeMounts:
-        - name: redis-storage
-          mountPath: /data
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-      volumes:
-      - name: redis-storage
-        persistentVolumeClaim:
-          claimName: redis-pvc
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  namespace: $NAMESPACE
-spec:
-  type: ClusterIP
-  ports:
-  - port: 6379
-    targetPort: 6379
-  selector:
-    app: redis
-EOF
+    # Set namespace and run infrastructure setup
+    export NAMESPACE="$NAMESPACE"
+    bash "$K8_INFRA_DIR/setup-infrastructure.sh" setup
 
-    echo "Waiting for Redis to be ready..."
-    kubectl wait --for=condition=available --timeout=60s deployment/redis -n $NAMESPACE 2>/dev/null || true
-    print_success "Redis installed"
+    print_success "Infrastructure deployment complete"
     echo ""
 }
 
 setup_api_keys() {
     print_step "Setting up API keys..."
 
-    # Check for API keys (loaded from .env)
+    load_env
+
+    # Check for API keys
     if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
         print_warning "No AI API keys found in .env file"
         echo ""
@@ -208,115 +211,447 @@ setup_api_keys() {
         echo "  GROQ_API_KEY=your-key"
         echo ""
     else
-        print_success "Using API keys from .env file"
+        print_success "Found API keys in .env file"
     fi
 
-    # Create secret with available keys (empty string for unset keys - won't be detected as available)
+    # Create or update secret
     kubectl create secret generic ai-provider-keys \
         --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
         --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
         --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
         -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-    print_success "API keys configured"
+    print_success "API keys configured in cluster"
     echo ""
 }
 
-build_and_deploy() {
+cmd_deploy() {
+    print_header
+    check_prerequisites
+
+    # Ensure namespace exists
+    print_step "Ensuring namespace exists..."
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    print_success "Namespace ready"
+    echo ""
+
+    # Setup API keys
+    setup_api_keys
+
+    # Build Docker image
     print_step "Building Docker image..."
-    docker build -t $APP_NAME:latest "$SCRIPT_DIR" >/dev/null 2>&1
+    docker build -t "$APP_NAME:latest" "$SCRIPT_DIR"
     print_success "Docker image built"
+    echo ""
 
+    # Load image into Kind
     print_step "Loading image into Kind cluster..."
-    kind load docker-image $APP_NAME:latest --name $CLUSTER_NAME
-    print_success "Image loaded"
+    if ! kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        print_error "Kind cluster not found. Run './setup.sh cluster' first"
+        exit 1
+    fi
+    kind load docker-image "$APP_NAME:latest" --name $CLUSTER_NAME
+    print_success "Image loaded into Kind"
+    echo ""
 
-    print_step "Deploying agent..."
+    # Deploy to K8s
+    print_step "Deploying agent to Kubernetes..."
     kubectl apply -f "$SCRIPT_DIR/k8-deployment.yaml"
 
-    echo "Waiting for deployment to be ready..."
+    print_step "Waiting for deployment to be ready..."
     if kubectl wait --for=condition=available --timeout=120s deployment/$APP_NAME -n $NAMESPACE 2>/dev/null; then
         print_success "Agent deployed successfully!"
     else
-        print_error "Deployment failed. Checking logs..."
-        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        print_error "Deployment failed or timed out. Checking logs..."
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=30
         exit 1
     fi
     echo ""
 }
 
-test_deployment() {
-    print_step "Testing deployment..."
+cmd_full_deploy() {
+    print_header
+    echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  ONE-CLICK DEPLOYMENT - Full Stack Setup     ${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
     echo ""
 
+    check_prerequisites
+
+    # Step 1: Create cluster
+    print_step "Step 1/4: Creating Kind cluster..."
+    cmd_cluster
+
+    # Step 2: Deploy infrastructure
+    print_step "Step 2/4: Deploying infrastructure..."
+    cmd_infra
+
+    # Step 3: Deploy agent
+    print_step "Step 3/4: Deploying agent..."
+    cmd_deploy
+
+    # Step 4: Port forward all services
+    print_step "Step 4/4: Setting up port forwarding..."
+    cmd_forward_all
+}
+
+cmd_test() {
+    print_header
+    print_step "Testing deployed agent..."
+    echo ""
+
+    # Check if agent is deployed
+    if ! kubectl get deployment $APP_NAME -n $NAMESPACE &>/dev/null; then
+        print_error "Agent not deployed. Run './setup.sh deploy' first"
+        exit 1
+    fi
+
     # Start port forward in background
+    print_step "Starting port forward..."
     kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80 >/dev/null 2>&1 &
     PF_PID=$!
     sleep 3
 
     # Test health endpoint
-    echo "Testing health endpoint..."
+    echo -e "${BLUE}Testing health endpoint...${NC}"
     if curl -s http://localhost:8090/health | grep -q "healthy"; then
         print_success "Health check passed"
     else
-        print_warning "Health check failed"
+        print_error "Health check failed"
     fi
+    echo ""
 
     # Test capabilities
-    echo "Testing capabilities endpoint..."
+    echo -e "${BLUE}Testing capabilities endpoint...${NC}"
     if curl -s http://localhost:8090/api/capabilities | grep -q "capabilities"; then
         print_success "Capabilities endpoint working"
     else
         print_warning "Capabilities endpoint not responding"
     fi
+    echo ""
 
     # Kill port forward
     kill $PF_PID 2>/dev/null || true
+
+    print_success "Tests complete"
     echo ""
 }
 
-print_summary() {
-    echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║       Setup Complete! 🎉               ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+cmd_forward() {
+    print_header
+    print_step "Setting up port forwarding for agent..."
+
+    if ! kubectl get svc $APP_NAME-service -n $NAMESPACE &>/dev/null; then
+        print_error "Agent service not found. Deploy first with './setup.sh deploy'"
+        exit 1
+    fi
+
     echo ""
-    echo "Your agent is now running in the Kind cluster!"
+    echo -e "${GREEN}Port forwarding agent...${NC}"
+    echo -e "${BLUE}Agent: http://localhost:8090${NC}"
     echo ""
-    echo "To access the agent:"
-    echo "  kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80"
-    echo "  Then visit: http://localhost:8090/health"
+    echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
     echo ""
-    echo "Useful commands:"
-    echo "  make logs      - View agent logs"
-    echo "  make status    - Check deployment status"
-    echo "  make test      - Run tests"
-    echo "  make clean     - Delete everything"
+
+    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80
+}
+
+cmd_forward_all() {
+    print_header
+    print_step "Setting up port forwarding for all services..."
+
     echo ""
-    if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
-        print_warning "Remember to set an API key for full AI functionality:"
-        echo "  export OPENAI_API_KEY=your-key"
-        echo "  make create-secrets"
+    echo -e "${GREEN}Starting port forwards...${NC}"
+    echo ""
+
+    # Port forward agent
+    if kubectl get svc $APP_NAME-service -n $NAMESPACE &>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80 >/dev/null 2>&1 &
+        print_success "Agent: http://localhost:8090"
+    else
+        print_warning "Agent service not found"
+    fi
+
+    # Port forward Grafana
+    if kubectl get svc grafana -n $NAMESPACE &>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+        print_success "Grafana: http://localhost:3000"
+    else
+        print_warning "Grafana service not found"
+    fi
+
+    # Port forward Prometheus
+    if kubectl get svc prometheus -n $NAMESPACE &>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+        print_success "Prometheus: http://localhost:9090"
+    else
+        print_warning "Prometheus service not found"
+    fi
+
+    # Port forward Jaeger
+    if kubectl get svc jaeger-query -n $NAMESPACE &>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
+        print_success "Jaeger: http://localhost:16686"
+    else
+        print_warning "Jaeger service not found"
+    fi
+
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  All services are now accessible!             ${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}Press Ctrl+C to stop all port forwards${NC}"
+    echo ""
+
+    # Wait for all background jobs
+    wait
+}
+
+cmd_logs() {
+    print_header
+
+    if ! kubectl get deployment $APP_NAME -n $NAMESPACE &>/dev/null; then
+        print_error "Agent not deployed"
+        exit 1
+    fi
+
+    print_step "Streaming logs from $APP_NAME..."
+    echo ""
+
+    kubectl logs -n $NAMESPACE -l app=$APP_NAME -f --tail=100
+}
+
+cmd_status() {
+    print_header
+    print_step "Checking deployment status..."
+    echo ""
+
+    # Check cluster
+    echo -e "${BLUE}Cluster:${NC}"
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        print_success "Kind cluster '$CLUSTER_NAME' is running"
+    else
+        print_warning "Kind cluster '$CLUSTER_NAME' not found"
+    fi
+    echo ""
+
+    # Check namespace
+    echo -e "${BLUE}Namespace:${NC}"
+    if kubectl get namespace $NAMESPACE &>/dev/null; then
+        print_success "Namespace '$NAMESPACE' exists"
+    else
+        print_warning "Namespace '$NAMESPACE' not found"
+    fi
+    echo ""
+
+    # Check deployments
+    echo -e "${BLUE}Deployments in $NAMESPACE:${NC}"
+    kubectl get deployments -n $NAMESPACE -o wide 2>/dev/null || echo "No deployments found"
+    echo ""
+
+    # Check services
+    echo -e "${BLUE}Services in $NAMESPACE:${NC}"
+    kubectl get services -n $NAMESPACE -o wide 2>/dev/null || echo "No services found"
+    echo ""
+
+    # Check pods
+    echo -e "${BLUE}Pods in $NAMESPACE:${NC}"
+    kubectl get pods -n $NAMESPACE -o wide 2>/dev/null || echo "No pods found"
+    echo ""
+
+    # Check agent specifically
+    if kubectl get deployment $APP_NAME -n $NAMESPACE &>/dev/null; then
+        echo -e "${BLUE}Agent Status:${NC}"
+        kubectl get deployment $APP_NAME -n $NAMESPACE
+        echo ""
+
+        # Check if agent is ready
+        READY=$(kubectl get deployment $APP_NAME -n $NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)
+        if [ "$READY" = "True" ]; then
+            print_success "Agent is ready and healthy"
+        else
+            print_warning "Agent is not ready"
+        fi
+        echo ""
     fi
 }
 
-# Main execution
-main() {
-    clear
+cmd_clean() {
     print_header
+    print_step "Removing agent deployment..."
 
-    load_env
-    check_prerequisites
-    create_kind_cluster
-    setup_namespace
-    install_redis
-    setup_api_keys
-    build_and_deploy
-    test_deployment
-    print_summary
+    if kubectl get deployment $APP_NAME -n $NAMESPACE &>/dev/null; then
+        kubectl delete -f "$SCRIPT_DIR/k8-deployment.yaml" --ignore-not-found=true
+        print_success "Agent removed"
+    else
+        print_warning "Agent not found"
+    fi
+
+    # Remove API keys secret
+    if kubectl get secret ai-provider-keys -n $NAMESPACE &>/dev/null; then
+        kubectl delete secret ai-provider-keys -n $NAMESPACE
+        print_success "API keys secret removed"
+    fi
+
+    echo ""
+    print_success "Agent cleanup complete"
+    echo ""
 }
 
-# Handle Ctrl+C
-trap 'echo -e "\n${YELLOW}Setup interrupted${NC}"; exit 1' INT
+cmd_clean_all() {
+    print_header
 
-# Run main function
-main
+    read -p "$(echo -e ${YELLOW}This will delete the entire Kind cluster. Continue? [y/N]: ${NC})" -n 1 -r
+    echo ""
+
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print_step "Deleting Kind cluster..."
+
+        if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+            kind delete cluster --name $CLUSTER_NAME
+            print_success "Cluster deleted"
+        else
+            print_warning "Cluster not found"
+        fi
+
+        echo ""
+        print_success "Full cleanup complete"
+    else
+        print_warning "Cleanup cancelled"
+    fi
+
+    echo ""
+}
+
+cmd_help() {
+    print_header
+
+    cat <<EOF
+${GREEN}GoMind Agent Example - Setup Script${NC}
+
+${BLUE}Usage:${NC}
+  ./setup.sh [COMMAND]
+
+${BLUE}Build & Run Commands:${NC}
+  ${YELLOW}build${NC}              Build agent binary locally
+  ${YELLOW}run${NC}                Build and run agent locally (no K8s)
+  ${YELLOW}docker-build${NC}       Build Docker image
+
+${BLUE}Infrastructure Commands:${NC}
+  ${YELLOW}cluster${NC}            Create Kind cluster with port mappings
+  ${YELLOW}infra${NC}              Deploy infrastructure (Redis, OTEL, Prometheus, Jaeger, Grafana)
+
+${BLUE}Deployment Commands:${NC}
+  ${YELLOW}deploy${NC}             Build, load image, and deploy agent to K8s
+  ${YELLOW}full-deploy${NC}        ${GREEN}ONE-CLICK: cluster + infra + deploy + forward_all${NC}
+
+${BLUE}Testing & Monitoring:${NC}
+  ${YELLOW}test${NC}               Run health tests against deployed agent
+  ${YELLOW}forward${NC}            Port forward agent only (8090)
+  ${YELLOW}forward-all${NC}        Port forward all services (agent + monitoring)
+  ${YELLOW}logs${NC}               View agent logs
+  ${YELLOW}status${NC}             Check deployment status
+
+${BLUE}Cleanup Commands:${NC}
+  ${YELLOW}clean${NC}              Remove agent deployment only
+  ${YELLOW}clean-all${NC}          Delete entire Kind cluster
+
+${BLUE}Configuration:${NC}
+  Cluster:     ${CLUSTER_NAME}
+  Namespace:   ${NAMESPACE}
+  App:         ${APP_NAME}
+  Port:        ${PORT}
+  Redis:       ${REDIS_URL}
+
+${BLUE}Environment Variables:${NC}
+  PORT            Agent port (default: 8090)
+  REDIS_URL       Redis connection string
+
+  ${GREEN}AI Provider Keys (set in .env file):${NC}
+  OPENAI_API_KEY
+  ANTHROPIC_API_KEY
+  GROQ_API_KEY
+
+${BLUE}Examples:${NC}
+  ./setup.sh full-deploy    # Complete deployment (recommended)
+  ./setup.sh run            # Run locally for development
+  ./setup.sh status         # Check what's running
+  ./setup.sh logs           # View agent logs
+  ./setup.sh clean-all      # Delete everything
+
+${BLUE}Port Mappings:${NC}
+  8090   - Research Agent
+  3000   - Grafana
+  9090   - Prometheus
+  16686  - Jaeger UI
+
+${BLUE}Quick Start:${NC}
+  1. Copy .env.example to .env and add API keys
+  2. Run: ./setup.sh full-deploy
+  3. Access agent at: http://localhost:8090
+
+EOF
+}
+
+#########################################
+# MAIN EXECUTION
+#########################################
+
+# Handle Ctrl+C
+trap 'echo -e "\n${YELLOW}Operation interrupted${NC}"; exit 1' INT
+
+# Parse command
+case "${1:-help}" in
+    build)
+        cmd_build
+        ;;
+    run)
+        cmd_run
+        ;;
+    docker-build)
+        cmd_docker_build
+        ;;
+    cluster)
+        cmd_cluster
+        ;;
+    infra)
+        cmd_infra
+        ;;
+    deploy)
+        cmd_deploy
+        ;;
+    full-deploy)
+        cmd_full_deploy
+        ;;
+    test)
+        cmd_test
+        ;;
+    forward)
+        cmd_forward
+        ;;
+    forward-all)
+        cmd_forward_all
+        ;;
+    logs)
+        cmd_logs
+        ;;
+    status)
+        cmd_status
+        ;;
+    clean)
+        cmd_clean
+        ;;
+    clean-all)
+        cmd_clean_all
+        ;;
+    help|--help|-h)
+        cmd_help
+        ;;
+    *)
+        print_error "Unknown command: $1"
+        echo ""
+        cmd_help
+        exit 1
+        ;;
+esac

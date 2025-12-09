@@ -3,8 +3,8 @@ module ai-first-agent-example
 go 1.25
 
 require (
-	github.com/itsneelabh/gomind/ai v0.6.7
-	github.com/itsneelabh/gomind/core v0.6.7
+	github.com/itsneelabh/gomind/ai v0.7.5
+	github.com/itsneelabh/gomind/core v0.7.5
 )
 
 require (

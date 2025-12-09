@@ -63,6 +63,75 @@ check_command() {
     fi
 }
 
+# Create Kind cluster with port mappings
+cmd_cluster() {
+    print_header "Creating Kind Cluster"
+
+    check_command kind
+    check_command kubectl
+
+    # Check if cluster already exists
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        print_info "Cluster '$CLUSTER_NAME' already exists"
+        print_info "To recreate, run: kind delete cluster --name $CLUSTER_NAME"
+        return 0
+    fi
+
+    print_info "Creating Kind cluster: $CLUSTER_NAME"
+
+    cat <<EOF | kind create cluster --name "$CLUSTER_NAME" --config=-
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 30082
+    hostPort: 8082
+    protocol: TCP
+  - containerPort: 30000
+    hostPort: 3000
+    protocol: TCP
+  - containerPort: 30090
+    hostPort: 9090
+    protocol: TCP
+  - containerPort: 30686
+    hostPort: 16686
+    protocol: TCP
+EOF
+
+    print_success "Kind cluster '$CLUSTER_NAME' created"
+    print_info "Cluster context: kind-$CLUSTER_NAME"
+}
+
+# Setup infrastructure (Redis + monitoring)
+cmd_infra() {
+    print_header "Setting Up Infrastructure"
+
+    check_command kubectl
+
+    # Verify cluster connectivity
+    if ! kubectl cluster-info &>/dev/null; then
+        print_error "Cannot connect to Kubernetes cluster"
+        print_info "Run './setup.sh cluster' to create a cluster first"
+        exit 1
+    fi
+
+    print_info "Deploying Redis and monitoring stack..."
+
+    # Run the infrastructure setup script
+    INFRA_SCRIPT="../k8-deployment/setup-infrastructure.sh"
+    if [ ! -f "$INFRA_SCRIPT" ]; then
+        print_error "Infrastructure script not found: $INFRA_SCRIPT"
+        exit 1
+    fi
+
+    # Export namespace for the infrastructure script
+    export NAMESPACE="$NAMESPACE"
+    bash "$INFRA_SCRIPT"
+
+    print_success "Infrastructure setup complete"
+}
+
 # Build the tool
 cmd_build() {
     print_header "Building Stock Market Tool"
@@ -107,83 +176,6 @@ cmd_docker_build() {
     print_success "Docker image built: $APP_NAME:latest"
 }
 
-# Setup Redis in Kubernetes
-setup_redis() {
-    print_info "Setting up Redis..."
-
-    # Check if Redis already exists in the namespace
-    if kubectl get deployment redis -n $NAMESPACE >/dev/null 2>&1; then
-        print_success "Redis already running in $NAMESPACE"
-        return 0
-    fi
-
-    kubectl apply -f - <<EOF
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: redis-pvc
-  namespace: $NAMESPACE
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis
-  namespace: $NAMESPACE
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-      - name: redis
-        image: redis:7-alpine
-        ports:
-        - containerPort: 6379
-        volumeMounts:
-        - name: redis-storage
-          mountPath: /data
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-      volumes:
-      - name: redis-storage
-        persistentVolumeClaim:
-          claimName: redis-pvc
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  namespace: $NAMESPACE
-spec:
-  type: ClusterIP
-  ports:
-  - port: 6379
-    targetPort: 6379
-  selector:
-    app: redis
-EOF
-
-    echo "Waiting for Redis to be ready..."
-    kubectl wait --for=condition=available --timeout=60s deployment/redis -n $NAMESPACE 2>/dev/null || true
-    print_success "Redis installed"
-}
-
 # Deploy to Kubernetes
 cmd_deploy() {
     print_header "Deploying to Kubernetes"
@@ -202,9 +194,6 @@ cmd_deploy() {
 
     # Create namespace
     kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-
-    # Setup Redis
-    setup_redis
 
     # Setup API keys as secrets
     print_info "Setting up API keys..."
@@ -255,6 +244,44 @@ cmd_deploy() {
     print_info "Check status: kubectl get pods -n $NAMESPACE -l app=$APP_NAME"
 }
 
+# One-click full deployment
+cmd_full_deploy() {
+    print_header "Full Deployment (One-Click)"
+
+    print_info "This will:"
+    echo "  1. Create Kind cluster"
+    echo "  2. Deploy infrastructure (Redis + monitoring)"
+    echo "  3. Deploy stock market tool"
+    echo "  4. Set up port forwarding"
+    echo ""
+
+    # Step 1: Create cluster
+    cmd_cluster
+
+    # Step 2: Setup infrastructure
+    cmd_infra
+
+    # Step 3: Deploy application
+    cmd_deploy
+
+    # Step 4: Setup port forwarding
+    print_header "Setting Up Port Forwarding"
+    print_info "Starting port forwards in background..."
+    cmd_forward_all
+
+    print_success "Full deployment complete!"
+    echo ""
+    print_info "Access points:"
+    echo "  Stock Tool:  http://localhost:8082"
+    echo "  Grafana:     http://localhost:3000 (admin/admin)"
+    echo "  Prometheus:  http://localhost:9090"
+    echo "  Jaeger:      http://localhost:16686"
+    echo ""
+    print_info "To stop port forwarding: pkill -f 'kubectl port-forward'"
+    print_info "To view logs: ./setup.sh logs"
+    print_info "To cleanup: ./setup.sh clean-all"
+}
+
 # Run tests
 cmd_test() {
     print_header "Running Tests"
@@ -301,6 +328,40 @@ cmd_forward() {
     kubectl port-forward -n $NAMESPACE svc/stock-service 8082:80
 }
 
+# Port forward all services (tool + monitoring)
+cmd_forward_all() {
+    print_header "Port Forwarding All Services"
+
+    # Kill any existing port forwards
+    pkill -f "kubectl port-forward.*$NAMESPACE" 2>/dev/null || true
+    sleep 2
+
+    print_info "Starting port forwards..."
+
+    # Stock Tool
+    kubectl port-forward -n $NAMESPACE svc/stock-service 8082:80 >/dev/null 2>&1 &
+    print_success "Stock Tool: http://localhost:8082"
+
+    # Grafana
+    kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+    print_success "Grafana: http://localhost:3000 (admin/admin)"
+
+    # Prometheus
+    kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+    print_success "Prometheus: http://localhost:9090"
+
+    # Jaeger
+    kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
+    print_success "Jaeger: http://localhost:16686"
+
+    echo ""
+    print_info "Port forwards running in background"
+    print_info "To stop: pkill -f 'kubectl port-forward'"
+    echo ""
+    print_info "Waiting for services to be ready..."
+    sleep 5
+}
+
 # View logs
 cmd_logs() {
     print_header "Viewing Logs"
@@ -319,13 +380,40 @@ cmd_status() {
     kubectl get svc -n $NAMESPACE -l app=$APP_NAME
 }
 
-# Clean up
+# Clean up deployment only
 cmd_clean() {
-    print_header "Cleaning Up"
+    print_header "Cleaning Up Deployment"
 
     print_info "Removing deployment..."
     kubectl delete -f k8-deployment.yaml --ignore-not-found
     print_success "Cleanup complete"
+}
+
+# Clean up everything (delete cluster)
+cmd_clean_all() {
+    print_header "Cleaning Up Everything"
+
+    print_info "This will delete the entire Kind cluster: $CLUSTER_NAME"
+    read -p "Are you sure? (y/N) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # Stop port forwards
+        print_info "Stopping port forwards..."
+        pkill -f "kubectl port-forward.*$NAMESPACE" 2>/dev/null || true
+
+        # Delete kind cluster
+        if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+            print_info "Deleting Kind cluster: $CLUSTER_NAME"
+            kind delete cluster --name "$CLUSTER_NAME"
+            print_success "Cluster deleted"
+        else
+            print_info "Cluster '$CLUSTER_NAME' not found"
+        fi
+
+        print_success "Cleanup complete"
+    else
+        print_info "Cleanup cancelled"
+    fi
 }
 
 # Show help
@@ -334,16 +422,29 @@ cmd_help() {
     echo ""
     echo "Usage: ./setup.sh <command>"
     echo ""
-    echo "Commands:"
+    echo "Quick Start Commands:"
+    echo "  full-deploy   ONE-CLICK: Create cluster + infra + deploy + port forwards"
+    echo "  cluster       Create Kind cluster with port mappings"
+    echo "  infra         Deploy infrastructure (Redis + monitoring stack)"
+    echo ""
+    echo "Build & Deploy Commands:"
     echo "  build         Build the tool binary"
     echo "  run           Build and run the tool locally"
     echo "  docker-build  Build Docker image"
     echo "  deploy        Build, load, and deploy to Kubernetes"
+    echo ""
+    echo "Testing & Access Commands:"
     echo "  test          Run test requests against deployed tool"
-    echo "  forward       Port forward the service for local access"
+    echo "  forward       Port forward the stock tool service only"
+    echo "  forward-all   Port forward tool + Grafana + Prometheus + Jaeger"
     echo "  logs          View tool logs"
     echo "  status        Check deployment status"
-    echo "  clean         Remove deployment"
+    echo ""
+    echo "Cleanup Commands:"
+    echo "  clean         Remove stock tool deployment only"
+    echo "  clean-all     Delete entire Kind cluster and all resources"
+    echo ""
+    echo "Help:"
     echo "  help          Show this help message"
     echo ""
     echo "Environment Variables:"
@@ -351,16 +452,43 @@ cmd_help() {
     echo "  PORT              HTTP server port (default: 8082)"
     echo "  FINNHUB_API_KEY   Finnhub API key for real stock data (optional)"
     echo "  OPENAI_API_KEY    OpenAI API key (optional)"
+    echo "  ANTHROPIC_API_KEY Anthropic API key (optional)"
+    echo "  GROQ_API_KEY      Groq API key (optional)"
+    echo ""
+    echo "Configuration:"
+    echo "  CLUSTER_NAME: $CLUSTER_NAME"
+    echo "  NAMESPACE:    $NAMESPACE"
+    echo "  APP_NAME:     $APP_NAME"
     echo ""
     echo "Examples:"
-    echo "  ./setup.sh build"
-    echo "  ./setup.sh deploy"
-    echo "  ./setup.sh test"
-    echo "  REDIS_URL=redis://localhost:6379 ./setup.sh run"
+    echo "  ./setup.sh full-deploy              # Complete one-click setup"
+    echo "  ./setup.sh cluster                  # Create cluster only"
+    echo "  ./setup.sh infra                    # Deploy infrastructure only"
+    echo "  ./setup.sh deploy                   # Deploy tool only"
+    echo "  ./setup.sh forward-all              # Port forward all services"
+    echo "  ./setup.sh test                     # Run tests"
+    echo "  REDIS_URL=redis://localhost:6379 ./setup.sh run  # Run locally"
+    echo ""
+    echo "Full Deployment Workflow:"
+    echo "  ./setup.sh full-deploy              # Does everything"
+    echo "  OR step-by-step:"
+    echo "  ./setup.sh cluster                  # 1. Create cluster"
+    echo "  ./setup.sh infra                    # 2. Setup infrastructure"
+    echo "  ./setup.sh deploy                   # 3. Deploy tool"
+    echo "  ./setup.sh forward-all              # 4. Access services"
 }
 
 # Main entry point
 case "${1:-help}" in
+    cluster)
+        cmd_cluster
+        ;;
+    infra)
+        cmd_infra
+        ;;
+    full-deploy)
+        cmd_full_deploy
+        ;;
     build)
         cmd_build
         ;;
@@ -379,6 +507,9 @@ case "${1:-help}" in
     forward)
         cmd_forward
         ;;
+    forward-all)
+        cmd_forward_all
+        ;;
     logs)
         cmd_logs
         ;;
@@ -387,6 +518,9 @@ case "${1:-help}" in
         ;;
     clean)
         cmd_clean
+        ;;
+    clean-all)
+        cmd_clean_all
         ;;
     help|--help|-h)
         cmd_help

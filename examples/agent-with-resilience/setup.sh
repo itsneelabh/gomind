@@ -8,10 +8,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLES_DIR="$(dirname "$SCRIPT_DIR")"
 
-echo "=============================================="
-echo "Setting up Research Agent with Resilience"
-echo "=============================================="
-echo ""
+# Configuration
+CLUSTER_NAME=${CLUSTER_NAME:-"gomind-demo-$(whoami)"}
+NAMESPACE="gomind-examples"
+APP_NAME="research-agent-resilience"
+PORT=${PORT:-8093}
+REDIS_URL=${REDIS_URL:-redis://localhost:6379}
 
 # Colors for output
 RED='\033[0;31m'
@@ -24,6 +26,24 @@ log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+print_header() {
+    echo -e "${BLUE}================================================${NC}"
+    echo -e "${BLUE}  Agent with Resilience - $1${NC}"
+    echo -e "${BLUE}================================================${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_info() {
+    echo -e "${YELLOW}[INFO]${NC} $1"
+}
 
 # Component directories (self-contained)
 GROCERY_API_DIR="$EXAMPLES_DIR/mock-services/grocery-store-api"
@@ -148,6 +168,26 @@ check_api_keys() {
     fi
 }
 
+# Load .env file if it exists
+load_env() {
+    if [ -f "$AGENT_DIR/.env" ]; then
+        print_info "Loading environment from .env file"
+        set -a
+        source "$AGENT_DIR/.env"
+        set +a
+        print_success "Loaded .env file"
+    elif [ -f "$AGENT_DIR/.env.example" ]; then
+        print_info "No .env file found, copying from .env.example"
+        cp "$AGENT_DIR/.env.example" "$AGENT_DIR/.env"
+        set -a
+        source "$AGENT_DIR/.env"
+        set +a
+        print_success "Created .env from example"
+    else
+        log_warn "No .env file found"
+    fi
+}
+
 # Create .env file
 setup_env() {
     echo "Setting up environment..."
@@ -253,13 +293,19 @@ load_to_kind() {
             cluster_name="kind"
             log_info "Using default Kind cluster: kind"
         else
-            # Use the first available Kind cluster
-            cluster_name=$(kind get clusters 2>/dev/null | head -1)
-            if [ -z "$cluster_name" ]; then
-                log_error "No Kind clusters found. Please create one with: kind create cluster --name <name>"
-                return 1
+            # Use the configured CLUSTER_NAME
+            if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+                cluster_name="$CLUSTER_NAME"
+                log_info "Using Kind cluster: $cluster_name"
+            else
+                # Use the first available Kind cluster
+                cluster_name=$(kind get clusters 2>/dev/null | head -1)
+                if [ -z "$cluster_name" ]; then
+                    log_error "No Kind clusters found. Please create one with: ./setup.sh cluster"
+                    return 1
+                fi
+                log_info "Using Kind cluster: $cluster_name"
             fi
-            log_info "Using Kind cluster: $cluster_name"
         fi
     fi
 
@@ -272,27 +318,6 @@ load_to_kind() {
     fi
 
     log_success "Images loaded to Kind"
-}
-
-# Load environment variables from .env file
-load_env() {
-    log_info "Loading environment variables..."
-
-    if [ -f "$AGENT_DIR/.env" ]; then
-        set -a
-        source "$AGENT_DIR/.env"
-        set +a
-        log_success "Loaded .env file"
-    elif [ -f "$AGENT_DIR/.env.example" ]; then
-        log_warn "No .env file found, copying from .env.example"
-        cp "$AGENT_DIR/.env.example" "$AGENT_DIR/.env"
-        set -a
-        source "$AGENT_DIR/.env"
-        set +a
-        log_success "Created .env from example"
-    else
-        log_warn "No .env file found"
-    fi
 }
 
 # Setup API keys as Kubernetes secrets
@@ -357,10 +382,10 @@ deploy_k8s() {
     kubectl wait --for=condition=ready pod -l app=research-agent-resilience -n gomind-examples --timeout=120s 2>/dev/null || true
 
     log_success "Deployment complete!"
-    log_info "Run '$0 forward' to set up port forwards"
+    log_info "Run './setup.sh forward-all' to set up port forwards"
 }
 
-# Port forward
+# Port forward (legacy - agent + dependencies)
 port_forward() {
     log_info "Setting up port forwards..."
 
@@ -603,7 +628,261 @@ run_all() {
     run_app
 }
 
-# Main setup
+#############################################
+# STANDARDIZED 1-CLICK DEPLOYMENT COMMANDS
+#############################################
+
+# Create Kind cluster with port mappings
+cmd_cluster() {
+    print_header "Creating Kind Cluster"
+
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        print_success "Cluster $CLUSTER_NAME already exists, reusing it"
+    else
+        cat <<EOF | kind create cluster --name $CLUSTER_NAME --config=-
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  # Agent port
+  - containerPort: 30093
+    hostPort: 8093
+    protocol: TCP
+  # Grafana
+  - containerPort: 30030
+    hostPort: 3000
+    protocol: TCP
+  # Prometheus
+  - containerPort: 30090
+    hostPort: 9090
+    protocol: TCP
+  # Jaeger
+  - containerPort: 31686
+    hostPort: 16686
+    protocol: TCP
+EOF
+        print_success "Kind cluster created"
+    fi
+
+    kubectl config use-context kind-$CLUSTER_NAME
+}
+
+# Setup infrastructure (Redis, OTEL, Prometheus, Jaeger, Grafana)
+cmd_infra() {
+    print_header "Setting Up Infrastructure"
+
+    # Use the infrastructure setup script
+    if [ -f "$SCRIPT_DIR/../k8-deployment/setup-infrastructure.sh" ]; then
+        print_success "Found infrastructure setup script"
+        echo ""
+
+        # Run the infrastructure setup
+        NAMESPACE=$NAMESPACE "$SCRIPT_DIR/../k8-deployment/setup-infrastructure.sh"
+
+        echo ""
+        print_success "Infrastructure ready"
+    else
+        print_error "Infrastructure setup script not found"
+        echo "Please ensure k8-deployment/setup-infrastructure.sh exists"
+        exit 1
+    fi
+}
+
+# Build Docker image
+cmd_docker_build() {
+    print_header "Building Docker Image"
+
+    build_docker
+
+    print_success "Docker images built"
+}
+
+# Deploy to Kubernetes (standardized)
+cmd_deploy() {
+    print_header "Deploying to Kubernetes"
+
+    load_env
+
+    # Build Docker images first
+    cmd_docker_build
+
+    # Load images into kind cluster if available
+    if command -v kind &> /dev/null; then
+        print_info "Loading images into kind cluster..."
+        load_to_kind
+        print_success "Images loaded"
+    fi
+
+    # Deploy to Kubernetes
+    deploy_k8s
+
+    print_success "Deployment complete!"
+    print_info "Run './setup.sh forward-all' to access services"
+}
+
+# Full deployment: cluster + infrastructure + agent
+cmd_full_deploy() {
+    print_header "Full Deployment (1-Click)"
+
+    load_env
+
+    # Step 1: Create Kind cluster
+    cmd_cluster
+
+    # Step 2: Setup infrastructure (Redis, monitoring, etc.)
+    cmd_infra
+
+    # Step 3: Deploy agent and dependencies
+    cmd_deploy
+
+    # Step 4: Setup port forwards
+    cmd_forward_all
+}
+
+# Port forward for agent only (standardized)
+cmd_forward() {
+    print_header "Port Forwarding (Agent)"
+
+    print_info "Starting port forward on localhost:8093..."
+    print_info "Press Ctrl+C to stop"
+    kubectl port-forward -n $NAMESPACE svc/research-agent-resilience 8093:8093
+}
+
+# Port forward for agent and monitoring
+cmd_forward_all() {
+    print_header "Port Forwarding (All Services)"
+
+    # Kill existing port forwards
+    pkill -f "kubectl.*port-forward.*$NAMESPACE" 2>/dev/null || true
+    sleep 2
+
+    # Start port forwarding in background
+    print_info "Starting port forwards..."
+    kubectl port-forward -n $NAMESPACE svc/research-agent-resilience 8093:8093 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/grocery-store-api 8081:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/grocery-tool-service 8083:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
+
+    sleep 2
+    print_success "Port forwarding active"
+
+    echo ""
+    echo "Agent:             http://localhost:8093/health"
+    echo "grocery-store-api: http://localhost:8081"
+    echo "grocery-tool:      http://localhost:8083"
+    echo "Grafana:           http://localhost:3000 (admin/admin)"
+    echo "Prometheus:        http://localhost:9090"
+    echo "Jaeger:            http://localhost:16686"
+    echo ""
+    echo "Press Ctrl+C or run: pkill -f 'kubectl.*port-forward.*$NAMESPACE'"
+}
+
+# Run tests (standardized)
+cmd_test() {
+    print_header "Running Tests"
+
+    # Use the existing test_resilience function
+    test_resilience
+}
+
+# Clean up agent only (standardized)
+cmd_clean() {
+    print_header "Cleaning Up Agent"
+
+    cleanup
+
+    print_success "Agent cleanup complete"
+}
+
+# Clean up everything including cluster (standardized)
+cmd_clean_all() {
+    print_header "Cleaning Up Everything"
+
+    # Kill port forwards
+    pkill -f "kubectl.*port-forward.*$NAMESPACE" 2>/dev/null || true
+
+    # Delete agent
+    kubectl delete -f "$AGENT_DIR/k8-deployment.yaml" --ignore-not-found 2>/dev/null || true
+    kubectl delete -f "$GROCERY_TOOL_DIR/k8-deployment.yaml" --ignore-not-found 2>/dev/null || true
+    kubectl delete -f "$GROCERY_API_DIR/k8-deployment.yaml" --ignore-not-found 2>/dev/null || true
+
+    # Stop local Redis
+    docker stop gomind-redis 2>/dev/null || true
+    docker rm gomind-redis 2>/dev/null || true
+
+    # Delete Kind cluster
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        print_info "Deleting Kind cluster $CLUSTER_NAME..."
+        kind delete cluster --name $CLUSTER_NAME
+        print_success "Kind cluster deleted"
+    fi
+
+    print_success "Full cleanup complete"
+}
+
+# View logs
+cmd_logs() {
+    print_header "Viewing Logs"
+
+    kubectl logs -n $NAMESPACE -l app=$APP_NAME -f --tail=100
+}
+
+# Check status
+cmd_status() {
+    print_header "Deployment Status"
+
+    echo "Agent Pod:"
+    kubectl get pods -n $NAMESPACE -l app=$APP_NAME
+    echo ""
+    echo "Agent Service:"
+    kubectl get svc -n $NAMESPACE -l app=$APP_NAME
+    echo ""
+    echo "Dependencies:"
+    kubectl get pods -n $NAMESPACE -l "app in (grocery-store-api,grocery-tool)"
+    echo ""
+    echo "Infrastructure:"
+    kubectl get pods -n $NAMESPACE -l "app in (redis,prometheus,grafana,otel-collector,jaeger)"
+}
+
+# Build the agent (standardized)
+cmd_build() {
+    print_header "Building Agent"
+
+    build_app
+
+    print_success "Build completed: research-agent-resilience"
+}
+
+# Run the agent locally (standardized)
+cmd_run() {
+    print_header "Running Agent"
+
+    load_env
+
+    if [ -z "$REDIS_URL" ]; then
+        print_error "REDIS_URL environment variable is required"
+        print_info "Set it in .env file or export it: export REDIS_URL=redis://localhost:6379"
+        exit 1
+    fi
+
+    # Build first
+    cmd_build
+
+    print_info "Starting research-agent-resilience on port $PORT..."
+    print_info "Redis URL: $REDIS_URL"
+    echo ""
+
+    run_app
+}
+
+#############################################
+# LEGACY COMMANDS (kept for compatibility)
+#############################################
+
+# Main setup (legacy)
 main() {
     check_prerequisites
     setup_redis
@@ -629,38 +908,108 @@ show_help() {
     cat << EOF
 Usage: $0 <command>
 
+STANDARDIZED 1-CLICK DEPLOYMENT COMMANDS:
+  cluster       Create Kind cluster with port mappings
+  infra         Setup infrastructure (Redis, Prometheus, Grafana, Jaeger)
+  full-deploy   ONE-CLICK: cluster + infra + deploy + port forwards
+  deploy        Build Docker images and deploy to Kubernetes
+  forward       Port forward the agent service only
+  forward-all   Port forward agent + monitoring dashboards
+  test          Run resilience test scenario
+  clean         Remove agent deployment only
+  clean-all     Delete Kind cluster and all resources
+
 Local Development Commands:
-  setup      Setup the local development environment (default)
-  run        Setup and run the agent only (assumes dependencies running)
-  run-all    Build and run ALL components locally (recommended)
-             - Reuses existing Redis/services if available
-             - Starts grocery-store-api + grocery-tool + agent
-  redis      Setup Redis only
-  build      Build the agent only
-  build-all  Build all components (agent + mock-services)
+  build         Build the agent binary
+  run           Build and run the agent locally
+  run-all       Build and run ALL components locally (recommended)
+                - Reuses existing Redis/services if available
+                - Starts grocery-store-api + grocery-tool + agent
 
 Kubernetes Deployment Commands:
-  docker     Build Docker images for all components
-  deploy     Build, load to Kind, and deploy to Kubernetes
-  forward    Set up port forwards to Kubernetes services
-  test       Run the resilience test scenario
-  cleanup    Remove all deployed resources
+  docker-build  Build Docker images for all components
+  logs          View agent logs
+  status        Check deployment status
+
+Legacy Commands:
+  setup         Setup the local development environment (default)
+  redis         Setup Redis only
+  build-all     Build all components (agent + mock-services)
+  docker        Build Docker images (alias for docker-build)
+  forward       Set up port forwards (legacy - use forward-all)
+  cleanup       Remove deployed resources (alias for clean)
+
+Environment Variables:
+  CLUSTER_NAME      Kind cluster name (default: gomind-demo-\$(whoami))
+  NAMESPACE         Kubernetes namespace (default: gomind-examples)
+  PORT              HTTP server port (default: 8093)
+  REDIS_URL         Redis connection URL (default: redis://localhost:6379)
+  OPENAI_API_KEY    OpenAI API key (optional)
+  ANTHROPIC_API_KEY Anthropic API key (optional)
+  GROQ_API_KEY      Groq API key (optional)
 
 Examples:
-  $0 run-all      # Quick start: run everything locally
-  $0 deploy       # Full deployment to Kubernetes
-  $0 forward      # Port forward after deployment
-  $0 test         # Run resilience test
+  $0 full-deploy    # ONE-CLICK: Complete deployment with monitoring
+  $0 cluster        # Create Kind cluster only
+  $0 infra          # Setup infrastructure only
+  $0 deploy         # Deploy to existing cluster
+  $0 forward-all    # Access all dashboards
+  $0 test           # Run resilience tests
+  $0 clean-all      # Delete everything
+
+  $0 run-all        # Quick start: run everything locally
+  REDIS_URL=redis://localhost:6379 $0 run
 EOF
 }
 
 # Handle arguments
-case "${1:-setup}" in
-    setup)
-        main
+case "${1:-help}" in
+    # Standardized commands
+    cluster)
+        cmd_cluster
+        ;;
+    infra)
+        cmd_infra
+        ;;
+    full-deploy)
+        cmd_full_deploy
+        ;;
+    deploy)
+        cmd_deploy
+        ;;
+    forward)
+        cmd_forward
+        ;;
+    forward-all)
+        cmd_forward_all
+        ;;
+    test)
+        cmd_test
+        ;;
+    clean)
+        cmd_clean
+        ;;
+    clean-all)
+        cmd_clean_all
+        ;;
+    build)
+        cmd_build
         ;;
     run)
-        main run
+        cmd_run
+        ;;
+    docker-build)
+        cmd_docker_build
+        ;;
+    logs)
+        cmd_logs
+        ;;
+    status)
+        cmd_status
+        ;;
+    # Legacy commands (kept for compatibility)
+    setup)
+        main
         ;;
     run-all)
         check_prerequisites
@@ -669,9 +1018,6 @@ case "${1:-setup}" in
     redis)
         setup_redis
         ;;
-    build)
-        build_app
-        ;;
     build-all)
         check_prerequisites
         build_all
@@ -679,18 +1025,6 @@ case "${1:-setup}" in
     docker)
         check_prerequisites
         build_docker
-        ;;
-    deploy)
-        check_prerequisites
-        build_docker
-        load_to_kind
-        deploy_k8s
-        ;;
-    forward)
-        port_forward
-        ;;
-    test)
-        test_resilience
         ;;
     cleanup)
         cleanup

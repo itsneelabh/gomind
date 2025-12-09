@@ -8,4 +8,7 @@ use (
 	./resilience
 	./telemetry
 	./ui
+	// Examples using unified metrics
+	./examples/agent-with-telemetry
+	./examples/agent-with-orchestration
 )

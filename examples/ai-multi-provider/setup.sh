@@ -1,6 +1,6 @@
 #!/bin/bash
-# Weather Tool Setup Script
-# Provides commands for building, running, and deploying the weather tool
+# AI Multi-Provider Setup Script
+# Provides commands for building, running, and deploying the multi-provider AI example
 
 set -e
 
@@ -17,13 +17,14 @@ NC='\033[0m' # No Color
 # Configuration
 CLUSTER_NAME="gomind-demo-$(whoami)"
 NAMESPACE="gomind-examples"
-APP_NAME="weather-tool"
-PORT=${PORT:-8090}
+APP_NAME="multi-provider-ai"
+TOOL_PORT=${TOOL_PORT:-8085}
+AGENT_PORT=${AGENT_PORT:-8086}
 REDIS_URL=${REDIS_URL:-redis://localhost:6379}
 
 print_header() {
     echo -e "${BLUE}================================================${NC}"
-    echo -e "${BLUE}  Weather Tool - $1${NC}"
+    echo -e "${BLUE}  AI Multi-Provider - $1${NC}"
     echo -e "${BLUE}================================================${NC}"
 }
 
@@ -46,9 +47,9 @@ load_env() {
         set -a
         source .env
         set +a
-    elif [ -f .env.example ]; then
-        print_info "No .env file found, copying from .env.example"
-        cp .env.example .env
+    elif [ -f ../env.example ]; then
+        print_info "No .env file found, copying from ../env.example"
+        cp ../env.example .env
         set -a
         source .env
         set +a
@@ -63,22 +64,22 @@ check_command() {
     fi
 }
 
-# Build the tool
+# Build the application
 cmd_build() {
-    print_header "Building Weather Tool"
+    print_header "Building Application"
 
     print_info "Running go mod tidy..."
     GOWORK=off go mod tidy
 
     print_info "Building binary..."
-    GOWORK=off go build -o weather-tool .
+    GOWORK=off go build -o multi-provider-ai-example .
 
-    print_success "Build completed: weather-tool"
+    print_success "Build completed: multi-provider-ai-example"
 }
 
-# Run the tool locally
+# Run the application locally
 cmd_run() {
-    print_header "Running Weather Tool"
+    print_header "Running Application"
 
     load_env
 
@@ -88,14 +89,30 @@ cmd_run() {
         exit 1
     fi
 
+    # Check for at least 2 AI provider API keys
+    KEY_COUNT=0
+    [ -n "$OPENAI_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+    [ -n "$GROQ_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+    [ -n "$ANTHROPIC_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+    [ -n "$DEEPSEEK_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+    [ -n "$GEMINI_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+
+    if [ $KEY_COUNT -lt 2 ]; then
+        print_error "At least 2 AI provider API keys are required for multi-provider functionality"
+        print_info "Set at least 2 of these in your .env file:"
+        print_info "  OPENAI_API_KEY, GROQ_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, GEMINI_API_KEY"
+        exit 1
+    fi
+
     # Build first
     cmd_build
 
-    print_info "Starting weather-tool on port $PORT..."
+    print_info "Starting multi-provider-ai-example on tool port $TOOL_PORT and agent port $AGENT_PORT..."
     print_info "Redis URL: $REDIS_URL"
+    print_success "Found $KEY_COUNT AI provider API keys configured"
     echo ""
 
-    ./weather-tool
+    ./multi-provider-ai-example
 }
 
 # Build Docker image
@@ -120,9 +137,13 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
   extraPortMappings:
-  # Weather tool port
-  - containerPort: 30090
-    hostPort: 8090
+  # Tool port
+  - containerPort: 30085
+    hostPort: 8085
+    protocol: TCP
+  # Agent port
+  - containerPort: 30086
+    hostPort: 8086
     protocol: TCP
   # Grafana
   - containerPort: 30030
@@ -169,47 +190,38 @@ setup_api_keys() {
     print_info "Setting up API keys..."
 
     # Check for AI API keys (loaded from .env)
-    if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
-        print_info "No AI API keys found in .env file"
+    KEY_COUNT=0
+    [ -n "$OPENAI_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+    [ -n "$GROQ_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+    [ -n "$ANTHROPIC_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+    [ -n "$DEEPSEEK_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+    [ -n "$GEMINI_API_KEY" ] && KEY_COUNT=$((KEY_COUNT+1))
+
+    if [ $KEY_COUNT -lt 2 ]; then
+        print_error "At least 2 AI API keys are required for multi-provider functionality"
         echo ""
-        echo "To enable AI features, add API keys to your .env file:"
+        echo "To enable multi-provider AI features, add at least 2 API keys to your .env file:"
         echo "  OPENAI_API_KEY=your-key"
-        echo "  # or"
-        echo "  ANTHROPIC_API_KEY=your-key"
-        echo "  # or"
         echo "  GROQ_API_KEY=your-key"
+        echo "  ANTHROPIC_API_KEY=your-key"
+        echo "  DEEPSEEK_API_KEY=your-key"
+        echo "  GEMINI_API_KEY=your-key"
         echo ""
+        exit 1
     else
-        print_success "Using AI API keys from .env file"
+        print_success "Found $KEY_COUNT AI provider API keys configured"
     fi
 
-    # Create AI provider secret with available keys
+    # Create secret with available keys
     kubectl create secret generic ai-provider-keys \
         --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
         --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
         --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
+        --from-literal=DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}" \
+        --from-literal=GEMINI_API_KEY="${GEMINI_API_KEY:-}" \
         -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-    print_success "AI API keys configured"
-
-    # Setup Weather API key
-    if [ -n "$WEATHER_API_KEY" ]; then
-        kubectl create secret generic external-api-keys \
-            --from-literal=WEATHER_API_KEY="${WEATHER_API_KEY}" \
-            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-        print_success "Weather API key configured"
-    else
-        print_info "No Weather API key found (will use mock data)"
-        echo ""
-        echo "For real weather data, get a FREE API key from:"
-        echo "  https://openweathermap.org/api"
-        echo ""
-        echo "Then add to .env: WEATHER_API_KEY=your-key-here"
-        # Create empty secret to avoid deployment errors
-        kubectl create secret generic external-api-keys \
-            --from-literal=WEATHER_API_KEY="" \
-            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-    fi
+    print_success "API keys configured"
 }
 
 # Deploy to Kubernetes
@@ -246,14 +258,14 @@ cmd_deploy() {
         print_success "$APP_NAME deployed successfully!"
     else
         print_error "Deployment failed. Checking logs..."
-        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=$APP_NAME --tail=20
         exit 1
     fi
 
-    print_info "Check status: kubectl get pods -n $NAMESPACE -l app=$APP_NAME"
+    print_info "Check status: kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=$APP_NAME"
 }
 
-# Full deployment: cluster + infrastructure + tool
+# Full deployment: cluster + infrastructure + application
 cmd_full_deploy() {
     print_header "Full Deployment"
 
@@ -265,7 +277,7 @@ cmd_full_deploy() {
     # Step 2: Setup monitoring infrastructure
     cmd_infra
 
-    # Step 3: Deploy tool
+    # Step 3: Deploy application
     cmd_deploy
 
     # Step 4: Setup port forwards
@@ -278,13 +290,13 @@ cmd_test() {
 
     # Start port forward in background
     print_info "Starting port forward..."
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/multi-provider-tool-service 8085:80 >/dev/null 2>&1 &
     PF_PID=$!
     sleep 3
 
     # Test health endpoint
     echo "Testing health endpoint..."
-    if curl -s http://localhost:8090/health | grep -q "healthy"; then
+    if curl -s http://localhost:8085/health | grep -q "healthy"; then
         print_success "Health check passed"
     else
         print_error "Health check failed"
@@ -292,33 +304,35 @@ cmd_test() {
 
     # Test capabilities
     echo "Testing capabilities endpoint..."
-    if curl -s http://localhost:8090/api/capabilities | grep -q "capabilities"; then
+    if curl -s http://localhost:8085/api/capabilities | grep -q "capabilities"; then
         print_success "Capabilities endpoint working"
     else
         print_error "Capabilities endpoint not responding"
     fi
 
-    # Test weather query
+    # Test with a sample request
     echo ""
-    print_info "Testing weather query..."
-    curl -s -X POST http://localhost:8090/api/capabilities/get_weather \
+    print_info "Testing multi-provider AI request..."
+    curl -s -X POST http://localhost:8085/api/test \
         -H "Content-Type: application/json" \
-        -d '{"location": "Tokyo"}' | jq . 2>/dev/null || echo "(install jq for pretty output)"
+        -d '{"message": "Hello from multi-provider test"}' | jq . 2>/dev/null || echo "(install jq for pretty output)"
 
     # Kill port forward
     kill $PF_PID 2>/dev/null || true
 }
 
-# Port forward for tool only
+# Port forward for tool service only
 cmd_forward() {
-    print_header "Port Forwarding (Tool)"
+    print_header "Port Forwarding (Tool Service)"
 
-    print_info "Starting port forward on localhost:8090..."
+    print_info "Starting port forward on localhost:8085 (tool) and localhost:8086 (agent)..."
     print_info "Press Ctrl+C to stop"
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80
+
+    kubectl port-forward -n $NAMESPACE svc/multi-provider-tool-service 8085:80 &
+    kubectl port-forward -n $NAMESPACE svc/multi-provider-agent-service 8086:80
 }
 
-# Port forward for tool and monitoring
+# Port forward for application and monitoring
 cmd_forward_all() {
     print_header "Port Forwarding (All)"
 
@@ -328,7 +342,8 @@ cmd_forward_all() {
 
     # Start port forwarding in background
     print_info "Starting port forwards..."
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/multi-provider-tool-service 8085:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/multi-provider-agent-service 8086:80 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
@@ -337,10 +352,11 @@ cmd_forward_all() {
     print_success "Port forwarding active"
 
     echo ""
-    echo "Weather Tool: http://localhost:8090/health"
-    echo "Grafana:      http://localhost:3000 (admin/admin)"
-    echo "Prometheus:   http://localhost:9090"
-    echo "Jaeger:       http://localhost:16686"
+    echo "Tool Service:  http://localhost:8085/health"
+    echo "Agent Service: http://localhost:8086/health"
+    echo "Grafana:       http://localhost:3000 (admin/admin)"
+    echo "Prometheus:    http://localhost:9090"
+    echo "Jaeger:        http://localhost:16686"
     echo ""
     echo "Press Ctrl+C or run: pkill -f 'kubectl.*port-forward.*$NAMESPACE'"
 }
@@ -349,30 +365,30 @@ cmd_forward_all() {
 cmd_logs() {
     print_header "Viewing Logs"
 
-    kubectl logs -n $NAMESPACE -l app=$APP_NAME -f --tail=100
+    kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=$APP_NAME -f --tail=100
 }
 
 # Check status
 cmd_status() {
     print_header "Deployment Status"
 
-    echo "Weather Tool Pod:"
-    kubectl get pods -n $NAMESPACE -l app=$APP_NAME
+    echo "Application Pods:"
+    kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=$APP_NAME
     echo ""
-    echo "Weather Tool Service:"
-    kubectl get svc -n $NAMESPACE -l app=$APP_NAME
+    echo "Application Services:"
+    kubectl get svc -n $NAMESPACE -l app.kubernetes.io/name=$APP_NAME
     echo ""
     echo "Monitoring Pods:"
     kubectl get pods -n $NAMESPACE -l "app in (prometheus,grafana,otel-collector,jaeger)"
 }
 
-# Clean up tool only
+# Clean up application only
 cmd_clean() {
-    print_header "Cleaning Up Tool"
+    print_header "Cleaning Up Application"
 
-    print_info "Removing weather tool deployment..."
+    print_info "Removing application deployment..."
     kubectl delete -f k8-deployment.yaml --ignore-not-found
-    print_success "Tool cleanup complete"
+    print_success "Application cleanup complete"
 }
 
 # Clean up everything including cluster
@@ -382,7 +398,7 @@ cmd_clean_all() {
     # Kill port forwards
     pkill -f "kubectl.*port-forward.*$NAMESPACE" 2>/dev/null || true
 
-    # Delete tool
+    # Delete application
     kubectl delete -f k8-deployment.yaml --ignore-not-found 2>/dev/null || true
 
     # Delete Kind cluster
@@ -397,38 +413,40 @@ cmd_clean_all() {
 
 # Show help
 cmd_help() {
-    echo "Weather Tool Setup Script"
+    echo "AI Multi-Provider Setup Script"
     echo ""
     echo "Usage: ./setup.sh <command>"
     echo ""
     echo "Local Development Commands:"
-    echo "  build         Build the tool binary"
-    echo "  run           Build and run the tool locally"
+    echo "  build         Build the application binary"
+    echo "  run           Build and run the application locally"
     echo ""
     echo "Kubernetes Cluster Commands:"
     echo "  cluster       Create Kind cluster with port mappings"
     echo "  infra         Setup monitoring infrastructure (Prometheus, Grafana, Jaeger)"
-    echo "  full-deploy   Complete deployment: cluster + infra + tool + port forwards"
+    echo "  full-deploy   Complete deployment: cluster + infra + application + port forwards"
     echo ""
     echo "Kubernetes Deployment Commands:"
     echo "  docker-build  Build Docker image"
     echo "  deploy        Build, load, and deploy to Kubernetes"
-    echo "  test          Run test requests against deployed tool"
-    echo "  forward       Port forward the tool service only"
-    echo "  forward-all   Port forward tool + monitoring dashboards"
-    echo "  logs          View tool logs"
+    echo "  test          Run test requests against deployed application"
+    echo "  forward       Port forward the application services only"
+    echo "  forward-all   Port forward application + monitoring dashboards"
+    echo "  logs          View application logs"
     echo "  status        Check deployment status"
-    echo "  clean         Remove tool deployment only"
+    echo "  clean         Remove application deployment only"
     echo "  clean-all     Delete Kind cluster and all resources"
     echo "  help          Show this help message"
     echo ""
     echo "Environment Variables:"
     echo "  REDIS_URL         Redis connection URL (required for run)"
-    echo "  PORT              HTTP server port (default: 8090)"
-    echo "  WEATHER_API_KEY   Weather API key (optional)"
-    echo "  OPENAI_API_KEY    OpenAI API key (optional)"
+    echo "  TOOL_PORT         Tool service port (default: 8085)"
+    echo "  AGENT_PORT        Agent service port (default: 8086)"
+    echo "  OPENAI_API_KEY    OpenAI API key (optional, min 2 providers required)"
     echo "  ANTHROPIC_API_KEY Anthropic API key (optional)"
     echo "  GROQ_API_KEY      Groq API key (optional)"
+    echo "  DEEPSEEK_API_KEY  DeepSeek API key (optional)"
+    echo "  GEMINI_API_KEY    Gemini API key (optional)"
     echo ""
     echo "Examples:"
     echo "  ./setup.sh full-deploy    # One-click full deployment"

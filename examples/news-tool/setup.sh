@@ -1,6 +1,6 @@
 #!/bin/bash
 # News Tool Setup Script
-# Deploys to existing Kind cluster without modifying common infrastructure
+# Provides commands for building, running, and deploying the news tool
 # NOTE: Requires GNEWS_API_KEY from https://gnews.io/
 
 set -e
@@ -8,134 +8,517 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Colors
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 # Configuration
 CLUSTER_NAME="gomind-demo-$(whoami)"
 NAMESPACE="gomind-examples"
 APP_NAME="news-tool"
-PORT=8099
+PORT=${PORT:-8099}
+REDIS_URL=${REDIS_URL:-redis://localhost:6379}
 
-print_step() { echo -e "${BLUE}▶ $1${NC}"; }
-print_success() { echo -e "${GREEN}✓ $1${NC}"; }
-print_warning() { echo -e "${YELLOW}⚠ $1${NC}"; }
-print_error() { echo -e "${RED}✗ $1${NC}"; }
+print_header() {
+    echo -e "${BLUE}================================================${NC}"
+    echo -e "${BLUE}  News Tool - $1${NC}"
+    echo -e "${BLUE}================================================${NC}"
+}
 
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_info() {
+    echo -e "${YELLOW}[INFO]${NC} $1"
+}
+
+# Load .env file if it exists
 load_env() {
     if [ -f .env ]; then
-        set -a; source .env; set +a
-        print_success "Loaded .env file"
+        print_info "Loading environment from .env file"
+        set -a
+        source .env
+        set +a
+    elif [ -f .env.example ]; then
+        print_info "No .env file found, copying from .env.example"
+        cp .env.example .env
+        set -a
+        source .env
+        set +a
     fi
 }
 
+check_command() {
+    if ! command -v $1 &> /dev/null; then
+        print_error "$1 is not installed"
+        echo "Please install $1 and try again"
+        exit 1
+    fi
+}
+
+# Build the tool
 cmd_build() {
-    print_step "Building news-tool..."
+    print_header "Building News Tool"
+
+    print_info "Running go mod tidy..."
     GOWORK=off go mod tidy
+
+    print_info "Building binary..."
     GOWORK=off go build -o news-tool .
-    print_success "Build completed"
+
+    print_success "Build completed: news-tool"
 }
 
+# Run the tool locally
 cmd_run() {
+    print_header "Running News Tool"
+
     load_env
-    [ -z "$REDIS_URL" ] && print_error "REDIS_URL required" && exit 1
-    if [ -z "$GNEWS_API_KEY" ] || [ "$GNEWS_API_KEY" = "your_api_key_here" ]; then
-        print_warning "GNEWS_API_KEY not set - news API will not work"
-        print_warning "Get a FREE API key at: https://gnews.io/"
+
+    if [ -z "$REDIS_URL" ]; then
+        print_error "REDIS_URL environment variable is required"
+        print_info "Set it in .env file or export it: export REDIS_URL=redis://localhost:6379"
+        exit 1
     fi
+
+    # Check for GNEWS_API_KEY
+    if [ -z "$GNEWS_API_KEY" ] || [ "$GNEWS_API_KEY" = "your_api_key_here" ]; then
+        print_error "GNEWS_API_KEY not set - news API will not work"
+        echo ""
+        echo "Get a FREE API key at: https://gnews.io/"
+        echo "Free tier: 100 requests/day"
+        echo ""
+        echo "Then add to .env: GNEWS_API_KEY=your-key-here"
+        exit 1
+    fi
+
+    # Build first
     cmd_build
+
+    print_info "Starting news-tool on port $PORT..."
+    print_info "Redis URL: $REDIS_URL"
+    print_success "Using GNEWS_API_KEY from .env"
+    echo ""
+
     ./news-tool
 }
 
+# Build Docker image
 cmd_docker_build() {
-    print_step "Building Docker image..."
+    print_header "Building Docker Image"
+
     docker build -t $APP_NAME:latest .
-    print_success "Docker image built"
+
+    print_success "Docker image built: $APP_NAME:latest"
 }
 
-cmd_deploy() {
-    print_step "Deploying $APP_NAME to Kind cluster..."
+# Create Kind cluster with port mappings for monitoring
+cmd_cluster() {
+    print_header "Creating Kind Cluster"
 
-    # Load .env for API key
-    load_env
-
-    # Check for API key
-    if [ -z "$GNEWS_API_KEY" ] || [ "$GNEWS_API_KEY" = "your_api_key_here" ]; then
-        print_warning "GNEWS_API_KEY not found in .env"
-        print_warning "The tool will deploy but news search will not work"
-        print_warning "Get a FREE API key at: https://gnews.io/"
-        GNEWS_API_KEY=""
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        print_success "Cluster $CLUSTER_NAME already exists, reusing it"
     else
-        print_success "Using GNEWS_API_KEY from .env"
+        cat <<EOF | kind create cluster --name $CLUSTER_NAME --config=-
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  # News tool port
+  - containerPort: 30099
+    hostPort: 8099
+    protocol: TCP
+  # Grafana
+  - containerPort: 30030
+    hostPort: 3000
+    protocol: TCP
+  # Prometheus
+  - containerPort: 30090
+    hostPort: 9090
+    protocol: TCP
+  # Jaeger
+  - containerPort: 31686
+    hostPort: 16686
+    protocol: TCP
+EOF
+        print_success "Kind cluster created"
     fi
 
+    kubectl config use-context kind-$CLUSTER_NAME
+}
+
+# Setup monitoring infrastructure
+cmd_infra() {
+    print_header "Setting Up Monitoring Infrastructure"
+
+    # Use the infrastructure setup script
+    if [ -f "$SCRIPT_DIR/../k8-deployment/setup-infrastructure.sh" ]; then
+        print_success "Found infrastructure setup script"
+        echo ""
+
+        # Run the infrastructure setup
+        NAMESPACE=$NAMESPACE "$SCRIPT_DIR/../k8-deployment/setup-infrastructure.sh"
+
+        echo ""
+        print_success "Monitoring infrastructure ready"
+    else
+        print_error "Infrastructure setup script not found"
+        echo "Please ensure k8-deployment/setup-infrastructure.sh exists"
+        exit 1
+    fi
+}
+
+# Setup API keys as Kubernetes secrets
+setup_api_keys() {
+    print_info "Setting up API keys..."
+
+    # Check for AI API keys (loaded from .env)
+    if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
+        print_info "No AI API keys found in .env file"
+        echo ""
+        echo "To enable AI features, add API keys to your .env file:"
+        echo "  OPENAI_API_KEY=your-key"
+        echo "  # or"
+        echo "  ANTHROPIC_API_KEY=your-key"
+        echo "  # or"
+        echo "  GROQ_API_KEY=your-key"
+        echo ""
+    else
+        print_success "Using AI API keys from .env file"
+    fi
+
+    # Create AI provider secret with available keys
+    kubectl create secret generic ai-provider-keys \
+        --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+        --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+        --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
+        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+    print_success "AI API keys configured"
+
+    # Setup GNEWS_API_KEY
+    if [ -z "$GNEWS_API_KEY" ] || [ "$GNEWS_API_KEY" = "your_api_key_here" ]; then
+        print_info "GNEWS_API_KEY not found in .env"
+        echo ""
+        echo "The tool will deploy but news search will not work"
+        echo ""
+        echo "Get a FREE API key from: https://gnews.io/"
+        echo "Free tier: 100 requests/day"
+        echo ""
+        echo "Then add to .env: GNEWS_API_KEY=your-key-here"
+        echo "And redeploy with: ./setup.sh deploy"
+        echo ""
+        # Create empty secret to avoid deployment errors
+        kubectl create secret generic external-api-keys \
+            --from-literal=GNEWS_API_KEY="" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    else
+        kubectl create secret generic external-api-keys \
+            --from-literal=GNEWS_API_KEY="${GNEWS_API_KEY}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        print_success "GNEWS_API_KEY configured"
+    fi
+}
+
+# Deploy to Kubernetes
+cmd_deploy() {
+    print_header "Deploying to Kubernetes"
+
+    load_env
+
+    # Build Docker image first
     cmd_docker_build
 
-    print_step "Loading image into Kind cluster..."
-    kind load docker-image $APP_NAME:latest --name $CLUSTER_NAME
-    print_success "Image loaded"
+    # Load image into kind cluster if available
+    if command -v kind &> /dev/null; then
+        print_info "Loading image into kind cluster..."
+        kind load docker-image $APP_NAME:latest --name "$CLUSTER_NAME"
+        print_success "Image loaded"
+    fi
 
-    # Create secret for API key
-    print_step "Creating API key secret..."
-    kubectl create secret generic external-api-keys \
-        --from-literal=GNEWS_API_KEY="${GNEWS_API_KEY}" \
-        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-    print_success "Secret created"
+    # Create namespace
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-    print_step "Applying Kubernetes manifests..."
+    # Setup API keys
+    setup_api_keys
+
+    print_info "Waiting for any existing deployment..."
+    kubectl wait --for=condition=available --timeout=30s deployment/$APP_NAME -n $NAMESPACE 2>/dev/null || true
+
+    # Apply Kubernetes manifests
+    print_info "Applying Kubernetes manifests..."
     kubectl apply -f k8-deployment.yaml
 
-    print_step "Waiting for deployment..."
+    print_info "Waiting for deployment to be ready..."
     if kubectl wait --for=condition=available --timeout=120s deployment/$APP_NAME -n $NAMESPACE 2>/dev/null; then
         print_success "$APP_NAME deployed successfully!"
     else
-        print_error "Deployment failed"
+        print_error "Deployment failed. Checking logs..."
         kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
         exit 1
     fi
 
     echo ""
-    if [ -z "$GNEWS_API_KEY" ]; then
-        print_warning "Remember to add GNEWS_API_KEY to .env and redeploy"
+    if [ -z "$GNEWS_API_KEY" ] || [ "$GNEWS_API_KEY" = "your_api_key_here" ]; then
+        print_info "Remember to add GNEWS_API_KEY to .env and redeploy for news search to work"
     fi
-    echo "To test:"
-    echo "  kubectl port-forward -n $NAMESPACE svc/${APP_NAME}-service 8099:80 &"
-    echo "  curl -X POST http://localhost:8099/api/capabilities/search_news \\"
-    echo "    -H 'Content-Type: application/json' -d '{\"query\":\"Tokyo travel\",\"max_results\":3}'"
+
+    print_info "Check status: kubectl get pods -n $NAMESPACE -l app=$APP_NAME"
 }
 
+# Full deployment: cluster + infrastructure + tool
+cmd_full_deploy() {
+    print_header "Full Deployment"
+
+    load_env
+
+    # Step 1: Create Kind cluster
+    cmd_cluster
+
+    # Step 2: Setup monitoring infrastructure
+    cmd_infra
+
+    # Step 3: Deploy tool
+    cmd_deploy
+
+    # Step 4: Setup port forwards
+    cmd_forward_all
+}
+
+# Run tests
 cmd_test() {
-    print_step "Testing news-tool..."
-    if ! curl -s http://localhost:$PORT/health >/dev/null 2>&1; then
-        kubectl port-forward -n $NAMESPACE svc/${APP_NAME}-service $PORT:80 >/dev/null 2>&1 &
-        sleep 3
+    print_header "Running Tests"
+
+    # Start port forward in background
+    print_info "Starting port forward..."
+    kubectl port-forward -n $NAMESPACE svc/${APP_NAME}-service 8099:80 >/dev/null 2>&1 &
+    PF_PID=$!
+    sleep 3
+
+    # Test health endpoint
+    echo "Testing health endpoint..."
+    if curl -s http://localhost:8099/health | grep -q "healthy"; then
+        print_success "Health check passed"
+    else
+        print_error "Health check failed"
     fi
-    curl -s -X POST http://localhost:$PORT/api/capabilities/search_news \
+
+    # Test capabilities
+    echo "Testing capabilities endpoint..."
+    if curl -s http://localhost:8099/api/capabilities | grep -q "capabilities"; then
+        print_success "Capabilities endpoint working"
+    else
+        print_error "Capabilities endpoint not responding"
+    fi
+
+    # Test news search
+    echo ""
+    print_info "Testing news search..."
+    curl -s -X POST http://localhost:8099/api/capabilities/search_news \
         -H "Content-Type: application/json" \
-        -d '{"query": "Tokyo travel", "max_results": 3}' | jq .
+        -d '{"query": "Tokyo travel", "max_results": 3}' | jq . 2>/dev/null || echo "(install jq for pretty output)"
+
+    # Kill port forward
+    kill $PF_PID 2>/dev/null || true
 }
 
-cmd_logs() { kubectl logs -n $NAMESPACE -l app=$APP_NAME -f; }
-cmd_status() { kubectl get pods,svc -n $NAMESPACE -l app=$APP_NAME; }
+# Port forward for tool only
+cmd_forward() {
+    print_header "Port Forwarding (Tool)"
 
+    print_info "Starting port forward on localhost:8099..."
+    print_info "Press Ctrl+C to stop"
+    kubectl port-forward -n $NAMESPACE svc/${APP_NAME}-service 8099:80
+}
+
+# Port forward for tool and monitoring
+cmd_forward_all() {
+    print_header "Port Forwarding (All)"
+
+    # Kill existing port forwards
+    pkill -f "kubectl.*port-forward.*$NAMESPACE" 2>/dev/null || true
+    sleep 2
+
+    # Start port forwarding in background
+    print_info "Starting port forwards..."
+    kubectl port-forward -n $NAMESPACE svc/${APP_NAME}-service 8099:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
+
+    sleep 2
+    print_success "Port forwarding active"
+
+    echo ""
+    echo "News Tool:    http://localhost:8099/health"
+    echo "Grafana:      http://localhost:3000 (admin/admin)"
+    echo "Prometheus:   http://localhost:9090"
+    echo "Jaeger:       http://localhost:16686"
+    echo ""
+    echo "To test news search:"
+    echo "  curl -X POST http://localhost:8099/api/capabilities/search_news \\"
+    echo "    -H 'Content-Type: application/json' \\"
+    echo "    -d '{\"query\":\"Tokyo travel\",\"max_results\":3}'"
+    echo ""
+    echo "Press Ctrl+C or run: pkill -f 'kubectl.*port-forward.*$NAMESPACE'"
+}
+
+# View logs
+cmd_logs() {
+    print_header "Viewing Logs"
+
+    kubectl logs -n $NAMESPACE -l app=$APP_NAME -f --tail=100
+}
+
+# Check status
+cmd_status() {
+    print_header "Deployment Status"
+
+    echo "News Tool Pod:"
+    kubectl get pods -n $NAMESPACE -l app=$APP_NAME
+    echo ""
+    echo "News Tool Service:"
+    kubectl get svc -n $NAMESPACE -l app=$APP_NAME
+    echo ""
+    echo "Monitoring Pods:"
+    kubectl get pods -n $NAMESPACE -l "app in (prometheus,grafana,otel-collector,jaeger)"
+}
+
+# Clean up tool only
+cmd_clean() {
+    print_header "Cleaning Up Tool"
+
+    print_info "Removing news tool deployment..."
+    kubectl delete -f k8-deployment.yaml --ignore-not-found
+    print_success "Tool cleanup complete"
+}
+
+# Clean up everything including cluster
+cmd_clean_all() {
+    print_header "Cleaning Up Everything"
+
+    # Kill port forwards
+    pkill -f "kubectl.*port-forward.*$NAMESPACE" 2>/dev/null || true
+
+    # Delete tool
+    kubectl delete -f k8-deployment.yaml --ignore-not-found 2>/dev/null || true
+
+    # Delete Kind cluster
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        print_info "Deleting Kind cluster $CLUSTER_NAME..."
+        kind delete cluster --name $CLUSTER_NAME
+        print_success "Kind cluster deleted"
+    fi
+
+    print_success "Full cleanup complete"
+}
+
+# Show help
 cmd_help() {
     echo "News Tool Setup Script"
     echo ""
-    echo "Usage: ./setup.sh {build|run|docker-build|deploy|test|logs|status|help}"
+    echo "Usage: ./setup.sh <command>"
     echo ""
-    echo "API: GNews.io - REQUIRES API KEY"
-    echo "  Get FREE API key at: https://gnews.io/"
-    echo "  Free tier: 100 requests/day"
+    echo "IMPORTANT: This tool REQUIRES GNEWS_API_KEY from https://gnews.io/"
+    echo "  - Free tier: 100 requests/day"
+    echo "  - Add to .env file: GNEWS_API_KEY=your-key-here"
     echo ""
-    echo "Set GNEWS_API_KEY in .env file before deploying"
+    echo "Local Development Commands:"
+    echo "  build         Build the tool binary"
+    echo "  run           Build and run the tool locally (requires GNEWS_API_KEY)"
+    echo ""
+    echo "Kubernetes Cluster Commands:"
+    echo "  cluster       Create Kind cluster with port mappings"
+    echo "  infra         Setup monitoring infrastructure (Prometheus, Grafana, Jaeger)"
+    echo "  full-deploy   Complete deployment: cluster + infra + tool + port forwards"
+    echo ""
+    echo "Kubernetes Deployment Commands:"
+    echo "  docker-build  Build Docker image"
+    echo "  deploy        Build, load, and deploy to Kubernetes"
+    echo "  test          Run test requests against deployed tool"
+    echo "  forward       Port forward the tool service only"
+    echo "  forward-all   Port forward tool + monitoring dashboards"
+    echo "  logs          View tool logs"
+    echo "  status        Check deployment status"
+    echo "  clean         Remove tool deployment only"
+    echo "  clean-all     Delete Kind cluster and all resources"
+    echo "  help          Show this help message"
+    echo ""
+    echo "Environment Variables:"
+    echo "  REDIS_URL         Redis connection URL (default: redis://localhost:6379)"
+    echo "  PORT              HTTP server port (default: 8099)"
+    echo "  GNEWS_API_KEY     GNews API key (REQUIRED - get from https://gnews.io/)"
+    echo "  OPENAI_API_KEY    OpenAI API key (optional)"
+    echo "  ANTHROPIC_API_KEY Anthropic API key (optional)"
+    echo "  GROQ_API_KEY      Groq API key (optional)"
+    echo ""
+    echo "Examples:"
+    echo "  ./setup.sh full-deploy    # One-click full deployment"
+    echo "  ./setup.sh deploy         # Deploy to existing cluster"
+    echo "  ./setup.sh forward-all    # Access all dashboards"
+    echo "  ./setup.sh test           # Run tests"
+    echo "  REDIS_URL=redis://localhost:6379 ./setup.sh run"
 }
 
+# Main entry point
 case "${1:-help}" in
-    build) cmd_build ;; run) cmd_run ;; docker-build) cmd_docker_build ;;
-    deploy) cmd_deploy ;; test) cmd_test ;; logs) cmd_logs ;; status) cmd_status ;;
-    help|--help|-h) cmd_help ;; *) print_error "Unknown: $1"; exit 1 ;;
+    build)
+        cmd_build
+        ;;
+    run)
+        cmd_run
+        ;;
+    docker-build)
+        cmd_docker_build
+        ;;
+    cluster)
+        cmd_cluster
+        ;;
+    infra)
+        cmd_infra
+        ;;
+    deploy)
+        cmd_deploy
+        ;;
+    full-deploy)
+        cmd_full_deploy
+        ;;
+    test)
+        cmd_test
+        ;;
+    forward)
+        cmd_forward
+        ;;
+    forward-all)
+        cmd_forward_all
+        ;;
+    logs)
+        cmd_logs
+        ;;
+    status)
+        cmd_status
+        ;;
+    clean)
+        cmd_clean
+        ;;
+    clean-all)
+        cmd_clean_all
+        ;;
+    help|--help|-h)
+        cmd_help
+        ;;
+    *)
+        print_error "Unknown command: $1"
+        cmd_help
+        exit 1
+        ;;
 esac

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Weather Tool Setup Script
-# Provides commands for building, running, and deploying the weather tool
+# Grocery Tool Setup Script
+# Provides commands for building, running, and deploying the grocery tool
 
 set -e
 
@@ -17,13 +17,13 @@ NC='\033[0m' # No Color
 # Configuration
 CLUSTER_NAME="gomind-demo-$(whoami)"
 NAMESPACE="gomind-examples"
-APP_NAME="weather-tool"
-PORT=${PORT:-8090}
+APP_NAME="grocery-tool"
+PORT=${PORT:-8091}
 REDIS_URL=${REDIS_URL:-redis://localhost:6379}
 
 print_header() {
     echo -e "${BLUE}================================================${NC}"
-    echo -e "${BLUE}  Weather Tool - $1${NC}"
+    echo -e "${BLUE}  Grocery Tool - $1${NC}"
     echo -e "${BLUE}================================================${NC}"
 }
 
@@ -65,20 +65,20 @@ check_command() {
 
 # Build the tool
 cmd_build() {
-    print_header "Building Weather Tool"
+    print_header "Building Tool"
 
     print_info "Running go mod tidy..."
     GOWORK=off go mod tidy
 
     print_info "Building binary..."
-    GOWORK=off go build -o weather-tool .
+    GOWORK=off go build -o grocery-tool .
 
-    print_success "Build completed: weather-tool"
+    print_success "Build completed: grocery-tool"
 }
 
 # Run the tool locally
 cmd_run() {
-    print_header "Running Weather Tool"
+    print_header "Running Tool"
 
     load_env
 
@@ -88,14 +88,21 @@ cmd_run() {
         exit 1
     fi
 
+    if [ -z "$GROCERY_API_URL" ]; then
+        print_error "GROCERY_API_URL environment variable is required"
+        print_info "Set it in .env file or export it: export GROCERY_API_URL=http://localhost:8080"
+        exit 1
+    fi
+
     # Build first
     cmd_build
 
-    print_info "Starting weather-tool on port $PORT..."
+    print_info "Starting grocery-tool on port $PORT..."
     print_info "Redis URL: $REDIS_URL"
+    print_info "Grocery API URL: $GROCERY_API_URL"
     echo ""
 
-    ./weather-tool
+    ./grocery-tool
 }
 
 # Build Docker image
@@ -120,9 +127,9 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
   extraPortMappings:
-  # Weather tool port
-  - containerPort: 30090
-    hostPort: 8090
+  # Grocery Tool port
+  - containerPort: 30091
+    hostPort: 8091
     protocol: TCP
   # Grafana
   - containerPort: 30030
@@ -164,52 +171,27 @@ cmd_infra() {
     fi
 }
 
-# Setup API keys as Kubernetes secrets
-setup_api_keys() {
-    print_info "Setting up API keys..."
+# Setup secrets for grocery tool
+setup_secrets() {
+    print_info "Setting up secrets..."
 
-    # Check for AI API keys (loaded from .env)
-    if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
-        print_info "No AI API keys found in .env file"
+    # Check for GROCERY_API_URL (loaded from .env)
+    if [ -z "$GROCERY_API_URL" ]; then
+        print_info "No GROCERY_API_URL found in .env file"
         echo ""
-        echo "To enable AI features, add API keys to your .env file:"
-        echo "  OPENAI_API_KEY=your-key"
-        echo "  # or"
-        echo "  ANTHROPIC_API_KEY=your-key"
-        echo "  # or"
-        echo "  GROQ_API_KEY=your-key"
+        echo "To enable grocery API features, add to your .env file:"
+        echo "  GROCERY_API_URL=http://your-grocery-api:8080"
         echo ""
     else
-        print_success "Using AI API keys from .env file"
+        print_success "Using GROCERY_API_URL from .env file"
     fi
 
-    # Create AI provider secret with available keys
-    kubectl create secret generic ai-provider-keys \
-        --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-        --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-        --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
+    # Create secret with available values
+    kubectl create secret generic grocery-tool-config \
+        --from-literal=GROCERY_API_URL="${GROCERY_API_URL:-}" \
         -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-    print_success "AI API keys configured"
-
-    # Setup Weather API key
-    if [ -n "$WEATHER_API_KEY" ]; then
-        kubectl create secret generic external-api-keys \
-            --from-literal=WEATHER_API_KEY="${WEATHER_API_KEY}" \
-            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-        print_success "Weather API key configured"
-    else
-        print_info "No Weather API key found (will use mock data)"
-        echo ""
-        echo "For real weather data, get a FREE API key from:"
-        echo "  https://openweathermap.org/api"
-        echo ""
-        echo "Then add to .env: WEATHER_API_KEY=your-key-here"
-        # Create empty secret to avoid deployment errors
-        kubectl create secret generic external-api-keys \
-            --from-literal=WEATHER_API_KEY="" \
-            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-    fi
+    print_success "Secrets configured"
 }
 
 # Deploy to Kubernetes
@@ -231,8 +213,8 @@ cmd_deploy() {
     # Create namespace
     kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-    # Setup API keys
-    setup_api_keys
+    # Setup secrets
+    setup_secrets
 
     print_info "Waiting for any existing deployment..."
     kubectl wait --for=condition=available --timeout=30s deployment/$APP_NAME -n $NAMESPACE 2>/dev/null || true
@@ -255,7 +237,7 @@ cmd_deploy() {
 
 # Full deployment: cluster + infrastructure + tool
 cmd_full_deploy() {
-    print_header "Full Deployment"
+    print_header "Full Deployment (ONE-CLICK!)"
 
     load_env
 
@@ -265,7 +247,7 @@ cmd_full_deploy() {
     # Step 2: Setup monitoring infrastructure
     cmd_infra
 
-    # Step 3: Deploy tool
+    # Step 3: Deploy grocery tool
     cmd_deploy
 
     # Step 4: Setup port forwards
@@ -278,13 +260,13 @@ cmd_test() {
 
     # Start port forward in background
     print_info "Starting port forward..."
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/grocery-tool-service 8091:80 >/dev/null 2>&1 &
     PF_PID=$!
     sleep 3
 
     # Test health endpoint
     echo "Testing health endpoint..."
-    if curl -s http://localhost:8090/health | grep -q "healthy"; then
+    if curl -s http://localhost:8091/health | grep -q "healthy"; then
         print_success "Health check passed"
     else
         print_error "Health check failed"
@@ -292,18 +274,18 @@ cmd_test() {
 
     # Test capabilities
     echo "Testing capabilities endpoint..."
-    if curl -s http://localhost:8090/api/capabilities | grep -q "capabilities"; then
+    if curl -s http://localhost:8091/api/capabilities | grep -q "capabilities"; then
         print_success "Capabilities endpoint working"
     else
         print_error "Capabilities endpoint not responding"
     fi
 
-    # Test weather query
+    # Test list_products
     echo ""
-    print_info "Testing weather query..."
-    curl -s -X POST http://localhost:8090/api/capabilities/get_weather \
+    print_info "Testing list_products capability..."
+    curl -s -X POST http://localhost:8091/api/capabilities/list_products \
         -H "Content-Type: application/json" \
-        -d '{"location": "Tokyo"}' | jq . 2>/dev/null || echo "(install jq for pretty output)"
+        -d '{}' | jq . 2>/dev/null || echo "(install jq for pretty output)"
 
     # Kill port forward
     kill $PF_PID 2>/dev/null || true
@@ -313,9 +295,9 @@ cmd_test() {
 cmd_forward() {
     print_header "Port Forwarding (Tool)"
 
-    print_info "Starting port forward on localhost:8090..."
+    print_info "Starting port forward on localhost:8091..."
     print_info "Press Ctrl+C to stop"
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80
+    kubectl port-forward -n $NAMESPACE svc/grocery-tool-service 8091:80
 }
 
 # Port forward for tool and monitoring
@@ -328,7 +310,7 @@ cmd_forward_all() {
 
     # Start port forwarding in background
     print_info "Starting port forwards..."
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/grocery-tool-service 8091:80 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
@@ -337,7 +319,7 @@ cmd_forward_all() {
     print_success "Port forwarding active"
 
     echo ""
-    echo "Weather Tool: http://localhost:8090/health"
+    echo "Grocery Tool: http://localhost:8091/health"
     echo "Grafana:      http://localhost:3000 (admin/admin)"
     echo "Prometheus:   http://localhost:9090"
     echo "Jaeger:       http://localhost:16686"
@@ -356,10 +338,10 @@ cmd_logs() {
 cmd_status() {
     print_header "Deployment Status"
 
-    echo "Weather Tool Pod:"
+    echo "Grocery Tool Pod:"
     kubectl get pods -n $NAMESPACE -l app=$APP_NAME
     echo ""
-    echo "Weather Tool Service:"
+    echo "Grocery Tool Service:"
     kubectl get svc -n $NAMESPACE -l app=$APP_NAME
     echo ""
     echo "Monitoring Pods:"
@@ -370,7 +352,7 @@ cmd_status() {
 cmd_clean() {
     print_header "Cleaning Up Tool"
 
-    print_info "Removing weather tool deployment..."
+    print_info "Removing tool deployment..."
     kubectl delete -f k8-deployment.yaml --ignore-not-found
     print_success "Tool cleanup complete"
 }
@@ -397,7 +379,7 @@ cmd_clean_all() {
 
 # Show help
 cmd_help() {
-    echo "Weather Tool Setup Script"
+    echo "Grocery Tool Setup Script"
     echo ""
     echo "Usage: ./setup.sh <command>"
     echo ""
@@ -408,7 +390,7 @@ cmd_help() {
     echo "Kubernetes Cluster Commands:"
     echo "  cluster       Create Kind cluster with port mappings"
     echo "  infra         Setup monitoring infrastructure (Prometheus, Grafana, Jaeger)"
-    echo "  full-deploy   Complete deployment: cluster + infra + tool + port forwards"
+    echo "  full-deploy   Complete deployment: cluster + infra + tool + port forwards (ONE-CLICK!)"
     echo ""
     echo "Kubernetes Deployment Commands:"
     echo "  docker-build  Build Docker image"
@@ -424,18 +406,15 @@ cmd_help() {
     echo ""
     echo "Environment Variables:"
     echo "  REDIS_URL         Redis connection URL (required for run)"
-    echo "  PORT              HTTP server port (default: 8090)"
-    echo "  WEATHER_API_KEY   Weather API key (optional)"
-    echo "  OPENAI_API_KEY    OpenAI API key (optional)"
-    echo "  ANTHROPIC_API_KEY Anthropic API key (optional)"
-    echo "  GROQ_API_KEY      Groq API key (optional)"
+    echo "  GROCERY_API_URL   Grocery Store API URL (required for run)"
+    echo "  PORT              HTTP server port (default: 8091)"
     echo ""
     echo "Examples:"
     echo "  ./setup.sh full-deploy    # One-click full deployment"
     echo "  ./setup.sh deploy         # Deploy to existing cluster"
     echo "  ./setup.sh forward-all    # Access all dashboards"
     echo "  ./setup.sh test           # Run tests"
-    echo "  REDIS_URL=redis://localhost:6379 ./setup.sh run"
+    echo "  REDIS_URL=redis://localhost:6379 GROCERY_API_URL=http://localhost:8080 ./setup.sh run"
 }
 
 # Main entry point
