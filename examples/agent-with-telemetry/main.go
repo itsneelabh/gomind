@@ -121,6 +121,9 @@ func main() {
 		core.WithDiscovery(true, "redis"),
 		core.WithCORS([]string{"*"}, true),
 		core.WithDevelopmentMode(os.Getenv("DEV_MODE") == "true"),
+
+		// Distributed tracing middleware for context propagation
+		core.WithMiddleware(telemetry.TracingMiddleware("research-assistant-telemetry")),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create framework: %v", err)
@@ -264,6 +267,10 @@ func initTelemetry(serviceName string) {
 		log.Printf("   Application will continue without telemetry")
 		return
 	}
+
+	// Enable framework integration - this allows core components (redis_registry, discovery)
+	// to emit metrics like discovery.registrations, discovery.health_checks, etc.
+	telemetry.EnableFrameworkIntegration(nil)
 
 	log.Printf("✅ Telemetry initialized successfully")
 	log.Printf("   Environment: %s", env)

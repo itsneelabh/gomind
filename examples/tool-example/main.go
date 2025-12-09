@@ -62,6 +62,9 @@ func main() {
 
 		// Development mode from environment
 		core.WithDevelopmentMode(os.Getenv("DEV_MODE") == "true"),
+
+		// Distributed tracing middleware for context propagation
+		core.WithMiddleware(telemetry.TracingMiddleware("weather-service")),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create framework: %v", err)
@@ -160,6 +163,10 @@ func initTelemetry(serviceName string) {
 		log.Printf("   Tool will continue without telemetry")
 		return
 	}
+
+	// Enable framework integration - this allows core components (redis_registry, discovery)
+	// to emit metrics like discovery.registrations, discovery.health_checks, etc.
+	telemetry.EnableFrameworkIntegration(nil)
 
 	log.Printf("✅ Telemetry initialized for %s", serviceName)
 }

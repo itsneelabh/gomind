@@ -531,7 +531,7 @@ func classifyError(err error) string {
 1. **Add Custom Metrics**: Extend `DeclareMetrics()` with agent-specific metrics
 2. **Create Alerts**: Define Prometheus alert rules for critical conditions
 3. **Custom Dashboards**: Build Grafana dashboards for your specific use case
-4. **Distributed Tracing**: Add context propagation to external service calls
+4. **Distributed Tracing**: See the [Distributed Tracing Guide](../../docs/DISTRIBUTED_TRACING_GUIDE.md) for complete tracing patterns, log correlation, and multi-service examples
 
 ## Related Examples
 
@@ -542,6 +542,7 @@ func classifyError(err error) string {
 ## Learn More
 
 - [GoMind Telemetry Module](../../telemetry/README.md) - Complete telemetry documentation
+- [Distributed Tracing Guide](../../docs/DISTRIBUTED_TRACING_GUIDE.md) - **End-to-end request tracing, log correlation, and multi-service examples**
 - [OpenTelemetry Go Documentation](https://opentelemetry.io/docs/languages/go/)
 - [Prometheus Best Practices](https://prometheus.io/docs/practices/naming/)
 

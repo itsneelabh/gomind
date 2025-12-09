@@ -33,8 +33,8 @@ RUN ls -lh weather-tool
 # Runtime stage
 FROM alpine:latest
 
-# Install runtime dependencies
-RUN apk --no-cache add ca-certificates tzdata curl
+# Install runtime dependencies (no curl - use K8s probes for health checks)
+RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /app
 
@@ -53,9 +53,8 @@ USER appuser
 # Set default PORT if not provided
 ENV PORT=8080
 
-# Health check - uses PORT environment variable
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:${PORT}/health || exit 1
+# Note: Health checks handled by Kubernetes probes (livenessProbe/readinessProbe)
+# See k8-deployment.yaml for probe configuration
 
 # Expose port (default 8080, can be overridden by PORT env var)
 EXPOSE ${PORT}

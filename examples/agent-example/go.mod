@@ -1,11 +1,11 @@
-module research-agent-example
+module github.com/itsneelabh/gomind/examples/agent-example
 
 go 1.25
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/itsneelabh/gomind/ai v0.6.7
-	github.com/itsneelabh/gomind/core v0.6.7
+	github.com/itsneelabh/gomind/ai v0.7.4
+	github.com/itsneelabh/gomind/core v0.7.4
 )
 
 require (

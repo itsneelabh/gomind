@@ -49,6 +49,7 @@ spec:
         app: research-agent-telemetry
         component: agent
         framework: gomind
+        gomind.framework/type: agent
         version: v1
       annotations:
         prometheus.io/scrape: "true"

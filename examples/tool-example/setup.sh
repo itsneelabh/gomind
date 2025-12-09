@@ -1,9 +1,11 @@
 #!/bin/bash
+# Weather Tool Setup Script
+# Provides commands for building, running, and deploying the weather tool
 
-# GoMind Weather Tool Example - One-Click Setup Script
-# This script sets up everything needed to run the weather tool example locally
+set -e
 
-set -e  # Exit on error
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Colors for output
 RED='\033[0;31m'
@@ -16,254 +18,167 @@ NC='\033[0m' # No Color
 CLUSTER_NAME="gomind-demo-$(whoami)"
 NAMESPACE="gomind-examples"
 APP_NAME="weather-tool"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT=${PORT:-8090}
+REDIS_URL=${REDIS_URL:-redis://localhost:6379}
 
-# Functions
 print_header() {
-    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║     GoMind Weather Tool Setup          ║${NC}"
-    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
-    echo ""
-}
-
-print_step() {
-    echo -e "${BLUE}▶ $1${NC}"
+    echo -e "${BLUE}================================================${NC}"
+    echo -e "${BLUE}  Weather Tool - $1${NC}"
+    echo -e "${BLUE}================================================${NC}"
 }
 
 print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠ $1${NC}"
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
 print_error() {
-    echo -e "${RED}✗ $1${NC}"
+    echo -e "${RED}[ERROR]${NC} $1"
 }
 
-load_env() {
-    print_step "Loading environment variables..."
+print_info() {
+    echo -e "${YELLOW}[INFO]${NC} $1"
+}
 
-    if [ -f "$SCRIPT_DIR/.env" ]; then
+# Load .env file if it exists
+load_env() {
+    if [ -f .env ]; then
+        print_info "Loading environment from .env file"
         set -a
-        source "$SCRIPT_DIR/.env"
+        source .env
         set +a
-        print_success "Loaded .env file"
-    elif [ -f "$SCRIPT_DIR/.env.example" ]; then
-        print_warning "No .env file found, copying from .env.example"
-        cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+    elif [ -f .env.example ]; then
+        print_info "No .env file found, copying from .env.example"
+        cp .env.example .env
         set -a
-        source "$SCRIPT_DIR/.env"
+        source .env
         set +a
-        print_success "Created .env from example"
-    else
-        print_warning "No .env file found"
     fi
-    echo ""
 }
 
 check_command() {
     if ! command -v $1 &> /dev/null; then
         print_error "$1 is not installed"
         echo "Please install $1 and try again"
-        echo "Installation guide: $2"
         exit 1
     fi
 }
 
-check_prerequisites() {
-    print_step "Checking prerequisites..."
+# Build the tool
+cmd_build() {
+    print_header "Building Weather Tool"
 
-    check_command "docker" "https://docs.docker.com/get-docker/"
-    check_command "kind" "https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
-    check_command "kubectl" "https://kubernetes.io/docs/tasks/tools/"
+    print_info "Running go mod tidy..."
+    GOWORK=off go mod tidy
 
-    print_success "All prerequisites installed"
-    echo ""
+    print_info "Building binary..."
+    GOWORK=off go build -o weather-tool .
+
+    print_success "Build completed: weather-tool"
 }
 
-create_kind_cluster() {
-    print_step "Setting up Kind cluster ($CLUSTER_NAME)..."
+# Run the tool locally
+cmd_run() {
+    print_header "Running Weather Tool"
 
-    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
-        print_success "Cluster $CLUSTER_NAME already exists, reusing it"
+    load_env
+
+    if [ -z "$REDIS_URL" ]; then
+        print_error "REDIS_URL environment variable is required"
+        print_info "Set it in .env file or export it: export REDIS_URL=redis://localhost:6379"
+        exit 1
+    fi
+
+    # Build first
+    cmd_build
+
+    print_info "Starting weather-tool on port $PORT..."
+    print_info "Redis URL: $REDIS_URL"
+    echo ""
+
+    ./weather-tool
+}
+
+# Build Docker image
+cmd_docker_build() {
+    print_header "Building Docker Image"
+
+    docker build -t $APP_NAME:latest .
+
+    print_success "Docker image built: $APP_NAME:latest"
+}
+
+# Deploy to Kubernetes
+cmd_deploy() {
+    print_header "Deploying to Kubernetes"
+
+    load_env
+
+    # Build Docker image first
+    cmd_docker_build
+
+    # Load image into kind cluster if available
+    if command -v kind &> /dev/null; then
+        print_info "Loading image into kind cluster..."
+        kind load docker-image $APP_NAME:latest --name "$CLUSTER_NAME"
+        print_success "Image loaded"
+    fi
+
+    # Setup API keys as secrets
+    print_info "Setting up API keys..."
+    if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$GROQ_API_KEY" ]; then
+        kubectl create secret generic ai-provider-keys \
+            --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+            --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+            --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        print_success "AI API keys configured"
     else
-        cat <<EOF | kind create cluster --name $CLUSTER_NAME --config=-
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-  extraPortMappings:
-  - containerPort: 30080
-    hostPort: 8080
-    protocol: TCP
-  - containerPort: 30090
-    hostPort: 8090
-    protocol: TCP
-EOF
-        print_success "Kind cluster created"
+        print_info "No AI API keys found in .env"
     fi
 
-    kubectl config use-context kind-$CLUSTER_NAME
-    echo ""
-}
-
-setup_namespace() {
-    print_step "Creating namespace..."
-    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-    print_success "Namespace ready"
-    echo ""
-}
-
-install_redis() {
-    print_step "Setting up Redis..."
-
-    # Check if Redis already exists in the namespace
-    if kubectl get deployment redis -n $NAMESPACE >/dev/null 2>&1; then
-        print_success "Redis already running in $NAMESPACE"
-        return 0
-    fi
-
-    kubectl apply -f - <<EOF
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: redis-pvc
-  namespace: $NAMESPACE
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis
-  namespace: $NAMESPACE
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-    spec:
-      containers:
-      - name: redis
-        image: redis:7-alpine
-        ports:
-        - containerPort: 6379
-        volumeMounts:
-        - name: redis-storage
-          mountPath: /data
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-      volumes:
-      - name: redis-storage
-        persistentVolumeClaim:
-          claimName: redis-pvc
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis
-  namespace: $NAMESPACE
-spec:
-  type: ClusterIP
-  ports:
-  - port: 6379
-    targetPort: 6379
-  selector:
-    app: redis
-EOF
-
-    echo "Waiting for Redis to be ready..."
-    kubectl wait --for=condition=available --timeout=60s deployment/redis -n $NAMESPACE 2>/dev/null || true
-    print_success "Redis installed"
-    echo ""
-}
-
-setup_api_keys() {
-    print_step "Setting up API keys..."
-
-    # Check for AI API keys (loaded from .env)
-    if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
-        print_warning "No AI API keys found in .env file"
+    if [ -n "$WEATHER_API_KEY" ]; then
+        kubectl create secret generic external-api-keys \
+            --from-literal=WEATHER_API_KEY="${WEATHER_API_KEY}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        print_success "Weather API key configured"
+    else
+        print_info "No Weather API key found (will use mock data)"
         echo ""
-        echo "To enable AI features, add API keys to your .env file:"
-        echo "  OPENAI_API_KEY=your-key"
-        echo "  # or"
-        echo "  ANTHROPIC_API_KEY=your-key"
-        echo "  # or"
-        echo "  GROQ_API_KEY=your-key"
+        echo "For real weather data, get a FREE API key from:"
+        echo "  https://openweathermap.org/api"
         echo ""
-    else
-        print_success "Using AI API keys from .env file"
+        echo "Then add to .env: WEATHER_API_KEY=your-key-here"
+        # Create empty secret to avoid deployment errors
+        kubectl create secret generic external-api-keys \
+            --from-literal=WEATHER_API_KEY="" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
     fi
 
-    # Weather API key (optional - tool works with mock data without it)
-    if [ -n "$WEATHER_API_KEY" ] && [ "$WEATHER_API_KEY" != "your-weather-api-key-here" ]; then
-        print_success "Using Weather API key from .env file"
-    else
-        print_warning "No Weather API key found - using mock weather data"
-        echo "  For real weather data, add WEATHER_API_KEY to .env"
-        WEATHER_API_KEY="mock-key"
-    fi
+    print_info "Waiting for any existing deployment..."
+    kubectl wait --for=condition=available --timeout=30s deployment/$APP_NAME -n $NAMESPACE 2>/dev/null || true
 
-    # Create AI provider keys secret (empty string for unset keys - won't be detected as available)
-    kubectl create secret generic ai-provider-keys \
-        --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-        --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-        --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
-        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    # Apply Kubernetes manifests
+    print_info "Applying Kubernetes manifests..."
+    kubectl apply -f k8-deployment.yaml
 
-    # Create external API keys secret (for weather API)
-    kubectl create secret generic external-api-keys \
-        --from-literal=WEATHER_API_KEY="${WEATHER_API_KEY}" \
-        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-
-    print_success "API keys configured"
-    echo ""
-}
-
-build_and_deploy() {
-    print_step "Building Docker image..."
-    docker build -t $APP_NAME:latest "$SCRIPT_DIR" >/dev/null 2>&1
-    print_success "Docker image built"
-
-    print_step "Loading image into Kind cluster..."
-    kind load docker-image $APP_NAME:latest --name $CLUSTER_NAME
-    print_success "Image loaded"
-
-    print_step "Deploying weather tool..."
-    kubectl apply -f "$SCRIPT_DIR/k8-deployment.yaml"
-
-    echo "Waiting for deployment to be ready..."
+    print_info "Waiting for deployment to be ready..."
     if kubectl wait --for=condition=available --timeout=120s deployment/$APP_NAME -n $NAMESPACE 2>/dev/null; then
-        print_success "Weather tool deployed successfully!"
+        print_success "$APP_NAME deployed successfully!"
     else
         print_error "Deployment failed. Checking logs..."
         kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
         exit 1
     fi
-    echo ""
+
+    print_info "Check status: kubectl get pods -n $NAMESPACE -l app=$APP_NAME"
 }
 
-test_deployment() {
-    print_step "Testing deployment..."
-    echo ""
+# Run tests
+cmd_test() {
+    print_header "Running Tests"
 
     # Start port forward in background
+    print_info "Starting port forward..."
     kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80 >/dev/null 2>&1 &
     PF_PID=$!
     sleep 3
@@ -273,7 +188,7 @@ test_deployment() {
     if curl -s http://localhost:8090/health | grep -q "healthy"; then
         print_success "Health check passed"
     else
-        print_warning "Health check failed"
+        print_error "Health check failed"
     fi
 
     # Test capabilities
@@ -281,56 +196,122 @@ test_deployment() {
     if curl -s http://localhost:8090/api/capabilities | grep -q "capabilities"; then
         print_success "Capabilities endpoint working"
     else
-        print_warning "Capabilities endpoint not responding"
+        print_error "Capabilities endpoint not responding"
     fi
+
+    # Test weather query
+    echo ""
+    print_info "Testing weather query..."
+    curl -s -X POST http://localhost:8090/api/capabilities/get_weather \
+        -H "Content-Type: application/json" \
+        -d '{"location": "Tokyo"}' | jq . 2>/dev/null || echo "(install jq for pretty output)"
 
     # Kill port forward
     kill $PF_PID 2>/dev/null || true
-    echo ""
 }
 
-print_summary() {
-    echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║       Setup Complete! 🎉               ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
-    echo ""
-    echo "Your agent is now running in the Kind cluster!"
-    echo ""
-    echo "To access the agent:"
-    echo "  kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80"
-    echo "  Then visit: http://localhost:8090/health"
-    echo ""
-    echo "Useful commands:"
-    echo "  make logs      - View agent logs"
-    echo "  make status    - Check deployment status"
-    echo "  make test      - Run tests"
-    echo "  make clean     - Delete everything"
-    echo ""
-    if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
-        print_warning "Remember to set an API key for full AI functionality:"
-        echo "  export OPENAI_API_KEY=your-key"
-        echo "  make create-secrets"
-    fi
+# Port forward for local access
+cmd_forward() {
+    print_header "Port Forwarding"
+
+    print_info "Starting port forward on localhost:8090..."
+    print_info "Press Ctrl+C to stop"
+    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80
 }
 
-# Main execution
-main() {
-    clear
-    print_header
+# View logs
+cmd_logs() {
+    print_header "Viewing Logs"
 
-    load_env
-    check_prerequisites
-    create_kind_cluster
-    setup_namespace
-    install_redis
-    setup_api_keys
-    build_and_deploy
-    test_deployment
-    print_summary
+    kubectl logs -n $NAMESPACE -l app=$APP_NAME -f --tail=100
 }
 
-# Handle Ctrl+C
-trap 'echo -e "\n${YELLOW}Setup interrupted${NC}"; exit 1' INT
+# Check status
+cmd_status() {
+    print_header "Deployment Status"
 
-# Run main function
-main
+    echo "Pods:"
+    kubectl get pods -n $NAMESPACE -l app=$APP_NAME
+    echo ""
+    echo "Service:"
+    kubectl get svc -n $NAMESPACE -l app=$APP_NAME
+}
+
+# Clean up
+cmd_clean() {
+    print_header "Cleaning Up"
+
+    print_info "Removing deployment..."
+    kubectl delete -f k8-deployment.yaml --ignore-not-found
+    print_success "Cleanup complete"
+}
+
+# Show help
+cmd_help() {
+    echo "Weather Tool Setup Script"
+    echo ""
+    echo "Usage: ./setup.sh <command>"
+    echo ""
+    echo "Commands:"
+    echo "  build         Build the tool binary"
+    echo "  run           Build and run the tool locally"
+    echo "  docker-build  Build Docker image"
+    echo "  deploy        Build, load, and deploy to Kubernetes"
+    echo "  test          Run test requests against deployed tool"
+    echo "  forward       Port forward the service for local access"
+    echo "  logs          View tool logs"
+    echo "  status        Check deployment status"
+    echo "  clean         Remove deployment"
+    echo "  help          Show this help message"
+    echo ""
+    echo "Environment Variables:"
+    echo "  REDIS_URL         Redis connection URL (required for run)"
+    echo "  PORT              HTTP server port (default: 8090)"
+    echo "  WEATHER_API_KEY   Weather API key (optional)"
+    echo "  OPENAI_API_KEY    OpenAI API key (optional)"
+    echo ""
+    echo "Examples:"
+    echo "  ./setup.sh build"
+    echo "  ./setup.sh deploy"
+    echo "  ./setup.sh test"
+    echo "  REDIS_URL=redis://localhost:6379 ./setup.sh run"
+}
+
+# Main entry point
+case "${1:-help}" in
+    build)
+        cmd_build
+        ;;
+    run)
+        cmd_run
+        ;;
+    docker-build)
+        cmd_docker_build
+        ;;
+    deploy)
+        cmd_deploy
+        ;;
+    test)
+        cmd_test
+        ;;
+    forward)
+        cmd_forward
+        ;;
+    logs)
+        cmd_logs
+        ;;
+    status)
+        cmd_status
+        ;;
+    clean)
+        cmd_clean
+        ;;
+    help|--help|-h)
+        cmd_help
+        ;;
+    *)
+        print_error "Unknown command: $1"
+        cmd_help
+        exit 1
+        ;;
+esac

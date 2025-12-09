@@ -162,19 +162,20 @@ func NewResearchAgent() (*ResearchAgent, error) {
 		},
 	})
 
+	// Create traced HTTP client for distributed tracing context propagation
+	tracedClient := telemetry.NewTracedHTTPClientWithTransport(&http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+		DisableKeepAlives:   false,
+		ForceAttemptHTTP2:   true,
+	})
+	tracedClient.Timeout = 30 * time.Second
+
 	researchAgent := &ResearchAgent{
-		BaseAgent: agent,
-		aiClient:  aiClient,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
-				DisableKeepAlives:   false,
-				ForceAttemptHTTP2:   true,
-			},
-		},
+		BaseAgent:  agent,
+		aiClient:   aiClient,
+		httpClient: tracedClient,
 	}
 
 	// Register agent capabilities

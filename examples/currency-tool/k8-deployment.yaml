@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: currency-tool
+  namespace: gomind-examples
+  labels:
+    app: currency-tool
+    component: tool
+    gomind.framework/type: tool
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: currency-tool
+  template:
+    metadata:
+      labels:
+        app: currency-tool
+        component: tool
+        gomind.framework/type: tool
+    spec:
+      containers:
+      - name: currency-tool
+        image: currency-tool:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8097
+          name: http
+        env:
+        - name: PORT
+          value: "8097"
+        - name: GOMIND_NAMESPACE
+          value: "gomind-examples"
+        - name: REDIS_URL
+          value: "redis://redis.gomind-examples:6379"
+        - name: GOMIND_REDIS_URL
+          value: "redis://redis.gomind-examples:6379"
+        - name: GOMIND_DISCOVERY_RETRY
+          value: "true"
+        - name: GOMIND_DISCOVERY_RETRY_INTERVAL
+          value: "30s"
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "currency-tool-service"
+        - name: GOMIND_K8S_SERVICE_PORT
+          value: "80"
+        - name: GOMIND_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: GOMIND_K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.gomind-examples:4318"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8097
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/capabilities
+            port: 8097
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: currency-tool-service
+  namespace: gomind-examples
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8097
+  selector:
+    app: currency-tool

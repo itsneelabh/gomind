@@ -15,13 +15,19 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 	startTime := time.Now()
 	ctx := req.Context()
 
-	// NEW: Track overall operation duration with deferred call
+	// Track overall operation duration with deferred call
 	// This ensures the metric is emitted even if the function returns early
+	var requestStatus = "success" // Will be set to "error" on failure paths
 	defer func() {
-		telemetry.Histogram("agent.research.duration_ms",
-			float64(time.Since(startTime).Milliseconds()),
-			"topic", "", // Will be updated with actual topic below
+		durationMs := float64(time.Since(startTime).Milliseconds())
+
+		// Legacy metric (for backwards compatibility)
+		telemetry.Histogram("agent.research.duration_ms", durationMs,
+			"topic", "",
 			"status", "completed")
+
+		// Unified metric (enables cross-module dashboards)
+		telemetry.RecordRequest(telemetry.ModuleAgent, "research", durationMs, requestStatus)
 	}()
 
 	r.Logger.Info("Starting research topic orchestration", map[string]interface{}{
@@ -34,6 +40,8 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 		r.Logger.Error("Failed to decode research request", map[string]interface{}{
 			"error": err.Error(),
 		})
+		requestStatus = "error"
+		telemetry.RecordRequestError(telemetry.ModuleAgent, "research", "validation")
 		http.Error(rw, "Invalid request format", http.StatusBadRequest)
 		return
 	}
@@ -46,6 +54,8 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 		r.Logger.Error("Failed to discover tools", map[string]interface{}{
 			"error": err.Error(),
 		})
+		requestStatus = "error"
+		telemetry.RecordRequestError(telemetry.ModuleAgent, "research", "discovery")
 		http.Error(rw, "Service discovery failed", http.StatusServiceUnavailable)
 		return
 	}
@@ -165,21 +175,26 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 	var aiAnalysis string
 
 	if request.UseAI && r.aiClient != nil {
-		// NEW: Track AI synthesis timing
 		aiStart := time.Now()
 
 		aiAnalysis = r.generateAIAnalysis(ctx, request.Topic, results)
+		aiDurationMs := float64(time.Since(aiStart).Milliseconds())
+		aiStatus := "success"
+		if aiAnalysis == "" {
+			aiStatus = "error"
+		}
+
+		// Legacy metrics (for backwards compatibility)
+		telemetry.Histogram("agent.ai_synthesis.duration_ms", aiDurationMs)
+		telemetry.Counter("agent.ai.requests",
+			"provider", "openai",
+			"operation", "synthesis")
+
+		// Unified metrics (enables cross-module AI dashboards)
+		telemetry.RecordAIRequest(telemetry.ModuleAgent, "openai", aiDurationMs, aiStatus)
+
 		if aiAnalysis != "" {
 			summary = aiAnalysis // Use AI analysis as the summary
-
-			// NEW: Track AI metrics
-			telemetry.Histogram("agent.ai_synthesis.duration_ms",
-				float64(time.Since(aiStart).Milliseconds()))
-			telemetry.Counter("agent.ai.requests",
-				"provider", "openai", // TODO: Get actual provider from aiClient
-				"operation", "synthesis")
-			// TODO: Track actual token usage from AI response
-
 			r.Logger.Info("AI analysis completed", map[string]interface{}{
 				"topic": request.Topic,
 			})
