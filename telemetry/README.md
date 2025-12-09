@@ -20,6 +20,7 @@ Welcome to the observability powerhouse of GoMind! Think of this guide as your f
 - [📈 Advanced Patterns](#-advanced-patterns)
 - [🎯 Best Practices Summary](#-best-practices-summary)
 - [🏁 Quick Reference](#-quick-reference)
+- [🔗 Unified Metrics API](#-unified-metrics-api)
 - [🌐 Distributed Tracing](#-distributed-tracing)
   - [📖 Comprehensive Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md)
 - [🎉 Summary](#-summary)
@@ -1236,6 +1237,204 @@ if !health.Initialized {
     // Telemetry not working
 }
 ```
+
+## 🔗 Unified Metrics API
+
+The Unified Metrics API provides pre-defined helper functions for recording cross-module metrics with consistent naming conventions. This enables unified observability across all GoMind modules (agent, orchestration, core) with standardized Prometheus metrics.
+
+### Why Unified Metrics?
+
+When building distributed systems with GoMind, different modules emit their own metrics. The unified metrics API ensures:
+- **Consistent naming**: All modules use the same metric names and label conventions
+- **Cross-module dashboards**: Create Grafana dashboards that aggregate data from all modules
+- **Simplified instrumentation**: Pre-defined functions for common patterns (requests, errors, tool calls, AI operations)
+- **Pre-registered metrics**: All metrics are registered at init() time, avoiding runtime registration issues
+
+### Module Constants
+
+Use these constants to identify the source module in metrics:
+
+```go
+import "github.com/itsneelabh/gomind/telemetry"
+
+const (
+    telemetry.ModuleAgent         = "agent"
+    telemetry.ModuleOrchestration = "orchestration"
+    telemetry.ModuleCore          = "core"
+)
+```
+
+### Available Functions
+
+#### Request Metrics
+
+```go
+// RecordRequest records a request with duration and status
+// Emits: gomind_request_duration_ms (histogram), gomind_requests_total (counter)
+telemetry.RecordRequest(module, operation string, durationMs float64, status string)
+
+// RecordRequestError records a request error
+// Emits: gomind_request_errors_total (counter)
+telemetry.RecordRequestError(module, operation, errorType string)
+```
+
+#### Tool/Capability Call Metrics
+
+```go
+// RecordToolCall records a tool invocation with duration
+// Emits: gomind_tool_call_duration_ms (histogram), gomind_tool_calls_total (counter)
+telemetry.RecordToolCall(module, toolName string, durationMs float64, status string)
+
+// RecordToolCallError records a tool call error
+// Emits: gomind_tool_call_errors_total (counter)
+telemetry.RecordToolCallError(module, toolName, errorType string)
+
+// RecordToolCallRetry records a tool call retry attempt
+// Emits: gomind_tool_call_retries_total (counter)
+telemetry.RecordToolCallRetry(module, toolName string)
+```
+
+#### AI Provider Metrics
+
+```go
+// RecordAIRequest records an AI provider request
+// Emits: gomind_ai_request_duration_ms (histogram), gomind_ai_requests_total (counter)
+telemetry.RecordAIRequest(module, provider string, durationMs float64, status string)
+
+// RecordAITokens records token usage from AI providers
+// Emits: gomind_ai_tokens_total (counter)
+// tokenType: "prompt", "completion", or "total"
+telemetry.RecordAITokens(module, provider, tokenType string, count int64)
+```
+
+### Usage Examples
+
+#### Agent Module Example
+
+```go
+package main
+
+import (
+    "time"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func handleResearchRequest(topic string) error {
+    start := time.Now()
+
+    // Record the request
+    defer func() {
+        duration := float64(time.Since(start).Milliseconds())
+        telemetry.RecordRequest(telemetry.ModuleAgent, "research", duration, "success")
+    }()
+
+    // Call a tool
+    toolStart := time.Now()
+    result, err := callWeatherTool(topic)
+    toolDuration := float64(time.Since(toolStart).Milliseconds())
+
+    if err != nil {
+        telemetry.RecordToolCallError(telemetry.ModuleAgent, "weather-tool", "api_error")
+        telemetry.RecordRequestError(telemetry.ModuleAgent, "research", "tool_failure")
+        return err
+    }
+
+    telemetry.RecordToolCall(telemetry.ModuleAgent, "weather-tool", toolDuration, "success")
+
+    // Call AI for analysis
+    aiStart := time.Now()
+    analysis, tokens, err := callAI(result)
+    aiDuration := float64(time.Since(aiStart).Milliseconds())
+
+    if err != nil {
+        telemetry.RecordAIRequest(telemetry.ModuleAgent, "openai", aiDuration, "error")
+        return err
+    }
+
+    telemetry.RecordAIRequest(telemetry.ModuleAgent, "openai", aiDuration, "success")
+    telemetry.RecordAITokens(telemetry.ModuleAgent, "openai", "prompt", int64(tokens.Prompt))
+    telemetry.RecordAITokens(telemetry.ModuleAgent, "openai", "completion", int64(tokens.Completion))
+
+    return nil
+}
+```
+
+#### Orchestration Module Example
+
+```go
+package main
+
+import (
+    "time"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func executeWorkflow(workflowID string) error {
+    start := time.Now()
+
+    defer func() {
+        duration := float64(time.Since(start).Milliseconds())
+        telemetry.RecordRequest(telemetry.ModuleOrchestration, "workflow_execution", duration, "success")
+    }()
+
+    // Execute each step
+    for _, step := range workflow.Steps {
+        stepStart := time.Now()
+
+        result, err := executeStep(step)
+        stepDuration := float64(time.Since(stepStart).Milliseconds())
+
+        if err != nil {
+            telemetry.RecordToolCallError(telemetry.ModuleOrchestration, step.CapabilityName, "execution_error")
+
+            // Try retry if configured
+            if step.RetryEnabled {
+                telemetry.RecordToolCallRetry(telemetry.ModuleOrchestration, step.CapabilityName)
+                // ... retry logic
+            }
+            continue
+        }
+
+        telemetry.RecordToolCall(telemetry.ModuleOrchestration, step.CapabilityName, stepDuration, "success")
+    }
+
+    return nil
+}
+```
+
+### Prometheus Query Examples
+
+The unified metrics enable powerful cross-module queries in Prometheus:
+
+```promql
+# Total requests across all modules
+sum(rate(gomind_requests_total[5m])) by (module)
+
+# Error rate by module
+sum(rate(gomind_request_errors_total[5m])) by (module)
+  / sum(rate(gomind_requests_total[5m])) by (module)
+
+# Average tool call latency by tool
+histogram_quantile(0.95,
+  sum(rate(gomind_tool_call_duration_ms_bucket[5m])) by (le, tool_name)
+)
+
+# AI token usage across all providers
+sum(increase(gomind_ai_tokens_total[1h])) by (provider, token_type)
+
+# Cross-module request flow visualization
+sum(rate(gomind_requests_total[5m])) by (module, operation)
+```
+
+### Grafana Dashboard
+
+With unified metrics, you can create a single dashboard showing:
+- Request rates and latencies across agent, orchestration, and core modules
+- Tool call success/failure rates
+- AI provider usage and token consumption
+- Error rates with breakdown by error type
+
+See the [examples/k8-deployment/grafana.yaml](../examples/k8-deployment/grafana.yaml) for a pre-configured dashboard.
 
 ## 🌐 Distributed Tracing
 

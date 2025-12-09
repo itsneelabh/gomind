@@ -1729,6 +1729,96 @@ telemetry.RecordLatency("order.processing",
 )
 ```
 
+### Unified Metrics API
+
+Cross-module metrics that enable consistent observability across agents and orchestration. These helpers emit standardized metrics with a `module` label, enabling unified Grafana dashboards regardless of which GoMind module you use.
+
+```go
+// Module constants
+const (
+    ModuleAgent         = "agent"
+    ModuleOrchestration = "orchestration"
+    ModuleCore          = "core"
+)
+
+// Request metrics
+func RecordRequest(module, operation string, durationMs float64, status string)
+func RecordRequestError(module, operation, errorType string)
+
+// Tool/capability call metrics
+func RecordToolCall(module, toolName string, durationMs float64, status string)
+func RecordToolCallError(module, toolName, errorType string)
+func RecordToolCallRetry(module, toolName string)
+
+// AI provider metrics
+func RecordAIRequest(module, provider string, durationMs float64, status string)
+func RecordAITokens(module, provider, tokenType string, count int64)
+```
+
+**Why use unified metrics:**
+- Single Grafana dashboard works for both agent and orchestration examples
+- Consistent metric names across all GoMind modules
+- Easy to compare performance between different module implementations
+- Prometheus queries work regardless of which module emits the data
+
+**Example - Agent Request Handler:**
+```go
+func handleResearchRequest(w http.ResponseWriter, r *http.Request) {
+    startTime := time.Now()
+    var requestStatus = "success"
+
+    defer func() {
+        durationMs := float64(time.Since(startTime).Milliseconds())
+        // Unified metric - works in cross-module dashboards
+        telemetry.RecordRequest(telemetry.ModuleAgent, "research", durationMs, requestStatus)
+    }()
+
+    // Parse request
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        requestStatus = "error"
+        telemetry.RecordRequestError(telemetry.ModuleAgent, "research", "validation")
+        http.Error(w, "Invalid request", http.StatusBadRequest)
+        return
+    }
+
+    // Process...
+}
+```
+
+**Example - Orchestration with AI:**
+```go
+func executeWithAI(ctx context.Context, prompt string) (string, error) {
+    startTime := time.Now()
+
+    response, err := aiClient.GenerateResponse(ctx, prompt)
+
+    // Record AI metrics
+    status := "success"
+    if err != nil {
+        status = "error"
+    }
+    telemetry.RecordAIRequest(telemetry.ModuleOrchestration, "openai",
+        float64(time.Since(startTime).Milliseconds()), status)
+
+    return response, err
+}
+```
+
+**Prometheus Queries for Unified Dashboards:**
+```promql
+# Request rate across all modules
+sum(rate(request_total[5m])) by (module, operation)
+
+# P95 latency by module
+histogram_quantile(0.95, sum(rate(request_duration_ms_bucket[5m])) by (le, module))
+
+# Error rate comparison: agent vs orchestration
+sum(rate(request_errors[5m])) by (module, error_type)
+
+# AI request latency by provider
+histogram_quantile(0.95, sum(rate(ai_request_duration_ms_bucket[5m])) by (le, provider))
+```
+
 ### Distributed Tracing
 
 HTTP instrumentation for automatic trace context propagation across service boundaries.
