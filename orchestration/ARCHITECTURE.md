@@ -69,28 +69,32 @@ The orchestration module provides multi-agent coordination with AI-driven orches
 
 ### 1. Interface-Based Dependency Injection
 
-**The Principle**: The orchestration module NEVER imports other optional modules directly. It only depends on interfaces defined in `core`.
+**The Principle**: The orchestration module uses interface-based dependencies for most optional modules. Per [FRAMEWORK_DESIGN_PRINCIPLES.md](../FRAMEWORK_DESIGN_PRINCIPLES.md), the valid dependencies are:
+
+- `orchestration` → `core` (required)
+- `orchestration` → `telemetry` (allowed for observability)
 
 ```go
-// ❌ NEVER DO THIS - Violates architectural principles
+// ❌ NEVER DO THIS - Would create circular dependency
 import "github.com/itsneelabh/gomind/ai"
-import "github.com/itsneelabh/gomind/telemetry"
+import "github.com/itsneelabh/gomind/resilience"
 
-// ✅ ALWAYS DO THIS - Interface-based dependencies
+// ✅ ALLOWED - Per FRAMEWORK_DESIGN_PRINCIPLES.md
 import "github.com/itsneelabh/gomind/core"
+import "github.com/itsneelabh/gomind/telemetry"  // For observability
 
 type AIOrchestrator struct {
-    aiClient    core.AIClient    // Interface, not concrete type
-    telemetry   core.Telemetry   // Interface, not concrete type
-    discovery   core.Discovery   // Interface, not concrete type
+    aiClient    core.AIClient    // Interface - injected by application
+    discovery   core.Discovery   // Interface - injected by application
 }
 ```
 
 **Rationale**:
-1. **Prevents circular dependencies**: Modules can't import each other
+1. **Prevents circular dependencies**: `ai` module cannot be imported (would create cycle)
 2. **Enables testing**: Can use mocks without importing real modules
 3. **Maintains modularity**: Can swap implementations without code changes
 4. **Follows SOLID principles**: Dependency Inversion Principle
+5. **Telemetry exception**: `telemetry` is allowed because it provides observability infrastructure that all modules need, and it doesn't create circular dependencies
 
 ### 2. Explicit Configuration Over Magic
 
@@ -175,7 +179,7 @@ if err != nil && o.config.EnableFallback {
                      │ - Logger     │
                      └──────────────┘
 
-Note: orchestration NEVER imports ai or telemetry directly!
+Note: orchestration imports core and telemetry only (per FRAMEWORK_DESIGN_PRINCIPLES.md)
 ```
 
 ### Module Dependencies
@@ -186,7 +190,8 @@ module github.com/itsneelabh/gomind/orchestration
 
 require (
     github.com/itsneelabh/gomind/core v0.1.0
-    // NO direct imports of ai, telemetry, or other optional modules
+    github.com/itsneelabh/gomind/telemetry v0.1.0  // Allowed for observability
+    // NO direct imports of ai, resilience, or ui modules
 )
 ```
 
