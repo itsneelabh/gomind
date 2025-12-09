@@ -87,7 +87,7 @@ A modular framework for building AI agents in Go with production-grade resilienc
 | What You Get with Go | The Reality |
 |---------------------|-------------|
 | **Container Size** | ~15-26MB for tools, ~24-44MB for agents (verified) |
-| **Memory Usage** | 10-50MB per component |
+| **Memory Footprint** | 8-12MB at runtime (verified in Kubernetes) |
 | **Startup Time** | ~100ms |
 | **Deployment** | Single binary - no dependencies |
 | **Concurrency** | Native goroutines - thousands of concurrent operations |
@@ -159,7 +159,7 @@ Unlike frameworks that evolved from notebooks and experiments, GoMind was archit
 | Aspect | GoMind | Traditional Frameworks |
 |--------|--------|----------------------|
 | **Container Size** | 15-44MB (verified) | 200-900MB (Python + deps) |
-| **Memory per Agent** | 20-80MB | 100-500MB |
+| **Memory per Agent** | 8-12MB (verified in K8s) | 100-500MB |
 | **Startup Time** | ~100ms | 5-30 seconds |
 | **Concurrent Agents** | 1000s (goroutines) | 10s-100s (GIL/processes) |
 | **Health Checks** | Built-in from start | Added via extensions |
@@ -859,7 +859,7 @@ func main() {
 |-------------------|---------|-------------------|
 | **Deploy an agent** | Copy single binary, run | Install Python, pip install 50 packages, pray |
 | **Container image size** | ~15-44MB (Alpine + Go binary) | 200-900MB (Python + dependencies) |
-| **Memory footprint** | 10-50MB per agent | 100-500MB per agent |
+| **Memory footprint** | 8-12MB per component (verified) | 100-500MB per agent |
 | **Handle API failures** | Built-in circuit breakers | Add retry library, configure it |
 | **Coordinate agents** | "Analyze this data" (English) | Write orchestration code |
 | **Add observability** | `telemetry.Counter("done")` | Setup Prometheus + Grafana + exporters |
