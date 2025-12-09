@@ -76,7 +76,7 @@ A modular framework for building AI agents in Go with production-grade resilienc
 | **Rolling Updates** | Deploy new versions with zero downtime |
 | **Service Discovery** | Tools and agents find each other via Kubernetes DNS |
 
-**The GoMind Advantage**: Go applications are Kubernetes-native. Single binary deployments, tiny containers (~21-51MB depending on features), and built-in health checks make Go agents perfect citizens in a Kubernetes cluster.
+**The GoMind Advantage**: Go applications are Kubernetes-native. Single binary deployments, tiny containers (~15-44MB depending on features), and built-in health checks make Go agents perfect citizens in a Kubernetes cluster.
 
 ### 3. Why Go? Language Is No Longer a Barrier
 
@@ -86,7 +86,7 @@ A modular framework for building AI agents in Go with production-grade resilienc
 
 | What You Get with Go | The Reality |
 |---------------------|-------------|
-| **Container Size** | ~21-32MB for tools, ~29-51MB for agents (verified) |
+| **Container Size** | ~15-26MB for tools, ~24-44MB for agents (verified) |
 | **Memory Usage** | 10-50MB per component |
 | **Startup Time** | ~100ms |
 | **Deployment** | Single binary - no dependencies |
@@ -158,7 +158,7 @@ Unlike frameworks that evolved from notebooks and experiments, GoMind was archit
 
 | Aspect | GoMind | Traditional Frameworks |
 |--------|--------|----------------------|
-| **Container Size** | 21-51MB (verified) | 200-900MB (Python + deps) |
+| **Container Size** | 15-44MB (verified) | 200-900MB (Python + deps) |
 | **Memory per Agent** | 20-80MB | 100-500MB |
 | **Startup Time** | ~100ms | 5-30 seconds |
 | **Concurrent Agents** | 1000s (goroutines) | 10s-100s (GIL/processes) |
@@ -858,7 +858,7 @@ func main() {
 | What You're Doing | GoMind | Python Frameworks |
 |-------------------|---------|-------------------|
 | **Deploy an agent** | Copy single binary, run | Install Python, pip install 50 packages, pray |
-| **Container image size** | ~21-51MB (Alpine + Go binary) | 200-900MB (Python + dependencies) |
+| **Container image size** | ~15-44MB (Alpine + Go binary) | 200-900MB (Python + dependencies) |
 | **Memory footprint** | 10-50MB per agent | 100-500MB per agent |
 | **Handle API failures** | Built-in circuit breakers | Add retry library, configure it |
 | **Coordinate agents** | "Analyze this data" (English) | Write orchestration code |
@@ -869,9 +869,9 @@ func main() {
 ### Container Image Size Details
 
 **GoMind Agent Images (Using Alpine Linux base)**:
-- Base Alpine image + ca-certificates: ~8-10MB
-- Go binary: ~13-41MB (varies by dependencies - telemetry adds ~10-20MB)
-- **Total container size: ~21-51MB** (tools: ~21-32MB, agents: ~29-51MB)
+- Base Alpine image + ca-certificates: ~9-10MB
+- Go binary: ~6-17MB (core only ~6MB, with telemetry ~17MB)
+- **Total container size: ~15-44MB** (tools: ~15-26MB, agents: ~24-44MB)
 
 Built with:
 - Multi-stage Docker builds (golang:1.25-alpine for building, alpine:3.19 for runtime)
