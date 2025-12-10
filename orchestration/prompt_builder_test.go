@@ -327,6 +327,162 @@ func TestDefaultPromptBuilder_SetLogger(t *testing.T) {
 }
 
 // =============================================================================
+// Step Reference Instructions Tests (STEP_REFERENCE_TEMPLATE_BUG fix)
+// =============================================================================
+
+func TestDefaultPromptBuilder_IncludesStepReferenceInstructions(t *testing.T) {
+	builder, err := NewDefaultPromptBuilder(&PromptConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "Available tools: item-lookup-tool, inventory-tool",
+		Request:        "Get item details and check inventory",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify critical step reference instructions are present
+	criticalElements := []string{
+		"CROSS-STEP DATA REFERENCES",
+		"{{<step_id>.response.<field_path>}}",
+		"DOUBLE curly braces",
+		"depends_on",
+	}
+
+	for _, element := range criticalElements {
+		if !strings.Contains(prompt, element) {
+			t.Errorf("prompt should contain %q for step reference guidance", element)
+		}
+	}
+}
+
+func TestDefaultPromptBuilder_IncludesStep2TemplateExample(t *testing.T) {
+	builder, err := NewDefaultPromptBuilder(&PromptConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "test",
+		Request:        "test",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify step-2 example with template references is present
+	step2Elements := []string{
+		"step-2",
+		`"depends_on": ["step-1"]`,
+		"{{step-1.response.data.id}}",
+		"{{step-1.response.data.name}}",
+	}
+
+	for _, element := range step2Elements {
+		if !strings.Contains(prompt, element) {
+			t.Errorf("prompt should contain step-2 example with %q", element)
+		}
+	}
+}
+
+func TestDefaultPromptBuilder_IncludesAntiPatternWarnings(t *testing.T) {
+	builder, err := NewDefaultPromptBuilder(&PromptConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "test",
+		Request:        "test",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify anti-pattern warnings are present
+	antiPatterns := []string{
+		"WRONG (will fail)",
+		"{step-1.response.data.id}",  // Single braces shown as wrong
+		"Single braces - NOT supported",
+	}
+
+	for _, antiPattern := range antiPatterns {
+		if !strings.Contains(prompt, antiPattern) {
+			t.Errorf("prompt should contain anti-pattern warning %q", antiPattern)
+		}
+	}
+}
+
+func TestDefaultPromptBuilder_IncludesResolutionExamples(t *testing.T) {
+	builder, err := NewDefaultPromptBuilder(&PromptConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "test",
+		Request:        "test",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify resolution examples are present (shows what templates resolve to)
+	resolutionElements := []string{
+		"RESOLUTION EXAMPLES",
+		"{{step-1.response.status}}",
+		"{{step-1.response.data.id}}",
+		"Resolves To",
+	}
+
+	for _, element := range resolutionElements {
+		if !strings.Contains(prompt, element) {
+			t.Errorf("prompt should contain resolution example %q", element)
+		}
+	}
+}
+
+func TestDefaultPromptBuilder_ImportantSectionIncludesStepReferences(t *testing.T) {
+	builder, err := NewDefaultPromptBuilder(&PromptConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "test",
+		Request:        "test",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify Important section mentions step references
+	importantRules := []string{
+		"Use {{stepId.response.field}} syntax for cross-step data references",
+		"Always declare dependencies in the depends_on array before referencing",
+	}
+
+	for _, rule := range importantRules {
+		if !strings.Contains(prompt, rule) {
+			t.Errorf("prompt Important section should contain %q", rule)
+		}
+	}
+}
+
+// =============================================================================
 // TemplatePromptBuilder Tests
 // =============================================================================
 

@@ -422,7 +422,8 @@ func (e *SmartExecutor) findReadySteps(plan *RoutingPlan, executed map[string]bo
 // buildStepContext creates context with dependency results for template interpolation
 func (e *SmartExecutor) buildStepContext(ctx context.Context, step RoutingStep, results map[string]*StepResult) context.Context {
 	// Add dependency results to context for template interpolation
-	// The results are stored as parsed JSON so templates like {{stepId.field}} can be resolved
+	// Results are wrapped in a "response" key to match template syntax: {{stepId.response.field}}
+	// This enables templates like {{step-1.response.data.id}} to resolve correctly
 	deps := make(map[string]map[string]interface{})
 	for _, depID := range step.DependsOn {
 		if result, ok := results[depID]; ok && result.Response != "" {
@@ -440,7 +441,9 @@ func (e *SmartExecutor) buildStepContext(ctx context.Context, step RoutingStep, 
 				}
 				// Continue without this dependency - templates referencing it will be unresolved
 			} else {
-				deps[depID] = parsed
+				// Wrap parsed response in "response" key to match template syntax
+				// Template: {{stepId.response.field}} -> deps[stepId]["response"][field]
+				deps[depID] = map[string]interface{}{"response": parsed}
 			}
 		}
 	}
@@ -803,8 +806,17 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			})
 		}
 
-		// Make the HTTP request (using callAgentWithBody for Layer 3 error detection)
-		response, responseBody, err := e.callAgentWithBody(ctx, url, parameters)
+		// Make the HTTP request based on component type
+		// Tools expect raw parameters, agents expect wrapped {"data": ...} format
+		var response, responseBody string
+		var err error
+		if agentInfo.Registration.Type == core.ComponentTypeAgent {
+			// Agents expect {"data": {...}} wrapper
+			response, responseBody, err = e.callAgentService(ctx, url, parameters)
+		} else {
+			// Tools expect raw parameters (default for backward compatibility)
+			response, responseBody, err = e.callTool(ctx, url, parameters)
+		}
 		if err == nil {
 			if e.logger != nil {
 				e.logger.Debug("Agent HTTP call successful", map[string]interface{}{
@@ -1166,100 +1178,29 @@ func isTypeRelatedError(err error, responseBody string) bool {
 	return false
 }
 
-// callAgent makes an HTTP call to an agent
-// This method sends a POST request with JSON parameters to the specified agent endpoint
-// and returns the JSON response as a string
-func (e *SmartExecutor) callAgent(ctx context.Context, url string, parameters map[string]interface{}) (string, error) {
-	// Prepare request body
-	body, err := json.Marshal(parameters)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal parameters: %w", err)
-	}
 
-	// Log request details at DEBUG level
-	if e.logger != nil {
-		e.logger.Debug("HTTP request to agent", map[string]interface{}{
-			"operation":   "agent_http_request",
-			"url":         url,
-			"method":      "POST",
-			"body_length": len(body),
-			"parameters":  parameters,
-		})
-	}
+// ============================================================================
+// Component HTTP Call Functions
+// ============================================================================
+// These functions implement the HTTP communication layer for tools and agents.
+// Tools and agents have different request format expectations:
+//   - Tools: expect raw parameters {"location": "Tokyo", "units": "metric"}
+//   - Agents: expect parameters wrapped in "data" field {"data": {...params...}}
+//
+// Architecture:
+//   callTool()        → callComponentWithBody() (shared HTTP logic)
+//   callAgentService() → callComponentWithBody() (shared HTTP logic)
+// ============================================================================
 
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	// Make the request
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			// Log error but don't fail the operation
-			if e.logger != nil {
-				e.logger.Warn("Error closing response body", map[string]interface{}{
-					"url":   url,
-					"error": closeErr.Error(),
-				})
-			}
-		}
-	}()
-
-	// Check status code
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("agent returned status %d", resp.StatusCode)
-	}
-
-	// Read response
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// Convert back to string for storage
-	responseBytes, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal response: %w", err)
-	}
-
-	responseStr := string(responseBytes)
-
-	// Log response content at DEBUG level
-	if e.logger != nil {
-		e.logger.Debug("HTTP response from agent", map[string]interface{}{
-			"operation":       "agent_http_response",
-			"url":             url,
-			"status_code":     resp.StatusCode,
-			"response_length": len(responseStr),
-			"response":        result, // Log parsed response for readability
-		})
-	}
-
-	return responseStr, nil
-}
-
-// callAgentWithBody makes an HTTP call and returns both response and error body.
-// This is needed for Layer 3 validation feedback to detect type errors from the
-// response body when the tool returns a 4xx error with details.
+// callComponentWithBody is the shared HTTP logic for calling any component (tool or agent).
+// It handles request creation, tracing, response reading, and error handling.
+// The body parameter should already be marshaled JSON with the correct format.
 // Returns: (successResponse, errorResponseBody, error)
-func (e *SmartExecutor) callAgentWithBody(ctx context.Context, url string, parameters map[string]interface{}) (string, string, error) {
-	// Prepare request body
-	body, err := json.Marshal(parameters)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal parameters: %w", err)
-	}
-
+func (e *SmartExecutor) callComponentWithBody(ctx context.Context, url string, body []byte) (string, string, error) {
 	// Log request details at DEBUG level
 	if e.logger != nil {
-		e.logger.Debug("HTTP request to agent (with body tracking)", map[string]interface{}{
-			"operation":   "agent_http_request_with_body",
+		e.logger.Debug("HTTP request to component", map[string]interface{}{
+			"operation":   "component_http_request",
 			"url":         url,
 			"method":      "POST",
 			"body_length": len(body),
@@ -1298,7 +1239,7 @@ func (e *SmartExecutor) callAgentWithBody(ctx context.Context, url string, param
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		return "", respBodyStr, fmt.Errorf("agent returned status %d: %s", resp.StatusCode, respBodyStr)
+		return "", respBodyStr, fmt.Errorf("component returned status %d: %s", resp.StatusCode, respBodyStr)
 	}
 
 	// Parse successful response
@@ -1313,6 +1254,50 @@ func (e *SmartExecutor) callAgentWithBody(ctx context.Context, url string, param
 	}
 
 	return string(responseBytes), respBodyStr, nil
+}
+
+// callTool sends an HTTP request to a tool with raw parameters.
+// Tools expect flat JSON: {"location": "Tokyo", "units": "metric"}
+// This is the standard format for all GoMind tools.
+func (e *SmartExecutor) callTool(ctx context.Context, url string, parameters map[string]interface{}) (string, string, error) {
+	// Tools receive raw parameters directly
+	body, err := json.Marshal(parameters)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal tool parameters: %w", err)
+	}
+
+	if e.logger != nil {
+		e.logger.Debug("Calling tool with raw parameters", map[string]interface{}{
+			"operation":  "call_tool",
+			"url":        url,
+			"parameters": parameters,
+		})
+	}
+
+	return e.callComponentWithBody(ctx, url, body)
+}
+
+// callAgentService sends an HTTP request to an agent with wrapped parameters.
+// Agents expect parameters wrapped in a "data" field: {"data": {...params...}}
+// This wrapper format is expected by BaseAgent handlers in the core module.
+func (e *SmartExecutor) callAgentService(ctx context.Context, url string, parameters map[string]interface{}) (string, string, error) {
+	// Agents expect parameters wrapped in a "data" field
+	wrapped := map[string]interface{}{"data": parameters}
+	body, err := json.Marshal(wrapped)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal agent parameters: %w", err)
+	}
+
+	if e.logger != nil {
+		e.logger.Debug("Calling agent with wrapped parameters", map[string]interface{}{
+			"operation":  "call_agent_service",
+			"url":        url,
+			"parameters": parameters,
+			"wrapped":    true,
+		})
+	}
+
+	return e.callComponentWithBody(ctx, url, body)
 }
 
 // ExecuteStep executes a single routing step (interface method)

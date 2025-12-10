@@ -9,6 +9,46 @@ import (
 	"github.com/itsneelabh/gomind/core"
 )
 
+// stepReferenceInstructions provides clear guidance for LLM on cross-step data references.
+// This addresses the template syntax mismatch bug where LLM generates single braces
+// but executor expects double braces.
+const stepReferenceInstructions = `
+CROSS-STEP DATA REFERENCES:
+When a step needs data from a previous step's output, use template syntax.
+
+SYNTAX RULES:
+| Component       | Format                              |
+|-----------------|-------------------------------------|
+| Full template   | {{<step_id>.response.<field_path>}} |
+| Step ID         | Must exist in depends_on array      |
+| Field path      | Dot notation for nested fields      |
+| Braces          | DOUBLE curly braces {{ }}           |
+
+RESOLUTION EXAMPLES:
+If step-1 returns: {"status": "ok", "data": {"id": 123, "items": ["a", "b"]}}
+
+| Template Reference               | Resolves To    |
+|----------------------------------|----------------|
+| {{step-1.response.status}}       | "ok"           |
+| {{step-1.response.data.id}}      | 123            |
+| {{step-1.response.data.items}}   | ["a", "b"]     |
+
+CORRECT USAGE:
+{
+  "step_id": "step-2",
+  "depends_on": ["step-1"],
+  "metadata": {
+    "parameters": { "id": "{{step-1.response.data.id}}" }
+  }
+}
+
+WRONG (will fail):
+{ "id": "{step-1.response.data.id}" }   // Single braces - NOT supported
+{ "id": "{{step-1.data.id}}" }          // Missing 'response' in path
+{ "id": "{{step-1.response.data.id}}" } // Without depends_on - NOT resolved
+
+CRITICAL: Always use DOUBLE curly braces {{...}}, never single braces {...}`
+
 // DefaultPromptBuilder provides comprehensive type rules out of the box.
 // It handles all common JSON types and can be extended with additional rules.
 //
@@ -154,7 +194,7 @@ Create an execution plan in JSON format with the following structure:
       "step_id": "step-1",
       "agent_name": "agent-name-from-catalog",
       "namespace": "default",
-      "instruction": "specific instruction for this agent",
+      "instruction": "specific instruction for this step",
       "depends_on": [],
       "metadata": {
         "capability": "capability-name",
@@ -166,9 +206,25 @@ Create an execution plan in JSON format with the following structure:
           "array_param": ["item1", "item2"]
         }
       }
+    },
+    {
+      "step_id": "step-2",
+      "agent_name": "another-agent",
+      "namespace": "default",
+      "instruction": "use data from step-1",
+      "depends_on": ["step-1"],
+      "metadata": {
+        "capability": "another-capability",
+        "parameters": {
+          "input_id": "{{step-1.response.data.id}}",
+          "input_name": "{{step-1.response.data.name}}"
+        }
+      }
     }
   ]
 }
+
+%s
 
 CRITICAL - Parameter Type Rules:
 %s
@@ -177,14 +233,17 @@ CRITICAL - Parameter Type Rules:
 Important:
 1. Only use agents and capabilities that exist in the catalog
 2. Ensure parameter names AND TYPES match exactly what the capability expects
-3. Order steps based on dependencies
-4. Include all necessary steps to fulfill the request
-5. Be specific in instructions
-6. For coordinates (lat/lon), use numeric values like 35.6897 not "35.6897"
+3. Order steps logically - steps can only depend on earlier steps
+4. Use {{stepId.response.field}} syntax for cross-step data references
+5. Always declare dependencies in the depends_on array before referencing
+6. Include all necessary steps to fulfill the request
+7. Be specific in instructions - what should each step accomplish?
+8. For coordinates (lat/lon), use numeric values like 35.6897 not "35.6897"
 
 Response (JSON only, no explanation):`,
 		input.CapabilityInfo,
 		input.Request,
+		stepReferenceInstructions,
 		typeRulesSection,
 		domainSection,
 		customInstructionsSection,
@@ -264,7 +323,7 @@ func (d *DefaultPromptBuilder) buildCustomInstructionsSection() string {
 
 	var instructions []string
 	for i, inst := range d.config.CustomInstructions {
-		instructions = append(instructions, fmt.Sprintf("%d. %s", i+7, inst)) // Start after default instructions
+		instructions = append(instructions, fmt.Sprintf("%d. %s", i+9, inst)) // Start after default instructions (8 default + 1)
 	}
 
 	return "\n" + strings.Join(instructions, "\n")

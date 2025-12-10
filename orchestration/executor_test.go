@@ -1504,3 +1504,317 @@ func TestSmartExecutor_ValidationFeedbackDisabled(t *testing.T) {
 		t.Error("Step should have failed when validation feedback is disabled")
 	}
 }
+
+// ============================================================================
+// Template Substitution Tests (Response Wrapper Fix)
+// ============================================================================
+
+// TestBuildStepContext_WrapsResponseCorrectly verifies that buildStepContext
+// wraps step results in a "response" key to match the template syntax
+// {{stepId.response.field}}
+func TestBuildStepContext_WrapsResponseCorrectly(t *testing.T) {
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	executor := NewSmartExecutor(catalog)
+
+	// Simulate completed step with JSON response
+	results := map[string]*StepResult{
+		"step-1": {
+			Response: `{"data": {"country": "France", "city": "Paris"}, "status": "ok"}`,
+		},
+	}
+
+	step := RoutingStep{
+		StepID:    "step-2",
+		DependsOn: []string{"step-1"},
+	}
+
+	ctx := executor.buildStepContext(context.Background(), step, results)
+	deps := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{})
+
+	// Verify step-1 exists in deps
+	if _, ok := deps["step-1"]; !ok {
+		t.Fatal("Expected step-1 in dependency results")
+	}
+
+	// Verify response wrapper exists
+	responseVal, ok := deps["step-1"]["response"]
+	if !ok {
+		t.Fatal("Expected 'response' wrapper key in step-1 result")
+	}
+
+	// Verify response is a map
+	response, ok := responseVal.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected response to be map[string]interface{}, got %T", responseVal)
+	}
+
+	// Verify nested data access works
+	data, ok := response["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected response['data'] to be map, got %T", response["data"])
+	}
+
+	// Verify country field
+	if data["country"] != "France" {
+		t.Errorf("Expected country='France', got '%v'", data["country"])
+	}
+
+	// Verify city field
+	if data["city"] != "Paris" {
+		t.Errorf("Expected city='Paris', got '%v'", data["city"])
+	}
+
+	// Verify status field at top level of response
+	if response["status"] != "ok" {
+		t.Errorf("Expected status='ok', got '%v'", response["status"])
+	}
+}
+
+// TestBuildStepContext_MultipleDependencies verifies response wrapper works
+// with multiple dependencies
+func TestBuildStepContext_MultipleDependencies(t *testing.T) {
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	executor := NewSmartExecutor(catalog)
+
+	// Simulate multiple completed steps
+	results := map[string]*StepResult{
+		"geocode-step": {
+			Response: `{"latitude": 35.6897, "longitude": 139.6917}`,
+		},
+		"stock-step": {
+			Response: `{"price": 150.25, "currency": "USD"}`,
+		},
+	}
+
+	step := RoutingStep{
+		StepID:    "final-step",
+		DependsOn: []string{"geocode-step", "stock-step"},
+	}
+
+	ctx := executor.buildStepContext(context.Background(), step, results)
+	deps := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{})
+
+	// Verify both dependencies have response wrapper
+	for _, depID := range []string{"geocode-step", "stock-step"} {
+		if _, ok := deps[depID]; !ok {
+			t.Errorf("Expected %s in dependency results", depID)
+			continue
+		}
+		if _, ok := deps[depID]["response"]; !ok {
+			t.Errorf("Expected 'response' wrapper in %s result", depID)
+		}
+	}
+
+	// Verify geocode data
+	geocodeResponse := deps["geocode-step"]["response"].(map[string]interface{})
+	if geocodeResponse["latitude"] != 35.6897 {
+		t.Errorf("Expected latitude=35.6897, got %v", geocodeResponse["latitude"])
+	}
+
+	// Verify stock data
+	stockResponse := deps["stock-step"]["response"].(map[string]interface{})
+	if stockResponse["price"] != 150.25 {
+		t.Errorf("Expected price=150.25, got %v", stockResponse["price"])
+	}
+}
+
+// TestTemplateSubstitution_WithResponseWrapper tests that templates using
+// {{stepId.response.field}} syntax are resolved correctly after the fix
+func TestTemplateSubstitution_WithResponseWrapper(t *testing.T) {
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	executor := NewSmartExecutor(catalog)
+
+	// Create dependency results WITH response wrapper (as buildStepContext now does)
+	depResults := map[string]map[string]interface{}{
+		"step-1": {
+			"response": map[string]interface{}{
+				"data": map[string]interface{}{
+					"id":      123,
+					"country": "France",
+					"cities":  []interface{}{"Paris", "Lyon"},
+				},
+				"status": "success",
+			},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		template string
+		want     interface{}
+	}{
+		{
+			name:     "simple field access",
+			template: "{{step-1.response.status}}",
+			want:     "success",
+		},
+		{
+			name:     "nested field access",
+			template: "{{step-1.response.data.country}}",
+			want:     "France",
+		},
+		{
+			name:     "numeric field access",
+			template: "{{step-1.response.data.id}}",
+			want:     123, // Go int from map literal
+		},
+		{
+			name:     "array field access - JSON serialized",
+			template: "{{step-1.response.data.cities}}",
+			want:     `["Paris","Lyon"]`, // Arrays are JSON serialized when whole value
+		},
+		{
+			name:     "template in string context",
+			template: "Country is {{step-1.response.data.country}}",
+			want:     "Country is France",
+		},
+		{
+			name:     "unresolved template (wrong path)",
+			template: "{{step-1.data.country}}", // Missing 'response' in path
+			want:     "{{step-1.data.country}}", // Should remain unchanged
+		},
+		{
+			name:     "unresolved template (wrong step)",
+			template: "{{step-2.response.data.country}}", // step-2 doesn't exist
+			want:     "{{step-2.response.data.country}}", // Should remain unchanged
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := executor.substituteTemplates(tt.template, depResults)
+			if got != tt.want {
+				t.Errorf("substituteTemplates() = %v (%T), want %v (%T)", got, got, tt.want, tt.want)
+			}
+		})
+	}
+}
+
+// TestInterpolateParameters_WithResponseWrapper tests parameter interpolation
+// with the response wrapper in place
+func TestInterpolateParameters_WithResponseWrapper(t *testing.T) {
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	executor := NewSmartExecutor(catalog)
+
+	// Simulate geocode step result with response wrapper
+	depResults := map[string]map[string]interface{}{
+		"geocode": {
+			"response": map[string]interface{}{
+				"latitude":  35.6897,
+				"longitude": 139.6917,
+				"city":      "Tokyo",
+			},
+		},
+	}
+
+	// Parameters using correct template syntax
+	params := map[string]interface{}{
+		"lat":      "{{geocode.response.latitude}}",
+		"lon":      "{{geocode.response.longitude}}",
+		"location": "Weather for {{geocode.response.city}}",
+		"units":    "celsius", // Non-template value
+	}
+
+	result := executor.interpolateParameters(params, depResults)
+
+	// Verify template values were substituted
+	if result["lat"] != 35.6897 {
+		t.Errorf("lat = %v (%T), want 35.6897 (float64)", result["lat"], result["lat"])
+	}
+
+	if result["lon"] != 139.6917 {
+		t.Errorf("lon = %v (%T), want 139.6917 (float64)", result["lon"], result["lon"])
+	}
+
+	if result["location"] != "Weather for Tokyo" {
+		t.Errorf("location = %v, want 'Weather for Tokyo'", result["location"])
+	}
+
+	// Verify non-template value unchanged
+	if result["units"] != "celsius" {
+		t.Errorf("units = %v, want 'celsius'", result["units"])
+	}
+}
+
+// TestBuildStepContext_InvalidJSON verifies graceful handling of non-JSON responses
+func TestBuildStepContext_InvalidJSON(t *testing.T) {
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	executor := NewSmartExecutor(catalog)
+
+	// Simulate step with invalid JSON response
+	results := map[string]*StepResult{
+		"step-1": {
+			Response: `not valid json`,
+		},
+		"step-2": {
+			Response: `{"valid": "json"}`,
+		},
+	}
+
+	step := RoutingStep{
+		StepID:    "step-3",
+		DependsOn: []string{"step-1", "step-2"},
+	}
+
+	ctx := executor.buildStepContext(context.Background(), step, results)
+	deps := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{})
+
+	// step-1 should NOT be in deps (invalid JSON)
+	if _, ok := deps["step-1"]; ok {
+		t.Error("Invalid JSON response should not be added to deps")
+	}
+
+	// step-2 should be in deps with response wrapper
+	if _, ok := deps["step-2"]; !ok {
+		t.Fatal("Valid JSON response should be in deps")
+	}
+	if _, ok := deps["step-2"]["response"]; !ok {
+		t.Error("Valid response should have 'response' wrapper")
+	}
+}
+
+// TestBuildStepContext_EmptyResponse verifies handling of empty responses
+func TestBuildStepContext_EmptyResponse(t *testing.T) {
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	executor := NewSmartExecutor(catalog)
+
+	// Simulate step with empty response
+	results := map[string]*StepResult{
+		"step-1": {
+			Response: "", // Empty
+		},
+		"step-2": {
+			Response: `{"data": "value"}`,
+		},
+	}
+
+	step := RoutingStep{
+		StepID:    "step-3",
+		DependsOn: []string{"step-1", "step-2"},
+	}
+
+	ctx := executor.buildStepContext(context.Background(), step, results)
+	deps := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{})
+
+	// step-1 should NOT be in deps (empty response)
+	if _, ok := deps["step-1"]; ok {
+		t.Error("Empty response should not be added to deps")
+	}
+
+	// step-2 should be in deps
+	if _, ok := deps["step-2"]; !ok {
+		t.Error("Non-empty response should be in deps")
+	}
+}
