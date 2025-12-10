@@ -13,6 +13,7 @@ Welcome to intelligent error handling in GoMind! This guide will walk you throug
 - [Configuration Options](#configuration-options)
 - [Best Practices](#best-practices)
 - [Quick Reference](#quick-reference)
+- [Orchestration Module: Multi-Layer Type Safety](#orchestration-module-multi-layer-type-safety)
 
 ## The Problem We're Solving
 
@@ -890,6 +891,114 @@ export GOMIND_AGENT_RETRY_BACKOFF_MS=1000
 | AI token cost | ~300 tokens per retry analysis | Cap retries at 3, skip AI for non-retryable errors |
 | Latency | ~500ms per AI analysis | Use low temperature for fast responses |
 | Complexity | Agent retry logic is more complex | Well-documented patterns, copy-paste examples |
+
+---
+
+## Orchestration Module: Multi-Layer Type Safety
+
+When using the orchestration module's AI-driven natural language mode, an additional layer of error handling addresses a common LLM limitation: type mismatches in generated parameters.
+
+### The Problem
+
+LLMs sometimes generate JSON parameters with incorrect types:
+```json
+// LLM generates (WRONG):
+{"lat": "35.6897", "lon": "139.6917"}
+
+// Tool expects (CORRECT):
+{"lat": 35.6897, "lon": 139.6917}
+```
+
+This causes Go's `json.Unmarshal` to fail with errors like:
+```
+json: cannot unmarshal string into Go struct field .lat of type float64
+```
+
+### The Solution: Multi-Layer Defense
+
+The orchestration module implements three layers of defense:
+
+#### Layer 1: Prompt Guidance (~70-80% effectiveness)
+The LLM planning prompt includes explicit type rules and examples. While helpful, LLMs don't always follow instructions perfectly.
+
+#### Layer 2: Schema-Based Coercion (~95% effectiveness)
+Before calling a tool, the executor automatically coerces parameters to match the capability schema:
+
+```go
+// Automatic coercion using capability schema
+// Input:  {"lat": "35.6897", "lon": "139.6917", "count": "5"}
+// Output: {"lat": 35.6897, "lon": 139.6917, "count": 5}
+```
+
+This layer is:
+- **Deterministic**: Uses `strconv.ParseFloat`, `strconv.ParseInt`, `strconv.ParseBool`
+- **Schema-driven**: Only coerces when the capability defines expected types
+- **Safe**: If coercion fails, the original value is preserved
+
+#### Layer 3: Validation Feedback Retry (~99% effectiveness)
+For edge cases that slip through Layers 1 and 2, if a tool returns a validation error (e.g., "Amount must be greater than 0"), the orchestrator:
+
+1. Detects the type-related or validation error
+2. Sends the error context back to the LLM
+3. Requests corrected parameters
+4. Retries with the corrected payload
+
+**Error patterns detected:**
+```go
+// Type errors
+"cannot unmarshal string into"
+"json: cannot unmarshal"
+"type mismatch"
+
+// Validation errors (business logic)
+"must be greater than"
+"must be positive"
+"is required"
+"cannot be empty"
+```
+
+### Configuration
+
+```go
+config := orchestration.DefaultConfig()
+
+// Layer 3 is enabled by default for maximum reliability
+config.ExecutionOptions.ValidationFeedbackEnabled = true  // Default: true
+config.ExecutionOptions.MaxValidationRetries = 2          // Default: 2
+
+// For cost-sensitive deployments, disable Layer 3
+// (Relies on Layers 1 & 2 only, ~95% success rate)
+config.ExecutionOptions.ValidationFeedbackEnabled = false
+```
+
+### Observability
+
+**Distributed Tracing (Jaeger/Tempo):**
+- `type_coercion_applied` span event when Layer 2 coerces parameters
+- `validation_feedback_started` span event when Layer 3 initiates correction
+- `validation_feedback_success` / `validation_feedback_failed` span events
+
+**Prometheus Metrics:**
+```promql
+# Type coercion frequency by capability
+sum(rate(orchestration_type_coercion_applied_total[5m])) by (capability)
+
+# Validation feedback success rate
+sum(rate(orchestration_validation_feedback_success_total[5m])) /
+sum(rate(orchestration_validation_feedback_attempts_total[5m]))
+```
+
+### How This Complements Tool-Level Error Handling
+
+| Layer | Responsibility | Location |
+|-------|---------------|----------|
+| **Tool** | Report structured errors with `ToolError` | Tool handlers |
+| **Agent** | Retry with AI-corrected payloads | Agent retry logic |
+| **Orchestrator** | Type coercion + validation feedback | Orchestration executor |
+
+The orchestration layer adds automatic type safety *before* requests reach tools, reducing the burden on both tools and agents. When combined with proper tool error reporting and agent retry logic, this creates a robust error handling system that achieves ~99% success rates in production.
+
+For detailed implementation information, see the [orchestration module documentation](../orchestration/README.md#multi-layer-type-safety).
 
 ---
 

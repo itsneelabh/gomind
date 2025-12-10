@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,16 @@ var (
 	stepOutputTemplatePattern = regexp.MustCompile(`\{\{([\w-]+)\.([\w-]+(?:\.[\w-]+)*)\}\}`)
 )
 
+// CorrectionCallback is called when validation feedback is needed (Layer 3).
+// It requests the LLM to correct parameters based on type error feedback.
+type CorrectionCallback func(
+	ctx context.Context,
+	step RoutingStep,
+	originalParams map[string]interface{},
+	errorMessage string,
+	schema *EnhancedCapability,
+) (map[string]interface{}, error)
+
 // SmartExecutor handles intelligent execution of routing plans
 type SmartExecutor struct {
 	catalog        *AgentCatalog
@@ -45,6 +57,11 @@ type SmartExecutor struct {
 
 	// Observability (follows framework design principles)
 	logger core.Logger // For structured logging
+
+	// Layer 3: Validation Feedback configuration
+	correctionCallback        CorrectionCallback // Callback to request LLM parameter correction
+	validationFeedbackEnabled bool               // Enable/disable validation feedback (default: true)
+	maxValidationRetries      int                // Maximum validation correction attempts (default: 2)
 }
 
 // NewSmartExecutor creates a new smart executor
@@ -72,6 +89,26 @@ func NewSmartExecutor(catalog *AgentCatalog) *SmartExecutor {
 		maxConcurrency: maxConcurrency,
 		semaphore:      make(chan struct{}, maxConcurrency),
 		httpClient:     tracedClient,
+		// Layer 3: Validation Feedback defaults
+		validationFeedbackEnabled: true, // Enable by default for production reliability
+		maxValidationRetries:      2,    // Up to 2 correction attempts
+	}
+}
+
+// SetCorrectionCallback sets the callback for Layer 3 validation feedback.
+// The callback is called when a type-related error is detected, requesting the LLM
+// to correct the parameters based on error feedback.
+func (e *SmartExecutor) SetCorrectionCallback(cb CorrectionCallback) {
+	e.correctionCallback = cb
+}
+
+// SetValidationFeedback configures Layer 3 validation feedback behavior.
+// enabled: Whether to attempt LLM correction on type errors
+// maxRetries: Maximum number of correction attempts (default: 2)
+func (e *SmartExecutor) SetValidationFeedback(enabled bool, maxRetries int) {
+	e.validationFeedbackEnabled = enabled
+	if maxRetries > 0 {
+		e.maxValidationRetries = maxRetries
 	}
 }
 
@@ -672,6 +709,44 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		}
 	}
 
+	// Layer 2: Schema-Based Type Coercion
+	// Coerce parameters to match capability schema types.
+	// This fixes LLM-generated parameters that have incorrect types (e.g., "35.6" instead of 35.6).
+	// The schema is obtained from the tool's InputSummary via the catalog.
+	capabilitySchema := e.findCapabilitySchema(agentInfo, capability)
+	if capabilitySchema != nil && len(capabilitySchema.Parameters) > 0 {
+		coerced, coercionLog := coerceParameterTypes(parameters, capabilitySchema.Parameters)
+		if len(coercionLog) > 0 {
+			// Telemetry: Add span event for distributed tracing visibility
+			// This allows operators to see coercion events in Jaeger/Grafana traces
+			telemetry.AddSpanEvent(ctx, "type_coercion_applied",
+				attribute.Int("coercions_count", len(coercionLog)),
+				attribute.String("capability", capability),
+				attribute.String("step_id", step.StepID),
+			)
+
+			// Telemetry: Record metric for monitoring dashboards
+			// Enables tracking coercion frequency across the system
+			telemetry.Counter("orchestration.type_coercion.applied",
+				"capability", capability,
+				"module", telemetry.ModuleOrchestration,
+			)
+
+			// Structured logging for debugging
+			if e.logger != nil {
+				e.logger.Debug("Parameter types coerced to match schema", map[string]interface{}{
+					"operation":  "type_coercion",
+					"step_id":    step.StepID,
+					"capability": capability,
+					"coercions":  coercionLog,
+					"trace_id":   tc.TraceID,
+					"span_id":    tc.SpanID,
+				})
+			}
+		}
+		parameters = coerced
+	}
+
 	// Find the capability endpoint
 	endpoint := e.findCapabilityEndpoint(agentInfo, capability)
 	if endpoint == "" {
@@ -707,8 +782,10 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		agentInfo.Registration.Port,
 		endpoint)
 
-	// Execute with retry logic
+	// Execute with retry logic including Layer 3 validation feedback
 	maxAttempts := 3
+	validationRetries := 0
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
 
@@ -721,19 +798,23 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				"max_attempts": maxAttempts,
 				"url":          url,
 				"capability":   capability,
+				"trace_id":     tc.TraceID,
+				"span_id":      tc.SpanID,
 			})
 		}
 
-		// Make the HTTP request
-		response, err := e.callAgent(ctx, url, parameters)
+		// Make the HTTP request (using callAgentWithBody for Layer 3 error detection)
+		response, responseBody, err := e.callAgentWithBody(ctx, url, parameters)
 		if err == nil {
 			if e.logger != nil {
 				e.logger.Debug("Agent HTTP call successful", map[string]interface{}{
-					"operation":      "agent_http_response",
-					"step_id":        step.StepID,
-					"agent_name":     step.AgentName,
-					"attempt":        attempt,
+					"operation":       "agent_http_response",
+					"step_id":         step.StepID,
+					"agent_name":      step.AgentName,
+					"attempt":         attempt,
 					"response_length": len(response),
+					"trace_id":        tc.TraceID,
+					"span_id":         tc.SpanID,
 				})
 			}
 			result.Success = true
@@ -741,6 +822,93 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			break
 		}
 
+		// Layer 3: Check if this is a type-related error that could be fixed by LLM
+		if e.validationFeedbackEnabled && e.correctionCallback != nil &&
+			validationRetries < e.maxValidationRetries && isTypeRelatedError(err, responseBody) {
+
+			validationRetries++
+
+			// Telemetry: Add span event for validation feedback attempt
+			telemetry.AddSpanEvent(ctx, "validation_feedback_started",
+				attribute.String("step_id", step.StepID),
+				attribute.String("capability", capability),
+				attribute.Int("validation_retry", validationRetries),
+				attribute.String("error_type", "type_mismatch"),
+			)
+
+			// Telemetry: Record metric for monitoring dashboards
+			telemetry.Counter("orchestration.validation_feedback.attempts",
+				"capability", capability,
+				"module", telemetry.ModuleOrchestration,
+			)
+
+			if e.logger != nil {
+				e.logger.Info("Type error detected, requesting LLM correction", map[string]interface{}{
+					"operation":         "validation_feedback",
+					"step_id":           step.StepID,
+					"capability":        capability,
+					"validation_retry":  validationRetries,
+					"max_retries":       e.maxValidationRetries,
+					"error":             err.Error(),
+					"trace_id":          tc.TraceID,
+					"span_id":           tc.SpanID,
+				})
+			}
+
+			// Request correction from LLM via callback
+			correctedParams, corrErr := e.correctionCallback(ctx, step, parameters, err.Error(), capabilitySchema)
+			if corrErr == nil && correctedParams != nil {
+				// Telemetry: Record successful correction
+				telemetry.AddSpanEvent(ctx, "validation_feedback_success",
+					attribute.String("step_id", step.StepID),
+					attribute.Int("retries_used", validationRetries),
+				)
+				telemetry.Counter("orchestration.validation_feedback.success",
+					"capability", capability,
+					"module", telemetry.ModuleOrchestration,
+				)
+
+				if e.logger != nil {
+					e.logger.Debug("Parameters corrected by LLM", map[string]interface{}{
+						"operation":   "validation_feedback_success",
+						"step_id":     step.StepID,
+						"capability":  capability,
+						"new_params":  correctedParams,
+						"trace_id":    tc.TraceID,
+						"span_id":     tc.SpanID,
+					})
+				}
+
+				// Update parameters and retry without incrementing attempt count
+				parameters = correctedParams
+				attempt-- // Retry with corrected parameters (don't count as regular retry)
+				continue
+			}
+
+			// Correction failed
+			telemetry.AddSpanEvent(ctx, "validation_feedback_failed",
+				attribute.String("step_id", step.StepID),
+				attribute.String("reason", "llm_correction_failed"),
+			)
+			telemetry.Counter("orchestration.validation_feedback.failed",
+				"capability", capability,
+				"reason", "llm_correction_failed",
+				"module", telemetry.ModuleOrchestration,
+			)
+
+			if e.logger != nil {
+				e.logger.Warn("LLM parameter correction failed", map[string]interface{}{
+					"operation":  "validation_feedback_failed",
+					"step_id":    step.StepID,
+					"capability": capability,
+					"error":      corrErr.Error(),
+					"trace_id":   tc.TraceID,
+					"span_id":    tc.SpanID,
+				})
+			}
+		}
+
+		// Regular error handling
 		logLevel := "Debug" // Use DEBUG for retry attempts
 		if attempt == maxAttempts {
 			logLevel = "Error" // Use ERROR for final failure
@@ -754,6 +922,8 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				"max_attempts": maxAttempts,
 				"error":        err.Error(),
 				"will_retry":   attempt < maxAttempts,
+				"trace_id":     tc.TraceID,
+				"span_id":      tc.SpanID,
 			}
 			if logLevel == "Error" {
 				e.logger.Error("Agent HTTP call failed after all retries", logData)
@@ -776,10 +946,10 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			retryDelay := time.Duration(attempt) * time.Second
 			if e.logger != nil {
 				e.logger.Debug("Waiting before retry", map[string]interface{}{
-					"operation":    "retry_delay",
-					"step_id":      step.StepID,
-					"agent_name":   step.AgentName,
-					"attempt":      attempt,
+					"operation":     "retry_delay",
+					"step_id":       step.StepID,
+					"agent_name":    step.AgentName,
+					"attempt":       attempt,
 					"delay_seconds": retryDelay.Seconds(),
 				})
 			}
@@ -839,6 +1009,161 @@ func (e *SmartExecutor) findCapabilityEndpoint(agent *AgentInfo, capabilityName 
 	}
 	// Default endpoint if not specified
 	return fmt.Sprintf("/api/%s", capabilityName)
+}
+
+// findCapabilitySchema returns the capability schema for type coercion.
+// This is used by Layer 2 (Schema-Based Type Coercion) to get parameter type information.
+func (e *SmartExecutor) findCapabilitySchema(agentInfo *AgentInfo, capabilityName string) *EnhancedCapability {
+	if agentInfo == nil {
+		return nil
+	}
+	for i := range agentInfo.Capabilities {
+		if agentInfo.Capabilities[i].Name == capabilityName {
+			return &agentInfo.Capabilities[i]
+		}
+	}
+	return nil
+}
+
+// coerceParameterTypes converts string values to their expected types based on schema.
+// This is the core of Layer 2 (Schema-Based Type Coercion) which fixes LLM-generated
+// parameters that have incorrect types (e.g., "35.6" instead of 35.6).
+// Returns the coerced parameters and a log of coercions performed for debugging.
+func coerceParameterTypes(params map[string]interface{}, schema []Parameter) (map[string]interface{}, []string) {
+	if params == nil || len(schema) == 0 {
+		return params, nil
+	}
+
+	// Build schema lookup: parameter name -> expected type
+	schemaMap := make(map[string]string)
+	for _, p := range schema {
+		schemaMap[p.Name] = strings.ToLower(p.Type)
+	}
+
+	result := make(map[string]interface{})
+	var coercionLog []string
+
+	for key, value := range params {
+		expectedType, hasSchema := schemaMap[key]
+		if !hasSchema {
+			result[key] = value
+			continue
+		}
+
+		coerced, wasCoerced := coerceValue(value, expectedType)
+		result[key] = coerced
+
+		if wasCoerced {
+			coercionLog = append(coercionLog, fmt.Sprintf("%s: %T(%v) -> %T(%v)",
+				key, value, value, coerced, coerced))
+		}
+	}
+
+	return result, coercionLog
+}
+
+// coerceValue attempts to convert a value to the expected type.
+// Returns the coerced value and whether coercion was performed.
+// Supported type conversions:
+//   - string -> float64/number: "35.6" -> 35.6
+//   - string -> int64/integer: "42" -> 42
+//   - string -> bool/boolean: "true" -> true
+func coerceValue(value interface{}, expectedType string) (interface{}, bool) {
+	// If value is already a non-string, return as-is
+	strVal, isString := value.(string)
+	if !isString {
+		return value, false
+	}
+
+	// Attempt coercion based on expected type
+	switch expectedType {
+	case "number", "float64", "float", "double":
+		if f, err := strconv.ParseFloat(strVal, 64); err == nil {
+			return f, true
+		}
+
+	case "integer", "int", "int64", "int32":
+		if i, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+			return i, true
+		}
+
+	case "boolean", "bool":
+		if b, err := strconv.ParseBool(strVal); err == nil {
+			return b, true
+		}
+
+	case "string":
+		// Already a string, no coercion needed
+		return value, false
+	}
+
+	// Coercion failed or not applicable, return original
+	return value, false
+}
+
+// isTypeRelatedError detects errors that can be corrected by requesting the LLM to fix parameters.
+// This is used by Layer 3 (Validation Feedback) to detect:
+// - Type errors (e.g., string instead of number)
+// - Validation errors (e.g., "must be greater than 0", "is required")
+// - Value constraint errors (e.g., "out of range", "invalid format")
+// When these errors are detected, the orchestrator will ask the AI to analyze
+// the error and generate corrected parameters.
+func isTypeRelatedError(err error, responseBody string) bool {
+	// Type-related error patterns (original Layer 3)
+	typeErrorPatterns := []string{
+		"cannot unmarshal string into",
+		"cannot unmarshal number into",
+		"cannot unmarshal bool into",
+		"json: cannot unmarshal",
+		"type mismatch",
+		"invalid type",
+		"expected number",
+		"expected string",
+		"expected boolean",
+		"expected integer",
+		"expected float",
+		"invalid value",
+	}
+
+	// Validation error patterns (enhanced - catches business logic validation)
+	validationErrorPatterns := []string{
+		"must be greater than",
+		"must be less than",
+		"must be positive",
+		"must be non-negative",
+		"must be at least",
+		"must be at most",
+		"is required",
+		"missing required",
+		"cannot be empty",
+		"cannot be zero",
+		"cannot be null",
+		"cannot be negative",
+		"invalid format",
+		"out of range",
+		"invalid_request", // Common API error code
+		"bad request",
+		"validation failed",
+		"constraint violation",
+	}
+
+	errStr := strings.ToLower(err.Error() + " " + responseBody)
+
+	// Check type error patterns
+	for _, pattern := range typeErrorPatterns {
+		if strings.Contains(errStr, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+
+	// Check validation error patterns
+	for _, pattern := range validationErrorPatterns {
+		if strings.Contains(errStr, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // callAgent makes an HTTP call to an agent
@@ -918,6 +1243,76 @@ func (e *SmartExecutor) callAgent(ctx context.Context, url string, parameters ma
 	}
 
 	return responseStr, nil
+}
+
+// callAgentWithBody makes an HTTP call and returns both response and error body.
+// This is needed for Layer 3 validation feedback to detect type errors from the
+// response body when the tool returns a 4xx error with details.
+// Returns: (successResponse, errorResponseBody, error)
+func (e *SmartExecutor) callAgentWithBody(ctx context.Context, url string, parameters map[string]interface{}) (string, string, error) {
+	// Prepare request body
+	body, err := json.Marshal(parameters)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal parameters: %w", err)
+	}
+
+	// Log request details at DEBUG level
+	if e.logger != nil {
+		e.logger.Debug("HTTP request to agent (with body tracking)", map[string]interface{}{
+			"operation":   "agent_http_request_with_body",
+			"url":         url,
+			"method":      "POST",
+			"body_length": len(body),
+		})
+	}
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Make the request
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("request failed: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			if e.logger != nil {
+				e.logger.Warn("Error closing response body", map[string]interface{}{
+					"url":   url,
+					"error": closeErr.Error(),
+				})
+			}
+		}
+	}()
+
+	// Read response body (always, even on error - needed for type error detection)
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return "", "", fmt.Errorf("failed to read response body: %w", readErr)
+	}
+	respBodyStr := string(respBody)
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		return "", respBodyStr, fmt.Errorf("agent returned status %d: %s", resp.StatusCode, respBodyStr)
+	}
+
+	// Parse successful response
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", respBodyStr, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	responseBytes, err := json.Marshal(result)
+	if err != nil {
+		return "", respBodyStr, fmt.Errorf("failed to marshal response: %w", err)
+	}
+
+	return string(responseBytes), respBodyStr, nil
 }
 
 // ExecuteStep executes a single routing step (interface method)

@@ -165,6 +165,11 @@ type ExecutionOptions struct {
 	CircuitBreaker   bool          `json:"circuit_breaker"`
 	FailureThreshold int           `json:"failure_threshold"`
 	RecoveryTimeout  time.Duration `json:"recovery_timeout"`
+
+	// Layer 3: Validation Feedback configuration
+	// When enabled, type errors trigger LLM-based parameter correction
+	ValidationFeedbackEnabled bool `json:"validation_feedback_enabled"`
+	MaxValidationRetries      int  `json:"max_validation_retries"` // Default: 2
 }
 
 // ServiceCapabilityConfig holds configuration for the service capability provider
@@ -223,6 +228,9 @@ func DefaultConfig() *OrchestratorConfig {
 			CircuitBreaker:   true,
 			FailureThreshold: 5,
 			RecoveryTimeout:  30 * time.Second,
+			// Layer 3: Validation Feedback defaults
+			ValidationFeedbackEnabled: true, // Enable by default for production reliability
+			MaxValidationRetries:      2,    // Up to 2 correction attempts
 		},
 		// CapabilityProvider defaults
 		CapabilityProviderType: "default", // Quick start default

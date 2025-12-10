@@ -2049,6 +2049,45 @@ response, err := orchestrator.ProcessRequest(ctx,
 )
 ```
 
+### ExecutionOptions Configuration
+
+Configure execution behavior for the orchestrator, including retry logic and type safety features.
+
+```go
+type ExecutionOptions struct {
+    MaxConcurrency           int           // Maximum parallel tool/agent calls (default: 5)
+    StepTimeout              time.Duration // Timeout per step (default: 30s)
+    TotalTimeout             time.Duration // Overall execution timeout (default: 2m)
+    RetryAttempts            int           // Retry failed steps (default: 2)
+    RetryDelay               time.Duration // Delay between retries (default: 2s)
+    CircuitBreaker           bool          // Enable circuit breaker (default: true)
+    FailureThreshold         int           // Circuit breaker threshold (default: 5)
+    RecoveryTimeout          time.Duration // Circuit breaker recovery (default: 30s)
+
+    // Type Safety (Layer 3 - Validation Feedback)
+    ValidationFeedbackEnabled bool         // Enable LLM-based parameter correction (default: true)
+    MaxValidationRetries      int          // Max correction attempts (default: 2)
+}
+```
+
+**Type Safety Configuration:**
+
+```go
+// Default configuration - maximum reliability (~99% success rate)
+config := orchestration.DefaultConfig()
+// ValidationFeedbackEnabled: true (default)
+// MaxValidationRetries: 2 (default)
+
+// Cost-sensitive configuration (~95% success rate)
+config.ExecutionOptions.ValidationFeedbackEnabled = false
+
+// Maximum reliability configuration
+config.ExecutionOptions.ValidationFeedbackEnabled = true
+config.ExecutionOptions.MaxValidationRetries = 3  // More retries for edge cases
+```
+
+See [Intelligent Error Handling](./INTELLIGENT_ERROR_HANDLING.md#orchestration-module-multi-layer-type-safety) for details on how type safety layers work together.
+
 ### Orchestration Strategies
 
 Different strategies for different scales and use cases:

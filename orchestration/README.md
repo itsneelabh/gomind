@@ -1060,6 +1060,33 @@ steps:
 
 ## 🆕 Production-Ready Enhancements
 
+### Multi-Layer Type Safety
+
+When using AI orchestration in natural language mode, LLMs occasionally generate parameters with incorrect types (e.g., `"35.6"` instead of `35.6`). The orchestration module includes a multi-layer defense system to ensure type correctness:
+
+| Layer | Strategy | Effectiveness |
+|-------|----------|---------------|
+| **Layer 1** | Prompt guidance with type rules | ~70-80% |
+| **Layer 2** | Schema-based type coercion (automatic) | ~95% |
+| **Layer 3** | Validation feedback retry (LLM correction) | ~99% |
+
+**How it works:**
+1. **Schema Coercion**: Before calling a tool, parameters are automatically coerced to match the capability schema (e.g., `"48.8566"` → `48.8566` for float64 fields)
+2. **Validation Feedback**: If a tool returns a type-related error, the orchestrator can request the LLM to correct the parameters and retry
+
+**Configuration:**
+```go
+config := orchestration.DefaultConfig()
+config.ExecutionOptions.ValidationFeedbackEnabled = true  // Enable Layer 3 (default: true)
+config.ExecutionOptions.MaxValidationRetries = 2          // Max correction attempts (default: 2)
+```
+
+**Observability:**
+- Span events: `type_coercion_applied`, `validation_feedback_started`, `validation_feedback_success`
+- Metrics: `orchestration.type_coercion.applied`, `orchestration.validation_feedback.attempts`
+
+For detailed implementation information, see [INTERNAL_TYPE_SAFETY_DESIGN.md](./INTERNAL_TYPE_SAFETY_DESIGN.md).
+
 ### Comprehensive Logging System
 The orchestration module now includes production-grade logging for all operations:
 

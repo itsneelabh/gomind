@@ -409,3 +409,201 @@ func TestFindJSONFunctions(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Layer 3: extractJSON and requestParameterCorrection Tests
+// ============================================================================
+
+// TestExtractJSON tests the extractJSON helper function for Layer 3
+func TestExtractJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "plain JSON object",
+			input:    `{"lat": 35.6897, "lon": 139.6917}`,
+			expected: `{"lat": 35.6897, "lon": 139.6917}`,
+		},
+		{
+			name:     "JSON with whitespace",
+			input:    `   {"lat": 35.6897}   `,
+			expected: `{"lat": 35.6897}`,
+		},
+		{
+			name: "JSON wrapped in markdown json code block",
+			input: "```json\n{\"lat\": 35.6897}\n```",
+			expected: `{"lat": 35.6897}`,
+		},
+		{
+			name: "JSON wrapped in plain markdown code block",
+			input: "```\n{\"lat\": 35.6897}\n```",
+			expected: `{"lat": 35.6897}`,
+		},
+		{
+			name: "JSON with markdown and extra whitespace",
+			input: "```json\n  {\"lat\": 35.6897, \"lon\": 139.6917}  \n```",
+			expected: `{"lat": 35.6897, "lon": 139.6917}`,
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "whitespace only",
+			input:    "   \n\t  ",
+			expected: "",
+		},
+		{
+			name: "multiline JSON in code block",
+			input: "```json\n{\n  \"lat\": 35.6897,\n  \"lon\": 139.6917\n}\n```",
+			expected: "{\n  \"lat\": 35.6897,\n  \"lon\": 139.6917\n}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractJSON(tt.input)
+			if result != tt.expected {
+				t.Errorf("extractJSON() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestRequestParameterCorrection tests the requestParameterCorrection method
+func TestRequestParameterCorrection(t *testing.T) {
+	// Create a mock AI client
+	mockAIClient := &mockAIClientForCorrection{
+		response: `{"lat": 35.6897, "lon": 139.6917}`,
+	}
+
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	config := DefaultConfig()
+
+	orchestrator := NewAIOrchestrator(config, nil, mockAIClient)
+	orchestrator.catalog = catalog
+
+	step := RoutingStep{
+		StepID:    "test-step",
+		AgentName: "weather-tool",
+		Metadata: map[string]interface{}{
+			"capability": "get_weather",
+		},
+	}
+
+	originalParams := map[string]interface{}{
+		"lat": "35.6897",  // String - incorrect
+		"lon": "139.6917", // String - incorrect
+	}
+
+	schema := &EnhancedCapability{
+		Name: "get_weather",
+		Parameters: []Parameter{
+			{Name: "lat", Type: "float64", Required: true},
+			{Name: "lon", Type: "float64", Required: true},
+		},
+	}
+
+	ctx := context.Background()
+	corrected, err := orchestrator.requestParameterCorrection(ctx, step, originalParams, "type error", schema)
+
+	if err != nil {
+		t.Fatalf("requestParameterCorrection failed: %v", err)
+	}
+
+	// Verify corrected params have proper types
+	if lat, ok := corrected["lat"].(float64); !ok {
+		t.Errorf("Expected lat to be float64, got %T", corrected["lat"])
+	} else if lat != 35.6897 {
+		t.Errorf("Expected lat=35.6897, got %v", lat)
+	}
+
+	// Verify the AI client was called with appropriate prompt
+	if !mockAIClient.called {
+		t.Error("AI client should have been called")
+	}
+
+	if !strings.Contains(mockAIClient.lastPrompt, "type error") {
+		t.Error("Prompt should contain error message")
+	}
+
+	if !strings.Contains(mockAIClient.lastPrompt, "lat") {
+		t.Error("Prompt should contain parameter names")
+	}
+}
+
+// TestRequestParameterCorrectionNoAIClient tests error handling when AI client is nil
+func TestRequestParameterCorrectionNoAIClient(t *testing.T) {
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	config := DefaultConfig()
+	config.ExecutionOptions.ValidationFeedbackEnabled = false // Don't wire up callback
+
+	orchestrator := NewAIOrchestrator(config, nil, nil) // nil AI client
+	orchestrator.catalog = catalog
+
+	step := RoutingStep{StepID: "test"}
+	params := map[string]interface{}{"lat": "35.6897"}
+	schema := &EnhancedCapability{}
+
+	_, err := orchestrator.requestParameterCorrection(context.Background(), step, params, "error", schema)
+
+	if err == nil {
+		t.Error("Expected error when AI client is nil")
+	}
+	if !strings.Contains(err.Error(), "AI client not available") {
+		t.Errorf("Expected 'AI client not available' error, got: %v", err)
+	}
+}
+
+// TestRequestParameterCorrectionInvalidJSON tests error handling for invalid LLM response
+func TestRequestParameterCorrectionInvalidJSON(t *testing.T) {
+	mockAIClient := &mockAIClientForCorrection{
+		response: "this is not valid JSON",
+	}
+
+	catalog := &AgentCatalog{
+		agents: make(map[string]*AgentInfo),
+	}
+	config := DefaultConfig()
+
+	orchestrator := NewAIOrchestrator(config, nil, mockAIClient)
+	orchestrator.catalog = catalog
+
+	step := RoutingStep{StepID: "test", Metadata: map[string]interface{}{"capability": "test"}}
+	params := map[string]interface{}{"lat": "35.6897"}
+	schema := &EnhancedCapability{}
+
+	_, err := orchestrator.requestParameterCorrection(context.Background(), step, params, "error", schema)
+
+	if err == nil {
+		t.Error("Expected error for invalid JSON response")
+	}
+	if !strings.Contains(err.Error(), "failed to parse") {
+		t.Errorf("Expected 'failed to parse' error, got: %v", err)
+	}
+}
+
+// mockAIClientForCorrection is a mock AI client for testing Layer 3 correction
+type mockAIClientForCorrection struct {
+	response   string
+	called     bool
+	lastPrompt string
+	shouldFail bool
+	failError  error
+}
+
+func (m *mockAIClientForCorrection) GenerateResponse(ctx context.Context, prompt string, opts *core.AIOptions) (*core.AIResponse, error) {
+	m.called = true
+	m.lastPrompt = prompt
+	if m.shouldFail {
+		return nil, m.failError
+	}
+	return &core.AIResponse{Content: m.response}, nil
+}

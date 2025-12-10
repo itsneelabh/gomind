@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -80,6 +81,12 @@ func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiC
 		o.capabilityProvider = NewDefaultCapabilityProvider(catalog)
 	}
 
+	// Layer 3: Wire up validation feedback if enabled
+	if config.ExecutionOptions.ValidationFeedbackEnabled {
+		o.executor.SetCorrectionCallback(o.requestParameterCorrection)
+		o.executor.SetValidationFeedback(true, config.ExecutionOptions.MaxValidationRetries)
+	}
+
 	return o
 }
 
@@ -152,6 +159,122 @@ func (o *AIOrchestrator) SetPromptBuilder(builder PromptBuilder) {
 			})
 		}
 	}
+}
+
+// requestParameterCorrection asks the LLM to fix parameters based on type error feedback.
+// This is the Layer 3 (Validation Feedback) mechanism that enables recovery from type errors
+// that slip through Layers 1 and 2.
+//
+// The method constructs a correction prompt that includes:
+//   - Original parameters that caused the error
+//   - Error message from the tool
+//   - Expected parameter schema from the capability definition
+//
+// Returns corrected parameters or an error if correction fails.
+func (o *AIOrchestrator) requestParameterCorrection(
+	ctx context.Context,
+	step RoutingStep,
+	originalParams map[string]interface{},
+	errorMessage string,
+	capabilitySchema *EnhancedCapability,
+) (map[string]interface{}, error) {
+	if o.aiClient == nil {
+		return nil, fmt.Errorf("AI client not available for parameter correction")
+	}
+
+	// Build schema JSON for the prompt
+	var schemaJSON []byte
+	if capabilitySchema != nil && len(capabilitySchema.Parameters) > 0 {
+		schemaJSON, _ = json.MarshalIndent(capabilitySchema.Parameters, "", "  ")
+	}
+	paramsJSON, _ := json.MarshalIndent(originalParams, "", "  ")
+
+	// Build the correction prompt
+	correctionPrompt := fmt.Sprintf(`The following tool call failed with a type error. Please fix the parameters.
+
+Tool: %s
+Capability: %s
+Error: %s
+
+Original Parameters (INCORRECT - caused the error above):
+%s
+
+Expected Parameter Schema:
+%s
+
+CRITICAL RULES for correction:
+1. Numbers (type: number, float64, integer, int) must NOT be in quotes
+   CORRECT: "lat": 35.6897
+   WRONG:   "lat": "35.6897"
+
+2. Booleans (type: boolean, bool) must NOT be in quotes
+   CORRECT: "enabled": true
+   WRONG:   "enabled": "true"
+
+3. Only strings should be quoted
+
+Respond with ONLY the corrected JSON parameters object. No explanation, no markdown, just the JSON object.`,
+		step.AgentName,
+		step.Metadata["capability"],
+		errorMessage,
+		string(paramsJSON),
+		string(schemaJSON),
+	)
+
+	if o.logger != nil {
+		o.logger.Debug("Requesting LLM parameter correction", map[string]interface{}{
+			"operation":  "layer3_correction_request",
+			"step_id":    step.StepID,
+			"capability": step.Metadata["capability"],
+		})
+	}
+
+	// Call LLM for correction
+	response, err := o.aiClient.GenerateResponse(ctx, correctionPrompt, nil)
+	if err != nil {
+		return nil, fmt.Errorf("LLM correction request failed: %w", err)
+	}
+
+	// Extract JSON from response (handle potential markdown wrapping)
+	content := response.Content
+	content = extractJSON(content)
+
+	// Parse corrected parameters
+	var correctedParams map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &correctedParams); err != nil {
+		return nil, fmt.Errorf("failed to parse corrected parameters: %w", err)
+	}
+
+	if o.logger != nil {
+		o.logger.Debug("LLM parameter correction successful", map[string]interface{}{
+			"operation":        "layer3_correction_success",
+			"step_id":          step.StepID,
+			"corrected_params": correctedParams,
+		})
+	}
+
+	return correctedParams, nil
+}
+
+// extractJSON attempts to extract a JSON object from text that might be wrapped in markdown.
+func extractJSON(text string) string {
+	// Trim whitespace
+	text = strings.TrimSpace(text)
+
+	// Check for markdown code blocks
+	if strings.HasPrefix(text, "```json") {
+		text = strings.TrimPrefix(text, "```json")
+		if idx := strings.Index(text, "```"); idx != -1 {
+			text = text[:idx]
+		}
+	} else if strings.HasPrefix(text, "```") {
+		text = strings.TrimPrefix(text, "```")
+		if idx := strings.Index(text, "```"); idx != -1 {
+			text = text[:idx]
+		}
+	}
+
+	return strings.TrimSpace(text)
 }
 
 // catalogRefreshLoop periodically refreshes the agent catalog
