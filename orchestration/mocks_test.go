@@ -326,7 +326,4 @@ func (m *MockDiscovery) Discover(ctx context.Context, filter core.DiscoveryFilte
 	return results, nil
 }
 
-// Helper function
-func stringContains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
+// Note: stringContains helper is defined in capability_provider_test.go

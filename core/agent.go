@@ -69,6 +69,12 @@ type Capability struct {
 	// Format: /api/capabilities/{name}/schema
 	// Returns complete JSON Schema v7 for validation
 	SchemaEndpoint string `json:"schema_endpoint,omitempty"`
+
+	// Internal marks capabilities that should not be exposed to LLM planning.
+	// Internal capabilities are still callable via HTTP but are excluded from
+	// the service catalog used for AI orchestration decisions.
+	// Use cases: orchestration endpoints, admin endpoints, deprecated capabilities.
+	Internal bool `json:"internal,omitempty"`
 }
 
 // BaseAgent provides the core agent functionality

@@ -15,88 +15,7 @@ import (
 	"github.com/itsneelabh/gomind/core"
 )
 
-// MockDiscovery implements core.Discovery for testing
-type MockDiscovery struct {
-	services map[string][]*core.ServiceRegistration
-}
-
-func NewMockDiscovery() *MockDiscovery {
-	return &MockDiscovery{
-		services: make(map[string][]*core.ServiceRegistration),
-	}
-}
-
-func (m *MockDiscovery) Register(ctx context.Context, registration *core.ServiceRegistration) error {
-	m.services[registration.Name] = append(m.services[registration.Name], registration)
-	return nil
-}
-
-func (m *MockDiscovery) Unregister(ctx context.Context, serviceID string) error {
-	return nil
-}
-
-func (m *MockDiscovery) FindService(ctx context.Context, serviceName string) ([]*core.ServiceRegistration, error) {
-	return m.services[serviceName], nil
-}
-
-func (m *MockDiscovery) FindByCapability(ctx context.Context, capability string) ([]*core.ServiceRegistration, error) {
-	var results []*core.ServiceRegistration
-	for _, services := range m.services {
-		for _, service := range services {
-			for _, cap := range service.Capabilities {
-				if cap.Name == capability {
-					results = append(results, service)
-					break
-				}
-			}
-		}
-	}
-	return results, nil
-}
-
-func (m *MockDiscovery) UpdateHealth(ctx context.Context, serviceID string, status core.HealthStatus) error {
-	return nil
-}
-
-func (m *MockDiscovery) Discover(ctx context.Context, filter core.DiscoveryFilter) ([]*core.ServiceInfo, error) {
-	var results []*core.ServiceInfo
-
-	// If searching by name
-	if filter.Name != "" {
-		if services, ok := m.services[filter.Name]; ok {
-			for _, svc := range services {
-				results = append(results, (*core.ServiceInfo)(svc))
-			}
-		}
-		return results, nil
-	}
-
-	// If searching by capabilities
-	if len(filter.Capabilities) > 0 {
-		for _, services := range m.services {
-			for _, service := range services {
-				for _, cap := range service.Capabilities {
-					for _, filterCap := range filter.Capabilities {
-						if cap.Name == filterCap {
-							results = append(results, (*core.ServiceInfo)(service))
-							goto nextService
-						}
-					}
-				}
-			nextService:
-			}
-		}
-		return results, nil
-	}
-
-	// Return all services
-	for _, services := range m.services {
-		for _, svc := range services {
-			results = append(results, (*core.ServiceInfo)(svc))
-		}
-	}
-	return results, nil
-}
+// NOTE: MockDiscovery is defined in mocks_test.go - using that one for these tests
 
 func TestAgentCatalog_Refresh(t *testing.T) {
 	// Create mock discovery with test services
@@ -264,7 +183,7 @@ func TestAgentCatalog_FormatForLLM(t *testing.T) {
 	}
 
 	for _, expected := range expectedStrings {
-		if !contains(output, expected) {
+		if !catalogContains(output, expected) {
 			t.Errorf("Expected output to contain '%s'", expected)
 		}
 	}
@@ -325,7 +244,177 @@ func TestAgentCatalog_ConvertBasicCapabilities(t *testing.T) {
 	}
 }
 
-// Helper function
-func contains(str, substr string) bool {
+// Helper function - using local version to avoid conflicts with mocks_test.go
+func catalogContains(str, substr string) bool {
 	return strings.Contains(str, substr)
+}
+
+// ============================================================================
+// Internal Capability Filtering Tests (Self-Referential Orchestration Bug Fix)
+// ============================================================================
+
+func TestFormatForLLM_FiltersInternalCapabilities(t *testing.T) {
+	discovery := NewMockDiscovery()
+	catalog := NewAgentCatalog(discovery)
+
+	// Setup agent with mix of public and internal capabilities
+	catalog.agents = map[string]*AgentInfo{
+		"test-agent-1": {
+			Registration: &core.ServiceInfo{
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+			},
+			Capabilities: []EnhancedCapability{
+				{Name: "public_capability", Description: "Public capability", Internal: false},
+				{Name: "orchestrate_natural", Description: "Internal orchestration", Internal: true},
+				{Name: "another_public", Description: "Another public capability", Internal: false},
+			},
+		},
+	}
+
+	output := catalog.FormatForLLM()
+
+	// Public capabilities should be present
+	if !catalogContains(output, "public_capability") {
+		t.Error("Expected public_capability in LLM output")
+	}
+	if !catalogContains(output, "another_public") {
+		t.Error("Expected another_public in LLM output")
+	}
+
+	// Internal capability should be filtered out
+	if catalogContains(output, "orchestrate_natural") {
+		t.Error("Internal capability orchestrate_natural should NOT be in LLM output")
+	}
+}
+
+func TestFormatForLLM_SkipsAgentWithOnlyInternalCapabilities(t *testing.T) {
+	discovery := NewMockDiscovery()
+	catalog := NewAgentCatalog(discovery)
+
+	// Setup two agents - one with only internal capabilities, one with public
+	catalog.agents = map[string]*AgentInfo{
+		"orchestrator-only": {
+			Registration: &core.ServiceInfo{
+				ID:      "orchestrator-only",
+				Name:    "orchestrator-agent",
+				Address: "localhost",
+				Port:    8090,
+			},
+			Capabilities: []EnhancedCapability{
+				{Name: "orchestrate_natural", Description: "Internal", Internal: true},
+				{Name: "execute_workflow", Description: "Also internal", Internal: true},
+			},
+		},
+		"tool-agent": {
+			Registration: &core.ServiceInfo{
+				ID:      "tool-agent",
+				Name:    "weather-tool",
+				Address: "localhost",
+				Port:    8091,
+			},
+			Capabilities: []EnhancedCapability{
+				{Name: "get_weather", Description: "Public weather capability", Internal: false},
+			},
+		},
+	}
+
+	output := catalog.FormatForLLM()
+
+	// Agent with only internal capabilities should be excluded entirely
+	if catalogContains(output, "orchestrator-agent") {
+		t.Error("Agent with only internal capabilities should NOT appear in LLM output")
+	}
+
+	// Agent with public capabilities should be present
+	if !catalogContains(output, "weather-tool") {
+		t.Error("Agent with public capabilities should appear in LLM output")
+	}
+	if !catalogContains(output, "get_weather") {
+		t.Error("Public capability get_weather should appear in LLM output")
+	}
+}
+
+func TestFormatForLLM_InternalFalseByDefault(t *testing.T) {
+	discovery := NewMockDiscovery()
+	catalog := NewAgentCatalog(discovery)
+
+	// Setup agent with capability without Internal field explicitly set
+	// (Go zero value for bool is false, so it should be treated as public)
+	catalog.agents = map[string]*AgentInfo{
+		"legacy-agent": {
+			Registration: &core.ServiceInfo{
+				ID:      "legacy-agent",
+				Name:    "legacy-service",
+				Address: "localhost",
+				Port:    8080,
+			},
+			Capabilities: []EnhancedCapability{
+				{Name: "legacy_capability", Description: "Legacy capability"},
+				// Internal field not set - should default to false
+			},
+		},
+	}
+
+	output := catalog.FormatForLLM()
+
+	// Capability without Internal field should appear (default: false = public)
+	if !catalogContains(output, "legacy_capability") {
+		t.Error("Capability without Internal field should appear in LLM output (default: public)")
+	}
+}
+
+func TestConvertBasicCapabilities_PreservesInternalFlag(t *testing.T) {
+	discovery := NewMockDiscovery()
+	catalog := NewAgentCatalog(discovery)
+
+	basic := []core.Capability{
+		{Name: "public_cap", Description: "Public", Internal: false},
+		{Name: "internal_cap", Description: "Internal", Internal: true},
+	}
+
+	enhanced := catalog.convertBasicCapabilities(basic)
+
+	if len(enhanced) != 2 {
+		t.Fatalf("Expected 2 enhanced capabilities, got %d", len(enhanced))
+	}
+
+	// Verify Internal flag is preserved
+	if enhanced[0].Internal != false {
+		t.Error("Expected public_cap.Internal to be false")
+	}
+	if enhanced[1].Internal != true {
+		t.Error("Expected internal_cap.Internal to be true")
+	}
+}
+
+func TestEnrichCapabilities_PropagatesInternalFlag(t *testing.T) {
+	discovery := NewMockDiscovery()
+	catalog := NewAgentCatalog(discovery)
+
+	// HTTP capabilities fetched from endpoint (no Internal flag)
+	httpCaps := []EnhancedCapability{
+		{Name: "orchestrate_natural", Description: "From HTTP"},
+		{Name: "public_cap", Description: "From HTTP"},
+	}
+
+	// Registration capabilities with Internal flags
+	regCaps := []core.Capability{
+		{Name: "orchestrate_natural", Description: "From registration", Internal: true},
+		{Name: "public_cap", Description: "From registration", Internal: false},
+	}
+
+	enriched := catalog.enrichCapabilitiesWithInputSummary(httpCaps, regCaps)
+
+	// Verify Internal flag was propagated from registration
+	for _, cap := range enriched {
+		if cap.Name == "orchestrate_natural" && !cap.Internal {
+			t.Error("orchestrate_natural should have Internal=true after enrichment")
+		}
+		if cap.Name == "public_cap" && cap.Internal {
+			t.Error("public_cap should have Internal=false after enrichment")
+		}
+	}
 }

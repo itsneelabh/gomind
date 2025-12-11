@@ -46,6 +46,11 @@ type EnhancedCapability struct {
 	Returns     ReturnType  `json:"returns"`
 	Tags        []string    `json:"tags"`
 	Examples    []Example   `json:"examples,omitempty"`
+
+	// Internal marks capabilities that should not be exposed to LLM planning.
+	// Internal capabilities are still callable via HTTP but are excluded from
+	// the service catalog used for AI orchestration decisions.
+	Internal bool `json:"internal,omitempty"`
 }
 
 // Parameter describes an input parameter
@@ -313,6 +318,7 @@ func (c *AgentCatalog) convertBasicCapabilities(caps []core.Capability) []Enhanc
 			Name:        cap.Name,
 			Description: cap.Description,
 			Endpoint:    cap.Endpoint,
+			Internal:    cap.Internal, // Preserve internal flag for LLM filtering
 		}
 		// Use defaults if not set
 		if enhanced[i].Endpoint == "" {
@@ -366,11 +372,18 @@ func (c *AgentCatalog) enrichCapabilitiesWithInputSummary(httpCaps []EnhancedCap
 		regCapMap[registrationCaps[i].Name] = &registrationCaps[i]
 	}
 
-	// Enrich each HTTP capability with InputSummary if parameters are empty
+	// Enrich each HTTP capability with InputSummary and Internal flag if available
 	for i := range httpCaps {
-		if len(httpCaps[i].Parameters) == 0 {
-			// Look up corresponding registration capability
-			if regCap, ok := regCapMap[httpCaps[i].Name]; ok && regCap.InputSummary != nil {
+		// Look up corresponding registration capability
+		if regCap, ok := regCapMap[httpCaps[i].Name]; ok {
+			// Propagate Internal flag from registration to HTTP capability
+			// This ensures capabilities marked as internal are filtered in FormatForLLM
+			if regCap.Internal {
+				httpCaps[i].Internal = true
+			}
+
+			// Add parameters from InputSummary if not present in HTTP capability
+			if len(httpCaps[i].Parameters) == 0 && regCap.InputSummary != nil {
 				params := make([]Parameter, 0)
 
 				// Add required fields
@@ -399,7 +412,7 @@ func (c *AgentCatalog) enrichCapabilitiesWithInputSummary(httpCaps []EnhancedCap
 
 				if c.logger != nil {
 					c.logger.Debug("Enriched capability with InputSummary from registration", map[string]interface{}{
-						"capability":      httpCaps[i].Name,
+						"capability":       httpCaps[i].Name,
 						"parameters_added": len(params),
 					})
 				}
@@ -447,6 +460,8 @@ func (c *AgentCatalog) FindByCapability(capability string) []string {
 // This creates a human-readable text representation of all agents and their capabilities
 // that can be included in prompts to LLMs for intelligent orchestration decisions.
 // The format includes agent names, endpoints, capability descriptions, parameters, and return types.
+// Note: Internal capabilities (marked with Internal: true) are filtered out to prevent
+// self-referential orchestration bugs where the LLM calls the orchestrator recursively.
 func (c *AgentCatalog) FormatForLLM() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -455,10 +470,23 @@ func (c *AgentCatalog) FormatForLLM() string {
 	output = "Available Agents and Capabilities:\n\n"
 
 	for id, agent := range c.agents {
+		// Filter out internal capabilities - only include public ones for LLM planning
+		publicCaps := make([]EnhancedCapability, 0, len(agent.Capabilities))
+		for _, cap := range agent.Capabilities {
+			if !cap.Internal {
+				publicCaps = append(publicCaps, cap)
+			}
+		}
+
+		// Skip agents that have no public capabilities
+		if len(publicCaps) == 0 {
+			continue
+		}
+
 		output += fmt.Sprintf("Agent: %s (ID: %s)\n", agent.Registration.Name, id)
 		output += fmt.Sprintf("  Address: http://%s:%d\n", agent.Registration.Address, agent.Registration.Port)
 
-		for _, cap := range agent.Capabilities {
+		for _, cap := range publicCaps {
 			output += fmt.Sprintf("  - Capability: %s\n", cap.Name)
 			output += fmt.Sprintf("    Description: %s\n", cap.Description)
 
