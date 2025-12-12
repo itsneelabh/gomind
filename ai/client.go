@@ -24,7 +24,11 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 		opt(config)
 	}
 
+	// Apply component-specific logging for AI module
 	if config.Logger != nil {
+		if cal, ok := config.Logger.(core.ComponentAwareLogger); ok {
+			config.Logger = cal.WithComponent("framework/ai")
+		}
 		config.Logger.Info("Starting AI client creation", map[string]interface{}{
 			"operation":        "ai_client_creation",
 			"provider_setting": config.Provider,
