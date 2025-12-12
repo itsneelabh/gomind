@@ -33,10 +33,16 @@ func NewTransportRegistry() TransportRegistry {
 // SetLogger sets the logger for this transport registry.
 // This enables dependency injection of loggers from the ChatAgent.
 // Follows the Interface-First Design principle from FRAMEWORK_DESIGN_PRINCIPLES.md.
+// The component is always set to "framework/ui" to ensure proper log attribution
+// regardless of which agent or tool is using the UI module.
 func (r *transportRegistry) SetLogger(logger core.Logger) {
 	if logger != nil {
 		r.mu.Lock()
-		r.logger = logger
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			r.logger = cal.WithComponent("framework/ui")
+		} else {
+			r.logger = logger
+		}
 		r.mu.Unlock()
 	}
 }

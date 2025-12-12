@@ -279,11 +279,17 @@ func NewCircuitBreaker(config *CircuitBreakerConfig) (*CircuitBreaker, error) {
 }
 
 // SetLogger sets the logger provider (follows framework design principles)
+// The component is always set to "framework/resilience" to ensure proper log attribution
+// regardless of which agent or tool is using the resilience module.
 func (cb *CircuitBreaker) SetLogger(logger core.Logger) {
 	if logger == nil {
 		cb.config.Logger = &core.NoOpLogger{}
 	} else {
-		cb.config.Logger = logger
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			cb.config.Logger = cal.WithComponent("framework/resilience")
+		} else {
+			cb.config.Logger = logger
+		}
 	}
 }
 

@@ -75,11 +75,17 @@ func NewRetryExecutor(config *RetryConfig) *RetryExecutor {
 }
 
 // SetLogger sets the logger for dependency injection (follows framework design principles)
+// The component is always set to "framework/resilience" to ensure proper log attribution
+// regardless of which agent or tool is using the resilience module.
 func (r *RetryExecutor) SetLogger(logger core.Logger) {
 	if logger == nil {
 		r.logger = &core.NoOpLogger{}
 	} else {
-		r.logger = logger
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			r.logger = cal.WithComponent("framework/resilience")
+		} else {
+			r.logger = logger
+		}
 	}
 }
 
