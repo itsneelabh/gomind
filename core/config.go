@@ -1531,8 +1531,9 @@ func parseLogLevel(level string) LogLevel {
 
 // ProductionLogger provides layered observability for framework operations
 type ProductionLogger struct {
-	level          LogLevel // Numeric level for efficient comparison
+	level          LogLevel  // Numeric level for efficient comparison
 	serviceName    string
+	component      string    // Component identifier (e.g., "framework/core", "agent/<name>", "tool/<name>")
 	format         string
 	output         io.Writer
 	metricsEnabled bool // Metrics layer (enabled when telemetry available)
@@ -1554,6 +1555,7 @@ func NewProductionLogger(logging LoggingConfig, dev DevelopmentConfig, serviceNa
 	return &ProductionLogger{
 		level:          level,
 		serviceName:    serviceName,
+		component:      "framework/core", // Default component for framework internals
 		format:         logging.Format,
 		output:         output,
 		metricsEnabled: false, // Enabled by telemetry module when available
@@ -1563,6 +1565,35 @@ func NewProductionLogger(logging LoggingConfig, dev DevelopmentConfig, serviceNa
 // EnableMetrics is called by telemetry module to enable metrics layer
 func (p *ProductionLogger) EnableMetrics() {
 	p.metricsEnabled = true
+}
+
+// WithComponent creates a child logger with specific component context.
+// This allows different parts of the application to have their own
+// component identifier while sharing the same base configuration.
+//
+// Component naming convention:
+//   - "framework/core"          - Core framework (discovery, registry, config)
+//   - "framework/orchestration" - Orchestration module
+//   - "framework/ai"            - AI module
+//   - "framework/resilience"    - Resilience patterns
+//   - "agent/<name>"            - User agents (e.g., "agent/travel-research-orchestration")
+//   - "tool/<name>"             - User tools (e.g., "tool/weather-service")
+func (p *ProductionLogger) WithComponent(component string) Logger {
+	return &ProductionLogger{
+		level:          p.level,
+		serviceName:    p.serviceName,
+		component:      component,
+		format:         p.format,
+		output:         p.output,
+		metricsEnabled: p.metricsEnabled,
+	}
+}
+
+// GetComponent returns the current component identifier for this logger.
+// This is useful for testing and debugging to verify the correct component
+// was set during logger creation.
+func (p *ProductionLogger) GetComponent() string {
+	return p.component
 }
 
 // Debug logs debug-level messages (only when level is Debug)
@@ -1629,7 +1660,7 @@ func (p *ProductionLogger) logEvent(level, msg string, fields map[string]interfa
 			"timestamp": timestamp,
 			"level":     level,
 			"service":   p.serviceName,
-			"component": "framework",
+			"component": p.component,
 			"message":   msg,
 		}
 

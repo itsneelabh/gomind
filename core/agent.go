@@ -130,6 +130,9 @@ func NewBaseAgentWithConfig(config *Config) *BaseAgent {
 		config.ID = fmt.Sprintf("%s-%s", config.Name, uuid.New().String()[:8])
 	}
 
+	// Track component type for automatic telemetry inference
+	SetCurrentComponentType(ComponentTypeAgent)
+
 	return &BaseAgent{
 		ID:                 config.ID,
 		Name:               config.Name,
@@ -938,6 +941,8 @@ type Framework struct {
 
 // applyConfigToComponent applies configuration to a component.
 // It handles both direct BaseAgent/BaseTool instances and types that embed them.
+// When the logger implements ComponentAwareLogger, it creates component-specific
+// loggers with names like "agent/<name>" or "tool/<name>" for easy log filtering.
 func applyConfigToComponent(component HTTPComponent, config *Config) {
 	// First try direct type assertion
 	switch base := component.(type) {
@@ -954,7 +959,9 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 			base.ID = config.Name
 		}
 		// else: keep the UUID-based ID from NewBaseAgent (for non-K8s deployments)
-		base.Logger = config.logger
+
+		// Create component-specific logger for agent log filtering
+		base.Logger = createComponentLogger(config.logger, "agent/"+base.ID)
 		return
 
 	case *BaseTool:
@@ -968,7 +975,9 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 			base.ID = config.Name
 		}
 		// else: keep the UUID-based ID from NewBaseTool (for non-K8s deployments)
-		base.Logger = config.logger
+
+		// Create component-specific logger for tool log filtering
+		base.Logger = createComponentLogger(config.logger, "tool/"+base.ID)
 		return
 	}
 
@@ -1001,7 +1010,9 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 					base.ID = config.Name
 				}
 				// else: keep the UUID-based ID from NewBaseAgent
-				base.Logger = config.logger
+
+				// Create component-specific logger for agent log filtering
+				base.Logger = createComponentLogger(config.logger, "agent/"+base.ID)
 				return
 			}
 		}
@@ -1019,11 +1030,22 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 					base.ID = config.Name
 				}
 				// else: keep the UUID-based ID from NewBaseTool
-				base.Logger = config.logger
+
+				// Create component-specific logger for tool log filtering
+				base.Logger = createComponentLogger(config.logger, "tool/"+base.ID)
 				return
 			}
 		}
 	}
+}
+
+// createComponentLogger creates a component-specific logger if the logger supports it.
+// Falls back to the original logger if ComponentAwareLogger interface is not implemented.
+func createComponentLogger(logger Logger, componentName string) Logger {
+	if cal, ok := logger.(ComponentAwareLogger); ok {
+		return cal.WithComponent(componentName)
+	}
+	return logger
 }
 
 // NewFramework creates a new framework instance with options.

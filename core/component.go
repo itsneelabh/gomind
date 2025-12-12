@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,28 @@ const (
 	ComponentTypeTool  ComponentType = "tool"
 	ComponentTypeAgent ComponentType = "agent"
 )
+
+// currentComponentType tracks the type of the most recently created component.
+// This allows telemetry.Initialize() to automatically infer the service type
+// without requiring explicit configuration.
+var (
+	currentComponentType ComponentType
+	componentTypeMu      sync.RWMutex
+)
+
+// SetCurrentComponentType sets the current component type (called by NewTool/NewBaseAgent)
+func SetCurrentComponentType(t ComponentType) {
+	componentTypeMu.Lock()
+	defer componentTypeMu.Unlock()
+	currentComponentType = t
+}
+
+// GetCurrentComponentType returns the current component type for telemetry inference
+func GetCurrentComponentType() ComponentType {
+	componentTypeMu.RLock()
+	defer componentTypeMu.RUnlock()
+	return currentComponentType
+}
 
 // Component is the base interface for all components in the framework
 type Component interface {

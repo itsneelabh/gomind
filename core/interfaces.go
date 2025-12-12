@@ -22,6 +22,30 @@ type Logger interface {
 	DebugWithContext(ctx context.Context, msg string, fields map[string]interface{})
 }
 
+// ComponentAwareLogger extends Logger with component context support.
+// This allows different parts of the application to have their own
+// component identifier while sharing the same base configuration.
+//
+// ProductionLogger implements this interface. When a logger is
+// component-aware, the component name appears in structured logs
+// allowing filtering by component type:
+//
+//	kubectl logs ... | jq 'select(.component | startswith("agent/"))'
+//	kubectl logs ... | jq 'select(.component == "framework/orchestration")'
+//
+// Component naming convention:
+//   - "framework/core"          - Core framework (discovery, registry, config)
+//   - "framework/orchestration" - Orchestration module
+//   - "framework/ai"            - AI module
+//   - "framework/resilience"    - Resilience patterns
+//   - "framework/telemetry"     - Telemetry integration
+//   - "agent/<name>"            - User agents (e.g., "agent/travel-research-orchestration")
+//   - "tool/<name>"             - User tools (e.g., "tool/weather-service")
+type ComponentAwareLogger interface {
+	Logger
+	WithComponent(component string) Logger
+}
+
 // Telemetry interface - optional telemetry support
 type Telemetry interface {
 	StartSpan(ctx context.Context, name string) (context.Context, Span)
