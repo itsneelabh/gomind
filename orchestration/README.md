@@ -1060,32 +1060,77 @@ steps:
 
 ## 🆕 Production-Ready Enhancements
 
-### Multi-Layer Type Safety
+### LLM-First Hybrid Parameter Resolution
 
-When using AI orchestration in natural language mode, LLMs occasionally generate parameters with incorrect types (e.g., `"35.6"` instead of `35.6`). The orchestration module includes a multi-layer defense system to ensure type correctness:
+In multi-step workflows, parameters must flow between tools automatically. The orchestration module uses a **three-layer resolution system** where LLM handles all semantic understanding:
 
-| Layer | Strategy | Effectiveness |
-|-------|----------|---------------|
-| **Layer 1** | Prompt guidance with type rules | ~70-80% |
-| **Layer 2** | Schema-based type coercion (automatic) | ~95% |
-| **Layer 3** | Validation feedback retry (LLM correction) | ~99% |
+| Layer | Strategy | When Used | Cost |
+|-------|----------|-----------|------|
+| **Layer 1: Auto-Wiring** | Exact name match, case-insensitive match, type coercion | Always (first) | Free |
+| **Layer 2: Micro-Resolution** | LLM extracts parameters via function calling | When Layer 1 leaves required params unmapped | 1 LLM call |
+| **Layer 3: Error Analysis** | LLM analyzes tool errors and suggests corrections | When tool returns 400/404/409/422 | 1 LLM call |
 
 **How it works:**
-1. **Schema Coercion**: Before calling a tool, parameters are automatically coerced to match the capability schema (e.g., `"48.8566"` → `48.8566` for float64 fields)
-2. **Validation Feedback**: If a tool returns a type-related error, the orchestrator can request the LLM to correct the parameters and retry
 
-**Configuration:**
-```go
-config := orchestration.DefaultConfig()
-config.ExecutionOptions.ValidationFeedbackEnabled = true  // Enable Layer 3 (default: true)
-config.ExecutionOptions.MaxValidationRetries = 2          // Max correction attempts (default: 2)
+```
+Step 1 completes → Output: {"latitude": "48.85", "country": "France"}
+
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1: Auto-Wiring (instant, free)                        │
+│   • Exact match: lat ← lat ✓                                │
+│   • Type coercion: "48.85" → 48.85                          │
+│   • Nested extraction: {code: "EUR"} → "EUR"                │
+│                                                             │
+│   NOTE: No semantic aliases - framework is domain-agnostic  │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼ (if required params still missing)
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 2: Micro-Resolution (LLM call)                        │
+│   • LLM understands "latitude" means "lat"                  │
+│   • LLM infers "France" uses "EUR" currency                 │
+│   • Guaranteed type safety via JSON schema                  │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼ (if tool call fails with correctable error)
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 3: Error Analysis (LLM call)                          │
+│   • Analyzes error: "City 'Tokio' not found"                │
+│   • Suggests fix: {"city": "Tokyo"}                         │
+│   • Retries with corrected parameters                       │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**Observability:**
-- Span events: `type_coercion_applied`, `validation_feedback_started`, `validation_feedback_success`
-- Metrics: `orchestration.type_coercion.applied`, `orchestration.validation_feedback.attempts`
+**Key Design Principle:** The framework contains **no domain-specific knowledge** (weather, currency, etc.). All semantic understanding is delegated to the LLM.
 
-For detailed implementation information, see [INTERNAL_TYPE_SAFETY_DESIGN.md](./INTERNAL_TYPE_SAFETY_DESIGN.md).
+**Disabling LLM Layers:**
+```go
+// Disable Layer 2: Micro-resolution (auto-wiring only)
+resolver := NewHybridResolver(aiClient, logger,
+    WithMicroResolution(false))
+
+// Disable Layer 3: Error Analysis (no LLM-based error recovery)
+analyzer := NewErrorAnalyzer(aiClient, logger,
+    WithErrorAnalysisEnabled(false))
+
+// Runtime toggle for Layer 3
+analyzer.Enable(false)  // Disable
+analyzer.Enable(true)   // Re-enable
+```
+
+**Error Handling by HTTP Status:**
+
+| Status | Handler | Action |
+|--------|---------|--------|
+| 400, 404, 409, 422 | LLM Error Analyzer | Analyze → correct → retry |
+| 408, 429, 5xx | Resilience Module | Same payload + backoff |
+| 401, 403, 405 | Neither | Fail immediately |
+
+**Observability:**
+- Span events: `llm.micro_resolution.*`, `error_analyzer.*`
+- All LLM calls are traced in Jaeger with prompts, responses, and token usage
+
+For detailed implementation information, see [INTELLIGENT_PARAMETER_BINDING.md](./INTELLIGENT_PARAMETER_BINDING.md).
 
 ### Comprehensive Logging System
 The orchestration module now includes production-grade logging for all operations:
@@ -1124,6 +1169,43 @@ logger.ErrorWithContext(ctx, "Workflow step failed", map[string]interface{}{
 - **Improved Registry Performance**: Optimized component lookup and caching
 - **Better Error Recovery**: Automatic retry on transient discovery failures
 - **Detailed Metrics**: Track discovery latency and success rates
+
+### Internal Capability Flag
+
+Capabilities can be marked as "internal" to exclude them from the LLM planning catalog while keeping them HTTP-callable. This prevents self-referential orchestration bugs where an orchestrator agent might recursively call itself.
+
+**Problem Solved:**
+When an orchestrator agent registers its `orchestrate_natural` capability, the LLM might include it in execution plans, causing recursive self-calls with 400 errors. The `Internal` flag prevents this by filtering internal capabilities from the catalog sent to the LLM.
+
+**Usage:**
+```go
+// Mark orchestration capabilities as internal to prevent LLM from calling them
+agent.RegisterCapability(core.Capability{
+    Name:        "orchestrate_natural",
+    Description: "Process natural language requests with AI orchestration",
+    Endpoint:    "/orchestrate/natural",
+    Internal:    true,  // Exclude from LLM catalog
+    Handler:     handleOrchestration,
+})
+```
+
+**Key Behaviors:**
+| Behavior | Internal: true | Internal: false (default) |
+|----------|----------------|---------------------------|
+| HTTP callable | ✅ Yes | ✅ Yes |
+| In LLM catalog | ❌ No | ✅ Yes |
+| In `FormatForLLM()` output | ❌ No | ✅ Yes |
+
+**When to Use `Internal: true`:**
+- Orchestration endpoints (prevent recursive planning)
+- Admin/maintenance endpoints
+- Deprecated capabilities (still accessible but hidden from AI)
+- Health check or metrics endpoints
+
+**Backward Compatibility:**
+- `Internal` defaults to `false` (Go zero value)
+- Existing capabilities without the field remain public
+- No changes required for existing tool/agent code
 
 ### Workflow Engine Improvements
 - **Parallel Step Execution**: Execute independent steps concurrently
