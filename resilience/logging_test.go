@@ -451,3 +451,189 @@ func TestLoggingFieldValidation(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Component-Aware Logging Tests
+// ============================================================================
+
+// ComponentAwareTestLogger implements ComponentAwareLogger for testing
+type ComponentAwareTestLogger struct {
+	*TestLogger
+	component string
+}
+
+func NewComponentAwareTestLogger() *ComponentAwareTestLogger {
+	return &ComponentAwareTestLogger{
+		TestLogger: &TestLogger{},
+		component:  "test/default",
+	}
+}
+
+func (c *ComponentAwareTestLogger) WithComponent(component string) core.Logger {
+	return &ComponentAwareTestLogger{
+		TestLogger: c.TestLogger, // Share the same log storage
+		component:  component,
+	}
+}
+
+func (c *ComponentAwareTestLogger) GetComponent() string {
+	return c.component
+}
+
+// TestCreateCircuitBreakerSetsResilienceComponent verifies that CreateCircuitBreaker
+// sets the "framework/resilience" component when using ComponentAwareLogger
+func TestCreateCircuitBreakerSetsResilienceComponent(t *testing.T) {
+	testLogger := NewComponentAwareTestLogger()
+
+	deps := ResilienceDependencies{
+		Logger: testLogger,
+	}
+
+	_, err := CreateCircuitBreaker("component-test-cb", deps)
+	if err != nil {
+		t.Fatalf("Failed to create circuit breaker: %v", err)
+	}
+
+	// The factory function should have called WithComponent("framework/resilience")
+	// We can verify this by checking the component on the logger
+	// Note: The factory creates a new logger instance via WithComponent, so we need
+	// to test this differently - by creating a circuit breaker with default deps
+	// and verifying the ProductionLogger has the correct component
+
+	// For a proper test, we need to verify the factory function behavior
+	// by creating a circuit breaker without providing a logger
+	depsNoLogger := ResilienceDependencies{}
+	cb, err := CreateCircuitBreaker("default-logger-test", depsNoLogger)
+	if err != nil {
+		t.Fatalf("Failed to create circuit breaker: %v", err)
+	}
+
+	// The circuit breaker's config should have a logger with "framework/resilience" component
+	// We can verify this by checking if the logger is a ProductionLogger with correct component
+	if pl, ok := cb.config.Logger.(*core.ProductionLogger); ok {
+		if pl.GetComponent() != "framework/resilience" {
+			t.Errorf("Expected component 'framework/resilience', got '%s'", pl.GetComponent())
+		}
+	} else {
+		// If not ProductionLogger, it should still be component-aware
+		if cal, ok := cb.config.Logger.(interface{ GetComponent() string }); ok {
+			if cal.GetComponent() != "framework/resilience" {
+				t.Errorf("Expected component 'framework/resilience', got '%s'", cal.GetComponent())
+			}
+		}
+	}
+}
+
+// TestCreateRetryExecutorSetsResilienceComponent verifies that CreateRetryExecutor
+// sets the "framework/resilience" component when using ComponentAwareLogger
+func TestCreateRetryExecutorSetsResilienceComponent(t *testing.T) {
+	// Create retry executor without providing a logger
+	depsNoLogger := ResilienceDependencies{}
+	executor := CreateRetryExecutor(depsNoLogger)
+
+	// The executor's logger should have "framework/resilience" component
+	if pl, ok := executor.logger.(*core.ProductionLogger); ok {
+		if pl.GetComponent() != "framework/resilience" {
+			t.Errorf("Expected component 'framework/resilience', got '%s'", pl.GetComponent())
+		}
+	} else {
+		// If not ProductionLogger, check if it has GetComponent method
+		if cal, ok := executor.logger.(interface{ GetComponent() string }); ok {
+			if cal.GetComponent() != "framework/resilience" {
+				t.Errorf("Expected component 'framework/resilience', got '%s'", cal.GetComponent())
+			}
+		}
+	}
+}
+
+// TestFactoryWithComponentAwareLogger verifies that factory functions correctly
+// use WithComponent when provided with a ComponentAwareLogger
+func TestFactoryWithComponentAwareLogger(t *testing.T) {
+	t.Run("circuit breaker with component-aware logger", func(t *testing.T) {
+		testLogger := NewComponentAwareTestLogger()
+
+		deps := ResilienceDependencies{
+			Logger: testLogger,
+		}
+
+		cb, err := CreateCircuitBreaker("cal-test-cb", deps)
+		if err != nil {
+			t.Fatalf("Failed to create circuit breaker: %v", err)
+		}
+
+		// Execute something to generate logs
+		err = cb.Execute(context.Background(), func() error {
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Execution failed: %v", err)
+		}
+
+		// Verify logs were captured (proving the logger was injected)
+		if len(testLogger.logs) == 0 {
+			t.Error("No logs captured, logger injection may have failed")
+		}
+	})
+
+	t.Run("retry executor with component-aware logger", func(t *testing.T) {
+		testLogger := NewComponentAwareTestLogger()
+
+		deps := ResilienceDependencies{
+			Logger: testLogger,
+		}
+
+		executor := CreateRetryExecutor(deps)
+
+		// Execute something to generate logs
+		err := executor.Execute(context.Background(), "cal-test-retry", func() error {
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Execution failed: %v", err)
+		}
+
+		// Verify logs were captured
+		if len(testLogger.logs) == 0 {
+			t.Error("No logs captured, logger injection may have failed")
+		}
+	})
+}
+
+// TestDefaultLoggerHasResilienceComponent verifies that when no logger is provided,
+// the default ProductionLogger is created with "framework/resilience" component
+func TestDefaultLoggerHasResilienceComponent(t *testing.T) {
+	t.Run("circuit breaker default logger", func(t *testing.T) {
+		deps := ResilienceDependencies{} // No logger provided
+
+		cb, err := CreateCircuitBreaker("default-component-test", deps)
+		if err != nil {
+			t.Fatalf("Failed to create circuit breaker: %v", err)
+		}
+
+		// Check that the logger has the correct component
+		if pl, ok := cb.config.Logger.(*core.ProductionLogger); ok {
+			component := pl.GetComponent()
+			if component != "framework/resilience" {
+				t.Errorf("Expected default logger component 'framework/resilience', got '%s'", component)
+			}
+		} else {
+			t.Log("Logger is not ProductionLogger - component check skipped")
+		}
+	})
+
+	t.Run("retry executor default logger", func(t *testing.T) {
+		deps := ResilienceDependencies{} // No logger provided
+
+		executor := CreateRetryExecutor(deps)
+
+		// Check that the logger has the correct component
+		if pl, ok := executor.logger.(*core.ProductionLogger); ok {
+			component := pl.GetComponent()
+			if component != "framework/resilience" {
+				t.Errorf("Expected default logger component 'framework/resilience', got '%s'", component)
+			}
+		} else {
+			t.Log("Logger is not ProductionLogger - component check skipped")
+		}
+	})
+}

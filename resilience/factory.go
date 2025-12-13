@@ -27,8 +27,8 @@ func CreateCircuitBreaker(name string, deps ResilienceDependencies) (*CircuitBre
 	if deps.Logger != nil {
 		config.Logger = deps.Logger
 	} else {
-		// Create default production logger
-		config.Logger = core.NewProductionLogger(
+		// Create default production logger with resilience component
+		logger := core.NewProductionLogger(
 			core.LoggingConfig{
 				Level:  "info",
 				Format: "json",
@@ -37,6 +37,12 @@ func CreateCircuitBreaker(name string, deps ResilienceDependencies) (*CircuitBre
 			core.DevelopmentConfig{},
 			"circuit-breaker",
 		)
+		// Set component to framework/resilience for log filtering
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			config.Logger = cal.WithComponent("framework/resilience")
+		} else {
+			config.Logger = logger
+		}
 	}
 
 	// Auto-detect and enable telemetry if available
@@ -77,7 +83,7 @@ func CreateRetryExecutor(deps ResilienceDependencies) *RetryExecutor {
 	if deps.Logger != nil {
 		executor.SetLogger(deps.Logger)
 	} else {
-		// Create default production logger
+		// Create default production logger with resilience component
 		logger := core.NewProductionLogger(
 			core.LoggingConfig{
 				Level:  "info",
@@ -87,7 +93,12 @@ func CreateRetryExecutor(deps ResilienceDependencies) *RetryExecutor {
 			core.DevelopmentConfig{},
 			"retry-executor",
 		)
-		executor.SetLogger(logger)
+		// Set component to framework/resilience for log filtering
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			executor.SetLogger(cal.WithComponent("framework/resilience"))
+		} else {
+			executor.SetLogger(logger)
+		}
 	}
 
 	// Enable telemetry if available

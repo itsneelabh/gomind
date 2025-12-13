@@ -105,11 +105,17 @@ func NewCircuitBreakerTransport(transport Transport, breaker core.CircuitBreaker
 }
 
 // SetLogger sets the logger provider (follows framework design principles)
+// The component is always set to "framework/ui" to ensure proper log attribution
+// regardless of which agent or tool is using the UI module.
 func (t *CircuitBreakerTransport) SetLogger(logger core.Logger) {
 	if logger == nil {
 		t.logger = &core.NoOpLogger{}
 	} else {
-		t.logger = logger
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			t.logger = cal.WithComponent("framework/ui")
+		} else {
+			t.logger = logger
+		}
 	}
 }
 

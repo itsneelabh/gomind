@@ -76,6 +76,9 @@ func NewToolWithConfig(config *Config) *BaseTool {
 		config.ID = fmt.Sprintf("%s-%s", config.Name, generateID())
 	}
 
+	// Track component type for automatic telemetry inference
+	SetCurrentComponentType(ComponentTypeTool)
+
 	return &BaseTool{
 		ID:                 config.ID,
 		Name:               config.Name,

@@ -27,9 +27,16 @@ func NewMemoryStore() *MemoryStore {
 }
 
 // SetLogger configures the logger for this memory store
+// The logger is wrapped with component "framework/core" to identify logs from this module
 func (m *MemoryStore) SetLogger(logger Logger) {
 	if logger != nil {
-		m.logger = logger
+		if cal, ok := logger.(ComponentAwareLogger); ok {
+			m.logger = cal.WithComponent("framework/core")
+		} else {
+			m.logger = logger
+		}
+	} else {
+		m.logger = nil
 	}
 }
 

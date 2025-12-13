@@ -34,9 +34,18 @@ func NewRedisDiscoveryWithNamespace(redisURL, namespace string) (*RedisDiscovery
 }
 
 // SetLogger sets the logger for the discovery client
+// The logger is wrapped with component "framework/core" to identify logs from this module
 func (d *RedisDiscovery) SetLogger(logger Logger) {
-	d.logger = logger
-	// Also set logger for embedded registry
+	if logger != nil {
+		if cal, ok := logger.(ComponentAwareLogger); ok {
+			d.logger = cal.WithComponent("framework/core")
+		} else {
+			d.logger = logger
+		}
+	} else {
+		d.logger = nil
+	}
+	// Also set logger for embedded registry (will apply its own WithComponent)
 	if d.RedisRegistry != nil {
 		d.RedisRegistry.SetLogger(logger)
 	}

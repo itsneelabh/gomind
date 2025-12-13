@@ -628,8 +628,17 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 }
 
 // SetLogger sets the logger for the registry client
+// The logger is wrapped with component "framework/core" to identify logs from this module
 func (r *RedisRegistry) SetLogger(logger Logger) {
-	r.logger = logger
+	if logger != nil {
+		if cal, ok := logger.(ComponentAwareLogger); ok {
+			r.logger = cal.WithComponent("framework/core")
+		} else {
+			r.logger = logger
+		}
+	} else {
+		r.logger = nil
+	}
 }
 
 // storeRegistrationState stores service info for potential re-registration (internal helper)
