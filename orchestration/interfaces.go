@@ -208,6 +208,12 @@ type OrchestratorConfig struct {
 
 	// Telemetry configuration (uses framework telemetry)
 	EnableTelemetry bool `json:"enable_telemetry"`
+
+	// Hybrid Parameter Resolution (auto-wiring + micro-resolution)
+	// When enabled, uses schema-based auto-wiring for parameter binding between steps,
+	// with LLM-based micro-resolution as fallback for complex cases.
+	// This provides more reliable parameter binding than template substitution alone.
+	EnableHybridResolution bool `json:"enable_hybrid_resolution"`
 }
 
 // DefaultConfig returns default orchestrator configuration with intelligent defaults
@@ -236,6 +242,9 @@ func DefaultConfig() *OrchestratorConfig {
 		CapabilityProviderType: "default", // Quick start default
 		EnableTelemetry:        true,      // Production-first
 		EnableFallback:         true,      // Graceful degradation
+
+		// Hybrid Parameter Resolution defaults
+		EnableHybridResolution: true, // Enable by default for reliable parameter binding
 	}
 	
 	// Auto-configure based on environment (intelligent configuration)

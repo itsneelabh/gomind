@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // AIOrchestrator is an AI-powered orchestrator that uses LLM for intelligent routing
@@ -44,6 +48,9 @@ type AIOrchestrator struct {
 
 // NewAIOrchestrator creates a new AI-powered orchestrator
 func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiClient core.AIClient) *AIOrchestrator {
+	// Immediate startup marker - uses stderr for guaranteed output
+	log.Printf("[GOMIND-ORCH-V2] NewAIOrchestrator starting - EnableHybridResolution=%v", config != nil && config.EnableHybridResolution)
+
 	if config == nil {
 		config = DefaultConfig()
 	}
@@ -87,6 +94,18 @@ func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiC
 		o.executor.SetValidationFeedback(true, config.ExecutionOptions.MaxValidationRetries)
 	}
 
+	// Configure hybrid parameter resolution if enabled
+	// This uses auto-wiring (schema-based) + micro-resolution (LLM fallback) for parameter binding
+	if config.EnableHybridResolution {
+		hybridResolver := NewHybridResolver(aiClient, nil) // Logger will be set later via SetLogger
+		o.executor.SetHybridResolver(hybridResolver)
+		o.executor.EnableHybridResolution(true)
+		// Debug log to confirm hybrid resolution was configured
+		fmt.Printf("[ORCHESTRATOR] Hybrid resolution enabled: hybridResolver=%v, useHybridResolution=true\n", hybridResolver != nil)
+	} else {
+		fmt.Printf("[ORCHESTRATOR] Hybrid resolution DISABLED in config (EnableHybridResolution=%v)\n", config.EnableHybridResolution)
+	}
+
 	return o
 }
 
@@ -126,14 +145,20 @@ func (o *AIOrchestrator) SetTelemetry(telemetry core.Telemetry) {
 }
 
 // SetLogger sets the logger provider (follows framework design principles)
+// The component is always set to "framework/orchestration" to ensure proper log attribution
+// regardless of which agent or tool is using the orchestration module.
 func (o *AIOrchestrator) SetLogger(logger core.Logger) {
 	if logger == nil {
 		o.logger = &core.NoOpLogger{}
 	} else {
-		o.logger = logger
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			o.logger = cal.WithComponent("framework/orchestration")
+		} else {
+			o.logger = logger
+		}
 	}
 
-	// Propagate logger to sub-components (follows dependency injection pattern)
+	// Propagate logger to sub-components (they will apply their own WithComponent)
 	if o.executor != nil {
 		o.executor.SetLogger(logger)
 	}
@@ -156,6 +181,21 @@ func (o *AIOrchestrator) SetPromptBuilder(builder PromptBuilder) {
 		if o.logger != nil {
 			o.logger.Info("PromptBuilder updated at runtime", map[string]interface{}{
 				"operation": "set_prompt_builder",
+			})
+		}
+	}
+}
+
+// SetErrorAnalyzer configures the LLM-based error analyzer for the executor.
+// When set, the executor uses LLM to analyze errors and determine if they can be
+// fixed with different parameters. This removes the need for tools to set Retryable flags.
+// See PARAMETER_BINDING_FIX.md for the complete design rationale.
+func (o *AIOrchestrator) SetErrorAnalyzer(analyzer *ErrorAnalyzer) {
+	if o.executor != nil && analyzer != nil {
+		o.executor.SetErrorAnalyzer(analyzer)
+		if o.logger != nil {
+			o.logger.Info("Error analyzer configured", map[string]interface{}{
+				"operation": "set_error_analyzer",
 			})
 		}
 	}
@@ -517,15 +557,44 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 		})
 	}
 
+	// Telemetry: Record LLM prompt for visibility in Jaeger
+	// Truncate to avoid overwhelming trace storage while preserving useful context
+	telemetry.AddSpanEvent(ctx, "llm.plan_generation.request",
+		attribute.String("request_id", requestID),
+		attribute.String("prompt", truncateString(prompt, 2000)),
+		attribute.Int("prompt_length", len(prompt)),
+		attribute.Float64("temperature", 0.3),
+		attribute.Int("max_tokens", 2000),
+	)
+
 	// Call LLM
+	llmStartTime := time.Now()
 	aiResponse, err := o.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
 		Temperature:  0.3, // Lower temperature for more deterministic planning
 		MaxTokens:    2000,
 		SystemPrompt: "You are an intelligent orchestrator that creates execution plans for multi-agent systems.",
 	})
+	llmDuration := time.Since(llmStartTime)
+
 	if err != nil {
+		telemetry.AddSpanEvent(ctx, "llm.plan_generation.error",
+			attribute.String("request_id", requestID),
+			attribute.String("error", err.Error()),
+			attribute.Int64("duration_ms", llmDuration.Milliseconds()),
+		)
 		return nil, err
 	}
+
+	// Telemetry: Record LLM response for visibility in Jaeger
+	telemetry.AddSpanEvent(ctx, "llm.plan_generation.response",
+		attribute.String("request_id", requestID),
+		attribute.String("response", truncateString(aiResponse.Content, 2000)),
+		attribute.Int("response_length", len(aiResponse.Content)),
+		attribute.Int("prompt_tokens", aiResponse.Usage.PromptTokens),
+		attribute.Int("completion_tokens", aiResponse.Usage.CompletionTokens),
+		attribute.Int("total_tokens", aiResponse.Usage.TotalTokens),
+		attribute.Int64("duration_ms", llmDuration.Milliseconds()),
+	)
 
 	if o.logger != nil {
 		o.logger.Debug("LLM response received", map[string]interface{}{
@@ -664,26 +733,59 @@ Important:
 5. Be specific in instructions
 6. For coordinates (lat/lon), use numeric values like 35.6897 not "35.6897"
 
-Response (JSON only, no explanation):`, capabilityInfo, request), nil
+CRITICAL FORMAT RULES:
+- Output ONLY valid JSON - no markdown, no code blocks, no backticks
+- Do NOT use markdown formatting like ** or * in any values
+- Do NOT wrap the JSON in code fences
+
+Response (JSON only):`, capabilityInfo, request), nil
 }
 
 // parsePlan parses the LLM response into a RoutingPlan
 func (o *AIOrchestrator) parsePlan(llmResponse string) (*RoutingPlan, error) {
-	// Extract JSON from the response (LLM might include markdown)
-	jsonStart := findJSONStart(llmResponse)
+	// Step 1: Clean the response - strip markdown code blocks
+	cleaned := stripMarkdownCodeBlocks(llmResponse)
+
+	// Step 2: Extract JSON from the response (LLM might include extra text)
+	jsonStart := findJSONStart(cleaned)
 	if jsonStart == -1 {
+		// Log for debugging
+		if o.logger != nil {
+			o.logger.Warn("No JSON found in LLM response", map[string]interface{}{
+				"operation":       "plan_parsing",
+				"response_length": len(llmResponse),
+				"response_prefix": truncateString(llmResponse, 200),
+			})
+		}
 		return nil, fmt.Errorf("no JSON found in LLM response")
 	}
 
-	jsonEnd := findJSONEnd(llmResponse, jsonStart)
+	jsonEnd := findJSONEndStringSafe(cleaned, jsonStart)
 	if jsonEnd == -1 {
-		return nil, fmt.Errorf("invalid JSON in LLM response")
+		if o.logger != nil {
+			o.logger.Warn("Invalid JSON structure in LLM response", map[string]interface{}{
+				"operation":       "plan_parsing",
+				"json_start":      jsonStart,
+				"response_length": len(cleaned),
+			})
+		}
+		return nil, fmt.Errorf("invalid JSON structure in LLM response")
 	}
 
-	jsonStr := llmResponse[jsonStart:jsonEnd]
+	jsonStr := cleaned[jsonStart:jsonEnd]
 
+	// Step 3: Try to parse the JSON
 	var plan RoutingPlan
 	if err := json.Unmarshal([]byte(jsonStr), &plan); err != nil {
+		// Log the actual JSON that failed to parse for debugging
+		if o.logger != nil {
+			o.logger.Warn("Failed to parse plan JSON", map[string]interface{}{
+				"operation":   "plan_parsing",
+				"error":       err.Error(),
+				"json_length": len(jsonStr),
+				"json_prefix": truncateString(jsonStr, 300),
+			})
+		}
 		return nil, fmt.Errorf("failed to parse plan JSON: %w", err)
 	}
 
@@ -908,7 +1010,7 @@ func findJSONStart(s string) int {
 	return -1
 }
 
-// findJSONEnd finds the end of JSON in a string
+// findJSONEnd finds the end of JSON in a string (simple version, doesn't handle strings)
 func findJSONEnd(s string, start int) int {
 	depth := 0
 	for i := start; i < len(s); i++ {
@@ -923,6 +1025,156 @@ func findJSONEnd(s string, start int) int {
 		}
 	}
 	return -1
+}
+
+// findJSONEndStringSafe finds the end of JSON while properly handling strings.
+// This correctly skips braces that appear inside quoted strings.
+func findJSONEndStringSafe(s string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := start; i < len(s); i++ {
+		c := s[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if c == '\\' && inString {
+			escaped = true
+			continue
+		}
+
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue // Skip characters inside strings
+		}
+
+		switch c {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
+// stripMarkdownCodeBlocks removes markdown code block fences from LLM responses.
+// Handles both ```json and ``` formats.
+var markdownCodeBlockRegex = regexp.MustCompile("(?s)```(?:json)?\\s*([\\s\\S]*?)\\s*```")
+
+// markdownBoldRegex matches **bold** patterns inside JSON string values
+var markdownBoldRegex = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+
+// markdownItalicRegex matches *italic* patterns inside JSON string values
+// Uses negative lookbehind/lookahead to avoid matching ** (bold)
+var markdownItalicRegex = regexp.MustCompile(`(?:^|[^*])\*([^*]+)\*(?:[^*]|$)`)
+
+// cleanLLMResponse aggressively cleans LLM responses to extract valid JSON.
+// It handles:
+// - Markdown code blocks (```json ... ```)
+// - Bold markers inside string values (**text** → text)
+// - Italic markers inside string values (*text* → text)
+// - Intro text like "Here's the plan:"
+//
+// This is a defensive measure since LLMs (especially Gemini) often add markdown
+// formatting despite explicit instructions not to. See research:
+// - https://community.openai.com/t/how-to-prevent-gpt-from-outputting-responses-in-markdown-format/961314
+// - https://datachain.ai/blog/enforcing-json-outputs-in-commercial-llms
+func cleanLLMResponse(s string) string {
+	// Step 1: Try to extract from code blocks first (most reliable)
+	if matches := markdownCodeBlockRegex.FindStringSubmatch(s); len(matches) > 1 {
+		s = strings.TrimSpace(matches[1])
+	} else {
+		// Step 2: Find the JSON object directly by locating { and its matching }
+		// This handles cases where LLM wraps JSON in other text
+		jsonStart := strings.Index(s, "{")
+		if jsonStart == -1 {
+			return s
+		}
+
+		// Find the matching closing brace using string-safe detection
+		jsonEnd := findJSONEndStringSafe(s, jsonStart)
+		if jsonEnd == -1 {
+			return s
+		}
+
+		// Extract just the JSON portion
+		s = strings.TrimSpace(s[jsonStart:jsonEnd])
+	}
+
+	// Step 3: Strip markdown formatting from string values
+	// This handles cases where LLM puts **bold** or *italic* inside JSON strings
+	s = stripMarkdownFromJSON(s)
+
+	return s
+}
+
+// stripMarkdownFromJSON removes markdown bold/italic formatting from JSON string values.
+// Converts "**Paris**" → "Paris" and "*weather*" → "weather"
+// This is safe for JSON because:
+// - ** and * inside quoted strings are the only place markdown appears
+// - We only strip when the pattern matches complete words
+func stripMarkdownFromJSON(s string) string {
+	// Strip bold: **text** → text
+	s = markdownBoldRegex.ReplaceAllString(s, "$1")
+
+	// Strip italic: *text* → text (but not **)
+	// We need to be more careful here to avoid breaking valid content
+	// Only strip if it looks like markdown (word boundaries)
+	result := strings.Builder{}
+	result.Grow(len(s))
+
+	i := 0
+	for i < len(s) {
+		// Look for potential italic marker
+		if s[i] == '*' && i+1 < len(s) && s[i+1] != '*' {
+			// Check if this looks like italic markdown: *word*
+			// Must have matching * and contain actual content
+			endIdx := strings.Index(s[i+1:], "*")
+			if endIdx > 0 && endIdx < 100 { // Reasonable word length
+				// Check the end isn't a double asterisk
+				fullEndIdx := i + 1 + endIdx
+				if fullEndIdx+1 >= len(s) || s[fullEndIdx+1] != '*' {
+					// Check content doesn't contain special chars that would make this not markdown
+					content := s[i+1 : fullEndIdx]
+					if !strings.ContainsAny(content, "\n\t{}[]\"") && len(strings.TrimSpace(content)) > 0 {
+						// This looks like italic markdown, strip the asterisks
+						result.WriteString(content)
+						i = fullEndIdx + 1
+						continue
+					}
+				}
+			}
+		}
+		result.WriteByte(s[i])
+		i++
+	}
+
+	return result.String()
+}
+
+func stripMarkdownCodeBlocks(s string) string {
+	// Use the more comprehensive cleaning function
+	return cleanLLMResponse(s)
+}
+
+// truncateString truncates a string to maxLen characters for logging
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // generateID generates a unique ID

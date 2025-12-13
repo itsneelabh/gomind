@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // AISynthesizer uses AI to synthesize agent responses
@@ -42,15 +45,42 @@ func (s *AISynthesizer) synthesizeWithLLM(ctx context.Context, request string, r
 	// Build prompt with all agent responses
 	prompt := s.buildSynthesisPrompt(request, results)
 
+	// Telemetry: Record LLM prompt for synthesis
+	telemetry.AddSpanEvent(ctx, "llm.synthesis.request",
+		attribute.String("original_request", truncateString(request, 500)),
+		attribute.String("prompt", truncateString(prompt, 2000)),
+		attribute.Int("prompt_length", len(prompt)),
+		attribute.Int("step_count", len(results.Steps)),
+		attribute.Float64("temperature", 0.5),
+		attribute.Int("max_tokens", 1500),
+	)
+
 	// Call LLM for synthesis
+	llmStartTime := time.Now()
 	aiResponse, err := s.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
 		Temperature:  0.5, // Balanced creativity
 		MaxTokens:    1500,
 		SystemPrompt: "You are an AI that synthesizes multiple agent responses into coherent, helpful answers.",
 	})
+	llmDuration := time.Since(llmStartTime)
+
 	if err != nil {
+		telemetry.AddSpanEvent(ctx, "llm.synthesis.error",
+			attribute.String("error", err.Error()),
+			attribute.Int64("duration_ms", llmDuration.Milliseconds()),
+		)
 		return "", fmt.Errorf("synthesis failed: %w", err)
 	}
+
+	// Telemetry: Record LLM response for synthesis
+	telemetry.AddSpanEvent(ctx, "llm.synthesis.response",
+		attribute.String("response", truncateString(aiResponse.Content, 2000)),
+		attribute.Int("response_length", len(aiResponse.Content)),
+		attribute.Int("prompt_tokens", aiResponse.Usage.PromptTokens),
+		attribute.Int("completion_tokens", aiResponse.Usage.CompletionTokens),
+		attribute.Int("total_tokens", aiResponse.Usage.TotalTokens),
+		attribute.Int64("duration_ms", llmDuration.Milliseconds()),
+	)
 
 	return aiResponse.Content, nil
 }

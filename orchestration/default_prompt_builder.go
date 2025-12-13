@@ -25,13 +25,26 @@ SYNTAX RULES:
 | Braces          | DOUBLE curly braces {{ }}           |
 
 RESOLUTION EXAMPLES:
-If step-1 returns: {"status": "ok", "data": {"id": 123, "items": ["a", "b"]}}
+If step-1 returns: {"status": "ok", "data": {"id": 123, "items": ["a", "b"], "currency": {"code": "EUR", "name": "Euro"}}}
 
-| Template Reference               | Resolves To    |
-|----------------------------------|----------------|
-| {{step-1.response.status}}       | "ok"           |
-| {{step-1.response.data.id}}      | 123            |
-| {{step-1.response.data.items}}   | ["a", "b"]     |
+| Template Reference                        | Resolves To    |
+|-------------------------------------------|----------------|
+| {{step-1.response.status}}                | "ok"           |
+| {{step-1.response.data.id}}               | 123            |
+| {{step-1.response.data.items}}            | ["a", "b"]     |
+| {{step-1.response.data.currency.code}}    | "EUR"          |
+| {{step-1.response.data.currency.name}}    | "Euro"         |
+
+NESTED OBJECT ACCESS (IMPORTANT):
+When referencing data from steps that return complex objects, always access the SPECIFIC FIELD you need:
+
+| If step returns an object like              | Use this template                          | NOT this                          |
+|---------------------------------------------|--------------------------------------------|-----------------------------------|
+| {"currency": {"code": "EUR", "name": "Euro"}} | {{step.response.data.currency.code}}     | {{step.response.data.currency}}   |
+| {"location": {"lat": 35.6, "lon": 139.7}}   | {{step.response.data.location.lat}}       | {{step.response.data.location}}   |
+| {"country": {"name": "France", "code": "FR"}} | {{step.response.data.country.code}}     | {{step.response.data.country}}    |
+
+WHY: Downstream tools expect primitive values (strings, numbers), not JSON objects.
 
 CORRECT USAGE:
 {
@@ -139,9 +152,19 @@ func NewDefaultPromptBuilder(config *PromptConfig) (*DefaultPromptBuilder, error
 	}, nil
 }
 
-// SetLogger sets the logger for debug output
+// SetLogger sets the logger for debug output (follows framework design principles)
+// The component is always set to "framework/orchestration" to ensure proper log attribution
+// regardless of which agent or tool is using the orchestration module.
 func (d *DefaultPromptBuilder) SetLogger(logger core.Logger) {
-	d.logger = logger
+	if logger == nil {
+		d.logger = nil
+	} else {
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			d.logger = cal.WithComponent("framework/orchestration")
+		} else {
+			d.logger = logger
+		}
+	}
 }
 
 // SetTelemetry allows dependency injection of telemetry
@@ -240,7 +263,16 @@ Important:
 7. Be specific in instructions - what should each step accomplish?
 8. For coordinates (lat/lon), use numeric values like 35.6897 not "35.6897"
 
-Response (JSON only, no explanation):`,
+CRITICAL FORMAT RULES (applies to all LLM providers):
+- You are a JSON API. Your ONLY output is a raw JSON object.
+- Output ONLY valid JSON - no markdown, no code blocks, no backticks
+- Do NOT use any text formatting: no ** (bold), no * (italic), no __ (underline)
+- Do NOT wrap JSON in code fences (no triple backticks)
+- Do NOT include any explanatory text before or after the JSON
+- String values must be plain text without any markdown formatting
+- Start your response with { and end with } - nothing else
+
+Response (raw JSON only, no formatting):`,
 		input.CapabilityInfo,
 		input.Request,
 		stepReferenceInstructions,

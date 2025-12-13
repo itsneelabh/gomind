@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -62,6 +63,16 @@ type SmartExecutor struct {
 	correctionCallback        CorrectionCallback // Callback to request LLM parameter correction
 	validationFeedbackEnabled bool               // Enable/disable validation feedback (default: true)
 	maxValidationRetries      int                // Maximum validation correction attempts (default: 2)
+
+	// Hybrid Parameter Resolution (Phase 4: Auto-wiring + Micro-resolution)
+	// When enabled, uses intelligent parameter binding instead of brittle template substitution
+	hybridResolver       *HybridResolver // Hybrid resolver for parameter binding
+	useHybridResolution  bool            // Enable hybrid resolution (default: true when resolver is set)
+
+	// Layer 3: LLM-based Error Analysis
+	// When enabled, uses LLM to analyze errors and determine if they can be fixed
+	// with different parameters (replaces the need for tools to set Retryable flags)
+	errorAnalyzer *ErrorAnalyzer // LLM-based error analyzer
 }
 
 // NewSmartExecutor creates a new smart executor
@@ -112,12 +123,59 @@ func (e *SmartExecutor) SetValidationFeedback(enabled bool, maxRetries int) {
 	}
 }
 
+// SetHybridResolver configures the hybrid parameter resolver.
+// When set, the executor uses intelligent auto-wiring and optional LLM micro-resolution
+// instead of brittle template substitution for parameter binding between steps.
+// This significantly improves reliability of multi-step workflows.
+func (e *SmartExecutor) SetHybridResolver(resolver *HybridResolver) {
+	e.hybridResolver = resolver
+	e.useHybridResolution = resolver != nil
+	if e.logger != nil && resolver != nil {
+		e.logger.Info("Hybrid parameter resolution enabled", map[string]interface{}{
+			"operation": "hybrid_resolver_configured",
+		})
+	}
+}
+
+// EnableHybridResolution enables or disables hybrid parameter resolution.
+// Use this to temporarily disable hybrid resolution without removing the resolver.
+func (e *SmartExecutor) EnableHybridResolution(enabled bool) {
+	e.useHybridResolution = enabled && e.hybridResolver != nil
+}
+
+// SetErrorAnalyzer configures the LLM-based error analyzer.
+// When set, the executor uses LLM to analyze errors and determine if they can be
+// fixed with different parameters. This replaces the need for tools to set Retryable flags.
+// See PARAMETER_BINDING_FIX.md for the complete design rationale.
+func (e *SmartExecutor) SetErrorAnalyzer(analyzer *ErrorAnalyzer) {
+	e.errorAnalyzer = analyzer
+	if e.logger != nil && analyzer != nil {
+		e.logger.Info("LLM error analyzer enabled", map[string]interface{}{
+			"operation": "error_analyzer_configured",
+		})
+	}
+}
+
 // SetLogger sets the logger provider (follows framework design principles)
+// The component is always set to "framework/orchestration" to ensure proper log attribution
+// regardless of which agent or tool is using the orchestration module.
 func (e *SmartExecutor) SetLogger(logger core.Logger) {
 	if logger == nil {
 		e.logger = &core.NoOpLogger{}
 	} else {
-		e.logger = logger
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			e.logger = cal.WithComponent("framework/orchestration")
+		} else {
+			e.logger = logger
+		}
+	}
+	// Propagate logger to hybrid resolver if configured (it will apply its own WithComponent)
+	if e.hybridResolver != nil {
+		e.hybridResolver.SetLogger(logger)
+	}
+	// Propagate logger to error analyzer if configured
+	if e.errorAnalyzer != nil {
+		e.errorAnalyzer.SetLogger(logger)
 	}
 }
 
@@ -451,6 +509,46 @@ func (e *SmartExecutor) buildStepContext(ctx context.Context, step RoutingStep, 
 	return context.WithValue(ctx, dependencyResultsKey, deps)
 }
 
+// collectDependencyResults extracts step results from context for the specified dependency IDs.
+// This is used by hybrid parameter resolution to get the actual responses from dependent steps.
+func (e *SmartExecutor) collectDependencyResults(ctx context.Context, dependsOn []string) map[string]*StepResult {
+	results := make(map[string]*StepResult)
+
+	// Get the raw dependency results from context (stored by buildStepContext)
+	depData, ok := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{})
+	if !ok || depData == nil {
+		return results
+	}
+
+	// Convert the wrapped response format back to StepResult format
+	// buildStepContext stores: deps[stepID] = {"response": parsedJSON}
+	// We need to convert this back for the hybrid resolver
+	for _, depID := range dependsOn {
+		if stepData, exists := depData[depID]; exists {
+			if responseData, hasResponse := stepData["response"].(map[string]interface{}); hasResponse {
+				// Marshal the response back to JSON for the StepResult
+				responseJSON, err := json.Marshal(responseData)
+				if err != nil {
+					if e.logger != nil {
+						e.logger.Warn("Failed to marshal dependency response", map[string]interface{}{
+							"dependency": depID,
+							"error":      err.Error(),
+						})
+					}
+					continue
+				}
+				results[depID] = &StepResult{
+					StepID:   depID,
+					Success:  true,
+					Response: string(responseJSON),
+				}
+			}
+		}
+	}
+
+	return results
+}
+
 // interpolateParameters substitutes template placeholders in parameters with values from dependency results.
 // Templates use the format {{stepId.fieldPath}} where:
 //   - stepId: The ID of a dependent step whose result should be used
@@ -465,16 +563,63 @@ func (e *SmartExecutor) interpolateParameters(
 		return nil
 	}
 
-	interpolated := make(map[string]interface{})
-	for key, value := range params {
-		if strVal, ok := value.(string); ok {
-			interpolated[key] = e.substituteTemplates(strVal, depResults)
-		} else {
-			interpolated[key] = value
+	// INFO: Log the start of template interpolation with available context
+	if e.logger != nil {
+		availableSteps := getDepResultKeys(depResults)
+		templateParams := make([]string, 0)
+		for key, value := range params {
+			if strVal, ok := value.(string); ok && stepOutputTemplatePattern.MatchString(strVal) {
+				templateParams = append(templateParams, key)
+			}
+		}
+		if len(templateParams) > 0 {
+			e.logger.Info("Template interpolation starting", map[string]interface{}{
+				"operation":            "template_interpolation_start",
+				"param_count":          len(params),
+				"template_params":      templateParams,
+				"available_dep_steps":  availableSteps,
+				"available_step_count": len(availableSteps),
+			})
 		}
 	}
 
+	interpolated := make(map[string]interface{})
+	for key, value := range params {
+		interpolated[key] = e.interpolateValue(value, depResults)
+	}
+
 	return interpolated
+}
+
+// interpolateValue recursively interpolates templates in values.
+// Handles strings, arrays, and nested maps to ensure templates are resolved
+// at all levels of the parameter structure.
+func (e *SmartExecutor) interpolateValue(value interface{}, depResults map[string]map[string]interface{}) interface{} {
+	switch v := value.(type) {
+	case string:
+		// Direct string - substitute templates
+		return e.substituteTemplates(v, depResults)
+
+	case []interface{}:
+		// Array - recursively interpolate each element
+		result := make([]interface{}, len(v))
+		for i, elem := range v {
+			result[i] = e.interpolateValue(elem, depResults)
+		}
+		return result
+
+	case map[string]interface{}:
+		// Nested map - recursively interpolate each value
+		result := make(map[string]interface{})
+		for k, val := range v {
+			result[k] = e.interpolateValue(val, depResults)
+		}
+		return result
+
+	default:
+		// Other types (numbers, bools, nil) - return as-is
+		return value
+	}
 }
 
 // substituteTemplates replaces template placeholders with actual values from step results.
@@ -497,6 +642,21 @@ func (e *SmartExecutor) substituteTemplates(
 		return template // No templates found, return as-is
 	}
 
+	// INFO: Log template detection with original template and available dependencies
+	if e.logger != nil {
+		templateRefs := make([]string, len(matches))
+		for i, m := range matches {
+			templateRefs[i] = m[0]
+		}
+		e.logger.Info("Template substitution starting", map[string]interface{}{
+			"operation":       "template_substitution_start",
+			"original_value":  template,
+			"templates_found": templateRefs,
+			"template_count":  len(matches),
+			"available_steps": getDepResultKeys(depResults),
+		})
+	}
+
 	// Special case: if the entire string is a single template, preserve the value's type
 	// This allows numeric values to remain as numbers instead of being converted to strings
 	// Critical for parameters like latitude/longitude that must be numbers, not strings
@@ -504,31 +664,77 @@ func (e *SmartExecutor) substituteTemplates(
 		stepID := matches[0][1]
 		fieldPath := matches[0][2]
 
-		stepData, stepExists := depResults[stepID]
+		// Use case-insensitive lookup for step ID (LLMs sometimes use uppercase)
+		stepData, actualStepID, stepExists := findStepDataCaseInsensitive(depResults, stepID)
 		if !stepExists {
 			// Step not found in dependencies - this is likely a configuration error
 			if e.logger != nil {
-				e.logger.Warn("Template references non-existent step dependency", map[string]interface{}{
-					"template":        template,
-					"referenced_step": stepID,
-					"available_deps":  getDepResultKeys(depResults),
+				e.logger.Warn("TEMPLATE RESOLUTION FAILED: Step not found", map[string]interface{}{
+					"operation":             "template_step_not_found",
+					"template":              template,
+					"requested_step_id":     stepID,
+					"available_steps":       getDepResultKeys(depResults),
+					"resolution_status":     "failed",
+					"failure_reason":        "step_not_in_dependencies",
+					"hint":                  "Check if the step is in depends_on array and has completed successfully",
 				})
 			}
 			return template
 		}
 
-		value := extractFieldValue(stepData, fieldPath)
+		// INFO: Log if case normalization was applied
+		if actualStepID != stepID && e.logger != nil {
+			e.logger.Info("Template step ID normalized (case-insensitive)", map[string]interface{}{
+				"operation":          "case_normalization_applied",
+				"original_step_id":   stepID,
+				"normalized_step_id": actualStepID,
+				"template":           template,
+			})
+		}
+
+		// Normalize field path - add "response." prefix if missing (LLMs sometimes omit it)
+		normalizedPath, pathNormalized := normalizeFieldPath(fieldPath)
+		if pathNormalized && e.logger != nil {
+			e.logger.Info("Template field path normalized (added response prefix)", map[string]interface{}{
+				"operation":       "path_normalization_applied",
+				"original_path":   fieldPath,
+				"normalized_path": normalizedPath,
+				"template":        template,
+			})
+		}
+
+		value := extractFieldValue(stepData, normalizedPath)
 		if value == nil {
-			// Field not found in step response
+			// Field not found in step response - provide detailed debugging info
 			if e.logger != nil {
-				e.logger.Warn("Template references non-existent field in step response", map[string]interface{}{
-					"template":         template,
-					"step_id":          stepID,
-					"field_path":       fieldPath,
-					"available_fields": getFieldKeys(stepData),
+				// Get a sample of the step data structure for debugging
+				stepDataSample := describeStepDataStructure(stepData)
+				e.logger.Warn("TEMPLATE RESOLUTION FAILED: Field not found", map[string]interface{}{
+					"operation":          "template_field_not_found",
+					"template":           template,
+					"step_id":            actualStepID,
+					"requested_path":     normalizedPath,
+					"available_fields":   getFieldKeys(stepData),
+					"step_data_structure": stepDataSample,
+					"resolution_status":  "failed",
+					"failure_reason":     "field_path_not_found",
+					"hint":               "Check if the field path matches the actual response structure",
 				})
 			}
 			return template
+		}
+
+		// INFO: Log successful resolution
+		if e.logger != nil {
+			e.logger.Info("TEMPLATE RESOLVED SUCCESSFULLY", map[string]interface{}{
+				"operation":         "template_resolution_success",
+				"template":          template,
+				"step_id":           actualStepID,
+				"field_path":        normalizedPath,
+				"resolved_value":    value,
+				"resolved_type":     fmt.Sprintf("%T", value),
+				"resolution_status": "success",
+			})
 		}
 
 		// Validate that the resolved value is a primitive type suitable for HTTP parameters
@@ -538,7 +744,8 @@ func (e *SmartExecutor) substituteTemplates(
 		case map[string]interface{}, []interface{}:
 			// Complex types - convert to JSON string for safety
 			if e.logger != nil {
-				e.logger.Debug("Template resolved to complex type, converting to JSON", map[string]interface{}{
+				e.logger.Info("Template resolved to complex type, converting to JSON", map[string]interface{}{
+					"operation":  "complex_type_conversion",
 					"template":   template,
 					"value_type": fmt.Sprintf("%T", v),
 				})
@@ -555,35 +762,188 @@ func (e *SmartExecutor) substituteTemplates(
 
 	// Multiple templates or template is part of a larger string - substitute as strings
 	result := template
+	resolvedCount := 0
+	failedCount := 0
+
 	for _, match := range matches {
 		fullMatch := match[0]
 		stepID := match[1]
 		fieldPath := match[2]
 
-		stepData, stepExists := depResults[stepID]
+		// Use case-insensitive lookup for step ID (LLMs sometimes use uppercase)
+		stepData, actualStepID, stepExists := findStepDataCaseInsensitive(depResults, stepID)
 		if !stepExists {
+			failedCount++
 			if e.logger != nil {
-				e.logger.Warn("Template references non-existent step dependency", map[string]interface{}{
-					"template":        fullMatch,
-					"referenced_step": stepID,
+				e.logger.Warn("TEMPLATE RESOLUTION FAILED: Step not found (multi-template)", map[string]interface{}{
+					"operation":         "template_step_not_found",
+					"template":          fullMatch,
+					"requested_step_id": stepID,
+					"available_steps":   getDepResultKeys(depResults),
+					"resolution_status": "failed",
 				})
 			}
 			continue // Leave template unresolved
 		}
 
-		value := extractFieldValue(stepData, fieldPath)
-		if value != nil {
-			result = strings.Replace(result, fullMatch, fmt.Sprintf("%v", value), 1)
-		} else if e.logger != nil {
-			e.logger.Warn("Template references non-existent field", map[string]interface{}{
-				"template":   fullMatch,
-				"step_id":    stepID,
-				"field_path": fieldPath,
+		// Log if case normalization was applied
+		if actualStepID != stepID && e.logger != nil {
+			e.logger.Info("Template step ID normalized (case-insensitive)", map[string]interface{}{
+				"operation":          "case_normalization_applied",
+				"original_step_id":   stepID,
+				"normalized_step_id": actualStepID,
+				"template":           fullMatch,
 			})
+		}
+
+		// Normalize field path - add "response." prefix if missing
+		normalizedPath, pathNormalized := normalizeFieldPath(fieldPath)
+		if pathNormalized && e.logger != nil {
+			e.logger.Info("Template field path normalized (added response prefix)", map[string]interface{}{
+				"operation":       "path_normalization_applied",
+				"original_path":   fieldPath,
+				"normalized_path": normalizedPath,
+				"template":        fullMatch,
+			})
+		}
+
+		value := extractFieldValue(stepData, normalizedPath)
+		if value != nil {
+			resolvedCount++
+			resolvedStr := fmt.Sprintf("%v", value)
+			result = strings.Replace(result, fullMatch, resolvedStr, 1)
+
+			if e.logger != nil {
+				e.logger.Info("TEMPLATE RESOLVED SUCCESSFULLY (multi-template)", map[string]interface{}{
+					"operation":         "template_resolution_success",
+					"template":          fullMatch,
+					"step_id":           actualStepID,
+					"field_path":        normalizedPath,
+					"resolved_value":    resolvedStr,
+					"resolution_status": "success",
+				})
+			}
+		} else {
+			failedCount++
+			if e.logger != nil {
+				e.logger.Warn("TEMPLATE RESOLUTION FAILED: Field not found (multi-template)", map[string]interface{}{
+					"operation":         "template_field_not_found",
+					"template":          fullMatch,
+					"step_id":           actualStepID,
+					"field_path":        normalizedPath,
+					"available_fields":  getFieldKeys(stepData),
+					"resolution_status": "failed",
+				})
+			}
 		}
 	}
 
+	// INFO: Log final substitution summary
+	if e.logger != nil {
+		e.logger.Info("Template substitution completed", map[string]interface{}{
+			"operation":      "template_substitution_complete",
+			"original_value": template,
+			"final_value":    result,
+			"total_templates": len(matches),
+			"resolved_count": resolvedCount,
+			"failed_count":   failedCount,
+			"all_resolved":   failedCount == 0,
+		})
+	}
+
 	return result
+}
+
+// resolveUnresolvedTemplatesWithLLM resolves parameters that still contain unresolved {{...}} templates
+// using LLM semantic inference. This handles cases where template path doesn't exist in source data.
+// Example: {{step-2.response.data.country.currency}} fails when geocoding returns country:"France"
+// (a string) instead of country:{currency:"EUR"}. The LLM can infer "EUR" from "France".
+func (e *SmartExecutor) resolveUnresolvedTemplatesWithLLM(
+	ctx context.Context,
+	params map[string]interface{},
+	depResults map[string]map[string]interface{},
+	stepID string,
+) map[string]interface{} {
+	if params == nil || e.hybridResolver == nil {
+		return params
+	}
+
+	// Collect all source data from dependencies
+	sourceData := make(map[string]interface{})
+	for _, result := range depResults {
+		for k, v := range result {
+			sourceData[k] = v
+		}
+	}
+
+	// Scan for unresolved templates
+	for paramName, paramValue := range params {
+		strVal, ok := paramValue.(string)
+		if !ok {
+			continue
+		}
+
+		// Check if value still contains unresolved template pattern
+		if !strings.Contains(strVal, "{{") || !strings.Contains(strVal, "}}") {
+			continue
+		}
+
+		// Found unresolved template - try to resolve semantically
+		if e.logger != nil {
+			e.logger.Info("SEMANTIC FALLBACK: Attempting LLM resolution for unresolved template", map[string]interface{}{
+				"step_id":        stepID,
+				"param_name":     paramName,
+				"template_value": strVal,
+				"source_keys":    getMapKeys(sourceData),
+			})
+		}
+
+		// Build a semantic hint based on the template pattern
+		// Extract what the template was trying to get (e.g., "currency" from "{{step-2.response.data.country.currency}}")
+		hint := fmt.Sprintf(
+			"The template '%s' tried to extract a value but the path doesn't exist. "+
+				"Based on the available data, infer what value was intended for parameter '%s'. "+
+				"Look for related information that can be used to determine the correct value.",
+			strVal, paramName)
+
+		// Use hybrid resolver's semantic value resolution
+		resolved, err := e.hybridResolver.ResolveSemanticValue(ctx, sourceData, paramName, hint, "string")
+		if err != nil {
+			if e.logger != nil {
+				e.logger.Warn("SEMANTIC FALLBACK FAILED: Could not resolve template", map[string]interface{}{
+					"step_id":        stepID,
+					"param_name":     paramName,
+					"template_value": strVal,
+					"error":          err.Error(),
+				})
+			}
+			continue
+		}
+
+		// Successfully resolved - update parameter
+		params[paramName] = resolved
+		if e.logger != nil {
+			e.logger.Info("SEMANTIC FALLBACK SUCCESS: Template resolved via LLM", map[string]interface{}{
+				"step_id":        stepID,
+				"param_name":     paramName,
+				"template_value": strVal,
+				"resolved_value": resolved,
+			})
+		}
+
+		// Telemetry for semantic resolution
+		telemetry.AddSpanEvent(ctx, "semantic_template_resolution",
+			attribute.String("step_id", stepID),
+			attribute.String("param_name", paramName),
+			attribute.String("original_template", strVal),
+		)
+		telemetry.Counter("orchestration.semantic_resolution.success",
+			"param_name", paramName,
+			"module", telemetry.ModuleOrchestration,
+		)
+	}
+
+	return params
 }
 
 // getDepResultKeys returns the step IDs available in dependency results (for logging)
@@ -604,6 +964,33 @@ func getFieldKeys(m map[string]interface{}) []string {
 	return keys
 }
 
+// describeStepDataStructure returns a string description of the step data structure for debugging.
+// This helps developers understand what fields are actually available when template resolution fails.
+// Example output: "response{data{lat,lon,location}}"
+func describeStepDataStructure(data map[string]interface{}) string {
+	if data == nil {
+		return "nil"
+	}
+	return describeMapStructure(data, 0)
+}
+
+// describeMapStructure recursively describes a map structure up to 3 levels deep
+func describeMapStructure(m map[string]interface{}, depth int) string {
+	if depth > 3 {
+		return "..."
+	}
+
+	keys := make([]string, 0, len(m))
+	for k, v := range m {
+		if nested, ok := v.(map[string]interface{}); ok {
+			keys = append(keys, k+"{"+describeMapStructure(nested, depth+1)+"}")
+		} else {
+			keys = append(keys, k)
+		}
+	}
+	return strings.Join(keys, ",")
+}
+
 // extractFieldValue extracts a value from a nested map using a dot-separated path.
 // For example, extractFieldValue(data, "location.lat") returns data["location"]["lat"]
 func extractFieldValue(data map[string]interface{}, fieldPath string) interface{} {
@@ -619,6 +1006,41 @@ func extractFieldValue(data map[string]interface{}, fieldPath string) interface{
 	}
 
 	return current
+}
+
+// findStepDataCaseInsensitive finds step data using case-insensitive lookup.
+// LLMs sometimes generate uppercase step IDs (e.g., "COUNTRY-INFO" instead of "country-info").
+// This function tries exact match first, then falls back to case-insensitive match.
+// Returns the step data and the actual key that matched (for logging).
+func findStepDataCaseInsensitive(depResults map[string]map[string]interface{}, stepID string) (map[string]interface{}, string, bool) {
+	// Try exact match first
+	if data, exists := depResults[stepID]; exists {
+		return data, stepID, true
+	}
+
+	// Try case-insensitive match
+	lowerStepID := strings.ToLower(stepID)
+	for key, data := range depResults {
+		if strings.ToLower(key) == lowerStepID {
+			return data, key, true
+		}
+	}
+
+	return nil, "", false
+}
+
+// normalizeFieldPath ensures the field path starts with "response." if it doesn't already.
+// LLMs sometimes omit the "response" prefix (e.g., "data.currency" instead of "response.data.currency").
+// The executor wraps step results in {"response": ...}, so we need to add the prefix.
+// Returns the normalized path and whether normalization was applied.
+func normalizeFieldPath(fieldPath string) (string, bool) {
+	// If path already starts with "response.", no change needed
+	if strings.HasPrefix(strings.ToLower(fieldPath), "response.") {
+		return fieldPath, false
+	}
+
+	// Add "response." prefix
+	return "response." + fieldPath, true
 }
 
 // executeStep executes a single routing step
@@ -695,7 +1117,96 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		parameters = params
 	}
 
-	// Interpolate template parameters with dependency results
+	// Parameter Resolution: Hybrid auto-wiring OR legacy template interpolation
+	// When hybrid resolution is enabled, it uses intelligent name-matching and optional LLM
+	// micro-resolution instead of brittle template substitution.
+
+	// Direct stderr logging for guaranteed visibility (bypasses logger filtering)
+	log.Printf("[GOMIND-EXEC-V2] Step %s: depends=%d, useHybrid=%v, resolverSet=%v",
+		step.StepID, len(step.DependsOn), e.useHybridResolution, e.hybridResolver != nil)
+
+	// Also log via framework logger for structured output
+	if e.logger != nil {
+		e.logger.Info("Hybrid resolution check", map[string]interface{}{
+			"step_id":               step.StepID,
+			"depends_on_count":      len(step.DependsOn),
+			"use_hybrid_resolution": e.useHybridResolution,
+			"hybrid_resolver_set":   e.hybridResolver != nil,
+			"will_use_hybrid":       len(step.DependsOn) > 0 && e.useHybridResolution && e.hybridResolver != nil,
+		})
+	}
+	if len(step.DependsOn) > 0 && e.useHybridResolution && e.hybridResolver != nil {
+		// Phase 4: Hybrid Parameter Resolution (preferred)
+		// Get the capability schema for target parameter types
+		capabilityForResolution := e.findCapabilitySchema(agentInfo, capability)
+		if e.logger != nil {
+			e.logger.Info("findCapabilitySchema result", map[string]interface{}{
+				"step_id":         step.StepID,
+				"capability":      capability,
+				"schema_found":    capabilityForResolution != nil,
+				"agent_name":      step.AgentName,
+				"agent_info_nil":  agentInfo == nil,
+				"agent_cap_count": func() int { if agentInfo != nil { return len(agentInfo.Capabilities) }; return 0 }(),
+			})
+		}
+		if capabilityForResolution != nil {
+			// Collect step results from dependencies
+			stepResultsMap := e.collectDependencyResults(ctx, step.DependsOn)
+
+			resolved, err := e.hybridResolver.ResolveParameters(ctx, stepResultsMap, capabilityForResolution)
+			if err != nil {
+				if e.logger != nil {
+					e.logger.Warn("Hybrid resolution failed, falling back to template interpolation", map[string]interface{}{
+						"operation": "hybrid_resolution_fallback",
+						"step_id":   step.StepID,
+						"error":     err.Error(),
+					})
+				}
+				// Fall through to template interpolation below
+			} else if resolved != nil && len(resolved) > 0 {
+				// Merge resolved parameters with original parameters
+				// Replace template strings with resolved values, preserve hardcoded values
+				if parameters == nil {
+					parameters = make(map[string]interface{})
+				}
+				for key, val := range resolved {
+					existing, exists := parameters[key]
+					if !exists {
+						// Key doesn't exist, add resolved value
+						parameters[key] = val
+					} else if strVal, ok := existing.(string); ok && strings.Contains(strVal, "{{") {
+						// Existing value is a template string - replace with resolved value
+						parameters[key] = val
+					}
+					// Otherwise, preserve the existing hardcoded value
+				}
+
+				if e.logger != nil {
+					e.logger.Info("HYBRID RESOLUTION APPLIED", map[string]interface{}{
+						"operation":         "hybrid_parameter_resolution",
+						"step_id":           step.StepID,
+						"capability":        capability,
+						"resolved_params":   resolved,
+						"final_params":      parameters,
+						"trace_id":          tc.TraceID,
+					})
+				}
+
+				// Add telemetry for hybrid resolution success
+				telemetry.AddSpanEvent(ctx, "hybrid_resolution_applied",
+					attribute.String("step_id", step.StepID),
+					attribute.String("capability", capability),
+					attribute.Int("resolved_count", len(resolved)),
+				)
+				telemetry.Counter("orchestration.hybrid_resolution.success",
+					"capability", capability,
+					"module", telemetry.ModuleOrchestration,
+				)
+			}
+		}
+	}
+
+	// Legacy: Template interpolation (fallback when hybrid resolution is disabled or unavailable)
 	// This enables templates like {{geocode.latitude}} to be replaced with actual values
 	if depResults, ok := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{}); ok && len(depResults) > 0 {
 		interpolated := e.interpolateParameters(parameters, depResults)
@@ -710,6 +1221,13 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			}
 			parameters = interpolated
 		}
+
+		// Semantic Fallback: Resolve any remaining unresolved templates using LLM inference
+		// This handles cases where the template path doesn't exist (e.g., {{step-2.response.data.country.currency}}
+		// when geocoding returns country:"France" as a string, not an object with currency field)
+		if e.hybridResolver != nil && e.useHybridResolution {
+			parameters = e.resolveUnresolvedTemplatesWithLLM(ctx, parameters, depResults, step.StepID)
+		}
 	}
 
 	// Layer 2: Schema-Based Type Coercion
@@ -717,6 +1235,24 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	// This fixes LLM-generated parameters that have incorrect types (e.g., "35.6" instead of 35.6).
 	// The schema is obtained from the tool's InputSummary via the catalog.
 	capabilitySchema := e.findCapabilitySchema(agentInfo, capability)
+
+	// INFO: Diagnostic log to understand coercion entry point
+	if e.logger != nil {
+		schemaParams := 0
+		if capabilitySchema != nil {
+			schemaParams = len(capabilitySchema.Parameters)
+		}
+		e.logger.Info("TYPE COERCION CHECK", map[string]interface{}{
+			"operation":              "type_coercion_entry",
+			"step_id":                step.StepID,
+			"capability":             capability,
+			"parameters":             parameters,
+			"schema_found":           capabilitySchema != nil,
+			"schema_param_count":     schemaParams,
+			"will_attempt_coercion":  capabilitySchema != nil && schemaParams > 0,
+		})
+	}
+
 	if capabilitySchema != nil && len(capabilitySchema.Parameters) > 0 {
 		coerced, coercionLog := coerceParameterTypes(parameters, capabilitySchema.Parameters)
 		if len(coercionLog) > 0 {
@@ -735,15 +1271,17 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				"module", telemetry.ModuleOrchestration,
 			)
 
-			// Structured logging for debugging
+			// Structured logging - INFO level for visibility
+			// This includes both type coercions (string->number) and object field extractions (map->string)
 			if e.logger != nil {
-				e.logger.Debug("Parameter types coerced to match schema", map[string]interface{}{
-					"operation":  "type_coercion",
-					"step_id":    step.StepID,
-					"capability": capability,
-					"coercions":  coercionLog,
-					"trace_id":   tc.TraceID,
-					"span_id":    tc.SpanID,
+				e.logger.Info("TYPE COERCION APPLIED", map[string]interface{}{
+					"operation":        "type_coercion",
+					"step_id":          step.StepID,
+					"capability":       capability,
+					"coercions":        coercionLog,
+					"coercion_count":   len(coercionLog),
+					"trace_id":         tc.TraceID,
+					"span_id":          tc.SpanID,
 				})
 			}
 		}
@@ -834,18 +1372,141 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			break
 		}
 
-		// Layer 3: Check if this is a type-related error that could be fixed by LLM
-		if e.validationFeedbackEnabled && e.correctionCallback != nil &&
-			validationRetries < e.maxValidationRetries && isTypeRelatedError(err, responseBody) {
+		// Layer 3: LLM-based Error Analysis (Phase 4 Enhancement)
+		// When ErrorAnalyzer is configured, use LLM to determine if error can be fixed
+		// with different parameters. This replaces the need for tools to set Retryable flags.
+		// HTTP Status Routing:
+		//   - 400, 404, 409, 422 → LLM Error Analyzer (might be fixable with different input)
+		//   - 408, 429, 5xx      → Resilience module (same payload + exponential backoff)
+		//   - 401, 403, 405      → Fail immediately (auth/permission issues)
+		if e.errorAnalyzer != nil && e.errorAnalyzer.IsEnabled() && validationRetries < e.maxValidationRetries {
+			httpStatus := extractHTTPStatusFromError(err)
+
+			// Build error analysis context
+			errCtx := &ErrorAnalysisContext{
+				HTTPStatus:            httpStatus,
+				ErrorResponse:         responseBody,
+				OriginalRequest:       parameters,
+				UserQuery:             step.Instruction,
+				CapabilityName:        capability,
+				CapabilityDescription: "",
+			}
+			if capabilitySchema != nil {
+				errCtx.CapabilityDescription = capabilitySchema.Description
+			}
+
+			// Analyze error with LLM
+			analysisResult, analysisErr := e.errorAnalyzer.AnalyzeError(ctx, errCtx)
+
+			if analysisErr != nil {
+				if e.logger != nil {
+					e.logger.Warn("LLM error analysis failed", map[string]interface{}{
+						"operation":   "error_analysis_failed",
+						"step_id":     step.StepID,
+						"capability":  capability,
+						"http_status": httpStatus,
+						"error":       analysisErr.Error(),
+					})
+				}
+				// Fall through to legacy error handling
+			} else if analysisResult == nil {
+				// nil result means delegate to resilience module (transient error)
+				if e.logger != nil {
+					e.logger.Debug("Error delegated to resilience module", map[string]interface{}{
+						"operation":   "resilience_delegation",
+						"step_id":     step.StepID,
+						"capability":  capability,
+						"http_status": httpStatus,
+					})
+				}
+				// Continue with normal retry logic (same payload)
+			} else if analysisResult.ShouldRetry && len(analysisResult.SuggestedChanges) > 0 {
+				validationRetries++
+
+				// Telemetry: Add span event for LLM error analysis
+				// Include error details and suggested changes for complete visibility in Jaeger
+				suggestedChangesJSON, _ := json.Marshal(analysisResult.SuggestedChanges)
+				telemetry.AddSpanEvent(ctx, "llm_error_analysis_retry",
+					attribute.String("step_id", step.StepID),
+					attribute.String("capability", capability),
+					attribute.Int("http_status", httpStatus),
+					attribute.String("reason", analysisResult.Reason),
+					attribute.String("error_message", err.Error()),
+					attribute.String("error_response", truncateString(responseBody, 500)),
+					attribute.String("suggested_changes", string(suggestedChangesJSON)),
+				)
+				telemetry.Counter("orchestration.error_analysis.retry",
+					"capability", capability,
+					"http_status", fmt.Sprintf("%d", httpStatus),
+					"module", telemetry.ModuleOrchestration,
+				)
+
+				if e.logger != nil {
+					e.logger.Info("LLM error analysis suggests retry with changes", map[string]interface{}{
+						"operation":         "error_analysis_retry",
+						"step_id":           step.StepID,
+						"capability":        capability,
+						"http_status":       httpStatus,
+						"reason":            analysisResult.Reason,
+						"suggested_changes": analysisResult.SuggestedChanges,
+						"validation_retry":  validationRetries,
+					})
+				}
+
+				// Merge suggested changes into parameters
+				for key, val := range analysisResult.SuggestedChanges {
+					parameters[key] = val
+				}
+
+				attempt-- // Retry with corrected parameters (don't count as regular retry)
+				continue
+			} else if !analysisResult.ShouldRetry {
+				// LLM determined this error is not fixable
+				if e.logger != nil {
+					e.logger.Info("LLM error analysis: not retryable", map[string]interface{}{
+						"operation":   "error_analysis_no_retry",
+						"step_id":     step.StepID,
+						"capability":  capability,
+						"http_status": httpStatus,
+						"reason":      analysisResult.Reason,
+					})
+				}
+
+				telemetry.AddSpanEvent(ctx, "llm_error_analysis_no_retry",
+					attribute.String("step_id", step.StepID),
+					attribute.String("reason", analysisResult.Reason),
+				)
+				telemetry.Counter("orchestration.error_analysis.no_retry",
+					"capability", capability,
+					"http_status", fmt.Sprintf("%d", httpStatus),
+					"module", telemetry.ModuleOrchestration,
+				)
+
+				// Break out of retry loop - LLM says don't retry
+				break
+			}
+		}
+
+		// Legacy Layer 3: Check if this is an error that could be fixed by LLM
+		// (fallback when ErrorAnalyzer is not configured)
+		// Triggers on:
+		// 1. Type-related errors (string patterns like "cannot unmarshal", "type mismatch")
+		// 2. Tool errors with Retryable: true (structured ToolResponse.Error.Retryable)
+		// This ensures AI correction for ALL retryable errors per INTELLIGENT_ERROR_HANDLING.md
+		if e.errorAnalyzer == nil && e.validationFeedbackEnabled && e.correctionCallback != nil &&
+			validationRetries < e.maxValidationRetries && shouldAttemptAICorrection(err, responseBody) {
 
 			validationRetries++
 
 			// Telemetry: Add span event for validation feedback attempt
+			// Include error details for complete visibility in Jaeger
 			telemetry.AddSpanEvent(ctx, "validation_feedback_started",
 				attribute.String("step_id", step.StepID),
 				attribute.String("capability", capability),
 				attribute.Int("validation_retry", validationRetries),
 				attribute.String("error_type", "type_mismatch"),
+				attribute.String("error_message", err.Error()),
+				attribute.String("error_response", truncateString(responseBody, 500)),
 			)
 
 			// Telemetry: Record metric for monitoring dashboards
@@ -870,10 +1531,13 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			// Request correction from LLM via callback
 			correctedParams, corrErr := e.correctionCallback(ctx, step, parameters, err.Error(), capabilitySchema)
 			if corrErr == nil && correctedParams != nil {
-				// Telemetry: Record successful correction
+				// Telemetry: Record successful correction with corrected parameters
+				// Serialize corrected params for visibility in Jaeger
+				correctedParamsJSON, _ := json.Marshal(correctedParams)
 				telemetry.AddSpanEvent(ctx, "validation_feedback_success",
 					attribute.String("step_id", step.StepID),
 					attribute.Int("retries_used", validationRetries),
+					attribute.String("corrected_params", truncateString(string(correctedParamsJSON), 500)),
 				)
 				telemetry.Counter("orchestration.validation_feedback.success",
 					"capability", capability,
@@ -918,6 +1582,37 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 					"span_id":    tc.SpanID,
 				})
 			}
+		}
+
+		// Check if error is explicitly non-retryable - don't waste retries on permanent errors
+		// This prevents blind retries when a tool explicitly says "don't retry"
+		// (e.g., LOCATION_NOT_FOUND, INVALID_SYMBOL, COUNTRY_NOT_FOUND)
+		if isNonRetryableToolError(responseBody) {
+			// Telemetry: Record that we stopped early due to non-retryable error
+			telemetry.AddSpanEvent(ctx, "non_retryable_error_detected",
+				attribute.String("step_id", step.StepID),
+				attribute.String("capability", capability),
+				attribute.Int("attempt", attempt),
+			)
+			telemetry.Counter("orchestration.non_retryable_errors",
+				"capability", capability,
+				"module", telemetry.ModuleOrchestration,
+			)
+
+			if e.logger != nil {
+				e.logger.Info("Non-retryable error detected, stopping retries", map[string]interface{}{
+					"operation":  "non_retryable_error",
+					"step_id":    step.StepID,
+					"capability": capability,
+					"attempt":    attempt,
+					"error":      err.Error(),
+					"trace_id":   tc.TraceID,
+					"span_id":    tc.SpanID,
+				})
+			}
+
+			// Break out of retry loop - no point retrying with same parameters
+			break
 		}
 
 		// Regular error handling
@@ -1080,14 +1775,32 @@ func coerceParameterTypes(params map[string]interface{}, schema []Parameter) (ma
 //   - string -> float64/number: "35.6" -> 35.6
 //   - string -> int64/integer: "42" -> 42
 //   - string -> bool/boolean: "true" -> true
+//   - map -> string: {"code":"EUR","name":"Euro"} -> "EUR" (smart field extraction)
 func coerceValue(value interface{}, expectedType string) (interface{}, bool) {
-	// If value is already a non-string, return as-is
-	strVal, isString := value.(string)
-	if !isString {
+	// Handle string values
+	if strVal, isString := value.(string); isString {
+		return coerceStringValue(strVal, expectedType)
+	}
+
+	// Handle map values - smart field extraction when string is expected
+	if mapVal, isMap := value.(map[string]interface{}); isMap {
+		if expectedType == "string" {
+			if extracted, _, ok := extractPrimaryField(mapVal); ok {
+				return extracted, true // Return extracted value and mark as coerced
+			}
+			// If extraction failed, try JSON serialization as fallback
+			// This preserves the original behavior of converting maps to JSON strings
+		}
+		// For non-string expected types, return map as-is
 		return value, false
 	}
 
-	// Attempt coercion based on expected type
+	// Other non-string types, return as-is
+	return value, false
+}
+
+// coerceStringValue handles coercion of string values to expected types.
+func coerceStringValue(strVal string, expectedType string) (interface{}, bool) {
 	switch expectedType {
 	case "number", "float64", "float", "double":
 		if f, err := strconv.ParseFloat(strVal, 64); err == nil {
@@ -1105,12 +1818,78 @@ func coerceValue(value interface{}, expectedType string) (interface{}, bool) {
 		}
 
 	case "string":
+		// Check if this is a JSON object string that we should extract a field from
+		// This handles cases where template substitution converted a complex object to JSON
+		// e.g., '{"code":"EUR","name":"Euro"}' -> we want to extract "EUR"
+		if strings.HasPrefix(strVal, "{") && strings.HasSuffix(strVal, "}") {
+			var parsed map[string]interface{}
+			if err := json.Unmarshal([]byte(strVal), &parsed); err == nil {
+				if extracted, _, ok := extractPrimaryField(parsed); ok {
+					return extracted, true
+				}
+			}
+		}
 		// Already a string, no coercion needed
-		return value, false
+		return strVal, false
 	}
 
 	// Coercion failed or not applicable, return original
-	return value, false
+	return strVal, false
+}
+
+// extractPrimaryField attempts to extract a primary/identifier field from a map.
+// This handles the common case where LLM resolves a template to a complex object
+// (e.g., {"code":"EUR","name":"Euro","symbol":"€"}) but the downstream tool
+// expects just the identifier (e.g., "EUR").
+//
+// Extraction priority (based on common API conventions):
+//  1. Single-field maps: use the only field (unambiguous)
+//  2. "code" field: common for currencies, countries, statuses
+//  3. "id" field: common for identifiers
+//  4. "value" field: common for value wrappers
+//  5. "name" field: common for labels/names
+//  6. "key" field: common for key-value pairs
+//
+// Returns the extracted value, the field name used, and whether extraction succeeded.
+// Only extracts string values to avoid type confusion.
+func extractPrimaryField(m map[string]interface{}) (string, string, bool) {
+	if m == nil || len(m) == 0 {
+		return "", "", false
+	}
+
+	// Priority 1: Single-field maps are unambiguous
+	if len(m) == 1 {
+		for k, v := range m {
+			if strVal, ok := v.(string); ok {
+				return strVal, k, true
+			}
+		}
+	}
+
+	// Priority 2-6: Try common identifier fields in order of priority
+	priorityFields := []string{"code", "id", "value", "name", "key"}
+	for _, field := range priorityFields {
+		if v, exists := m[field]; exists {
+			if strVal, ok := v.(string); ok {
+				return strVal, field, true
+			}
+		}
+	}
+
+	// Also check case-insensitive matches (LLMs sometimes use different cases)
+	lowerMap := make(map[string]interface{})
+	for k, v := range m {
+		lowerMap[strings.ToLower(k)] = v
+	}
+	for _, field := range priorityFields {
+		if v, exists := lowerMap[field]; exists {
+			if strVal, ok := v.(string); ok {
+				return strVal, field, true
+			}
+		}
+	}
+
+	return "", "", false
 }
 
 // isTypeRelatedError detects errors that can be corrected by requesting the LLM to fix parameters.
@@ -1178,6 +1957,132 @@ func isTypeRelatedError(err error, responseBody string) bool {
 	return false
 }
 
+// shouldAttemptAICorrection determines if an error should trigger LLM-powered correction.
+// This is the primary entry point for deciding AI correction, combining multiple strategies:
+// 1. Type-related errors: Pattern matching for common type mismatches
+// 2. Structured Retryable errors: Parse ToolResponse and check Error.Retryable flag
+//
+// This function ensures compliance with docs/INTELLIGENT_ERROR_HANDLING.md which states
+// that ANY error with Retryable=true should trigger AI correction, not just type errors.
+func shouldAttemptAICorrection(err error, responseBody string) bool {
+	// Strategy 1: Check for type-related error patterns (legacy support)
+	if isTypeRelatedError(err, responseBody) {
+		return true
+	}
+
+	// Strategy 2: Check for structured ToolResponse with Retryable=true
+	if isRetryableToolError(responseBody) {
+		return true
+	}
+
+	return false
+}
+
+// isRetryableToolError parses the response body as a ToolResponse and checks
+// if the error is marked as retryable. This enables AI correction for ALL
+// errors that tools indicate can be fixed with different input.
+//
+// Expected format:
+//
+//	{
+//	  "success": false,
+//	  "error": {
+//	    "code": "INVALID_CURRENCY",
+//	    "message": "Currency not found",
+//	    "retryable": true,
+//	    ...
+//	  }
+//	}
+func isRetryableToolError(responseBody string) bool {
+	if responseBody == "" {
+		return false
+	}
+
+	// Try to parse as ToolResponse structure
+	var response struct {
+		Success bool `json:"success"`
+		Error   *struct {
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			Category  string `json:"category"`
+			Retryable bool   `json:"retryable"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal([]byte(responseBody), &response); err != nil {
+		return false
+	}
+
+	// Check if it's a failed response with a retryable error
+	if !response.Success && response.Error != nil && response.Error.Retryable {
+		return true
+	}
+
+	return false
+}
+
+// isNonRetryableToolError parses the response body as a ToolResponse and checks
+// if the error is explicitly marked as non-retryable (retryable: false).
+// This is used to prevent blind retries when a tool indicates the error cannot
+// be fixed by retrying with the same input.
+//
+// Examples of non-retryable errors:
+//   - LOCATION_NOT_FOUND: Location doesn't exist, retrying won't help
+//   - INVALID_SYMBOL: Stock symbol is invalid, no point retrying
+//   - COUNTRY_NOT_FOUND: Country doesn't exist in the database
+//
+// Returns true if the response explicitly has success:false AND retryable:false
+func isNonRetryableToolError(responseBody string) bool {
+	if responseBody == "" {
+		return false
+	}
+
+	// Try to parse as ToolResponse structure
+	var response struct {
+		Success bool `json:"success"`
+		Error   *struct {
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			Retryable bool   `json:"retryable"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal([]byte(responseBody), &response); err != nil {
+		return false
+	}
+
+	// Check if it's a failed response with error info explicitly marked as non-retryable
+	// Note: We check for Error != nil and explicitly !Retryable
+	// This only returns true when the tool explicitly said "don't retry"
+	if !response.Success && response.Error != nil && !response.Error.Retryable {
+		return true
+	}
+
+	return false
+}
+
+// extractHTTPStatusFromError extracts the HTTP status code from an error message.
+// The error format from callComponentWithBody is: "component returned status %d: %s"
+// Returns the HTTP status code, or 0 if it cannot be extracted.
+func extractHTTPStatusFromError(err error) int {
+	if err == nil {
+		return 0
+	}
+
+	errStr := err.Error()
+
+	// Pattern: "component returned status XXX:"
+	statusPattern := regexp.MustCompile(`status (\d{3})`)
+	matches := statusPattern.FindStringSubmatch(errStr)
+	if len(matches) >= 2 {
+		status, parseErr := strconv.Atoi(matches[1])
+		if parseErr == nil {
+			return status
+		}
+	}
+
+	return 0
+}
 
 // ============================================================================
 // Component HTTP Call Functions

@@ -3,9 +3,15 @@ package orchestration
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+// stringContains is a helper for checking if a string contains a substring
+func stringContains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
 
 // TestCreateSimpleOrchestrator tests the zero-configuration orchestrator creation
 func TestCreateSimpleOrchestrator(t *testing.T) {

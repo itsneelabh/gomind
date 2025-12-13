@@ -1675,9 +1675,14 @@ func TestTemplateSubstitution_WithResponseWrapper(t *testing.T) {
 			want:     "Country is France",
 		},
 		{
-			name:     "unresolved template (wrong path)",
-			template: "{{step-1.data.country}}", // Missing 'response' in path
-			want:     "{{step-1.data.country}}", // Should remain unchanged
+			name:     "path normalization (missing response prefix)",
+			template: "{{step-1.data.country}}", // Missing 'response' in path - auto-corrected
+			want:     "France",                  // Now resolves due to normalizeFieldPath
+		},
+		{
+			name:     "unresolved template (nonexistent field)",
+			template: "{{step-1.response.data.nonexistent}}", // Field doesn't exist
+			want:     "{{step-1.response.data.nonexistent}}", // Should remain unchanged
 		},
 		{
 			name:     "unresolved template (wrong step)",

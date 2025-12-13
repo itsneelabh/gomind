@@ -14,9 +14,11 @@ Welcome to the complete guide on distributed tracing in GoMind! Think of this as
 - [Complete Example: Multi-Service Tracing](#-complete-example-multi-service-tracing)
 - [Infrastructure Setup (Kubernetes)](#-infrastructure-setup-kubernetes)
 - [Viewing Your Traces](#-viewing-your-traces)
+  - [Using request_id for Troubleshooting](#using-request_id-for-troubleshooting)
 - [Best Practices](#-best-practices)
 - [Troubleshooting](#-troubleshooting)
 - [Quick Reference](#-quick-reference)
+- [LLM Telemetry in Orchestration (Automatic)](#llm-telemetry-in-orchestration-automatic)
 
 ---
 
@@ -1042,6 +1044,100 @@ http://localhost:16686/trace/fee30b72efcbefd21fddf9cd56d2c8c9
    {app="stock-tool"} |= "fee30b72efcbefd21fddf9cd56d2c8c9"
    ```
 
+### Using request_id for Troubleshooting
+
+When you make an orchestration request, the API response includes a `request_id`:
+
+```json
+{
+  "request_id": "1765636433370038463-370038546",
+  "response": "Here's the weather in Tokyo...",
+  "tools_used": ["weather-tool", "currency-tool"],
+  "confidence": 1.0
+}
+```
+
+**The `request_id` is your primary troubleshooting key** - it connects API responses to distributed traces and logs.
+
+#### How request_id Relates to Traces
+
+The orchestrator sets `request_id` as a span attribute on the trace:
+
+```go
+span.SetAttribute("request_id", requestID)
+```
+
+This means you can search for traces using the `request_id` from your API response.
+
+#### Finding Traces by request_id in Jaeger UI
+
+1. Open Jaeger: `http://localhost:16686`
+2. Select service: `travel-research-orchestration` (or your agent's service name)
+3. In the **Tags** field, enter: `request_id=1765636433370038463-370038546`
+4. Click **Find Traces**
+5. Click on the trace to see the full waterfall view
+
+#### Finding Traces by request_id via CLI
+
+```bash
+# Search traces by request_id tag
+curl -s "http://localhost:16686/api/traces?service=travel-research-orchestration&tags=%7B%22request_id%22%3A%221765636433370038463-370038546%22%7D" | jq '.data[0].traceID'
+
+# Get the full trace once you have the trace_id
+curl -s "http://localhost:16686/api/traces/cd41f5a1a12afa1158f3e666a340d543" | jq '.data[0]'
+```
+
+#### Direct URL to Trace
+
+Once you know the trace_id, you can construct a direct URL:
+
+```
+http://localhost:16686/trace/<trace_id>
+```
+
+#### Searching Logs by request_id
+
+The `request_id` also appears in all structured logs throughout the request lifecycle:
+
+```bash
+# Search pod logs
+kubectl logs -n gomind-examples deploy/travel-research-agent | grep "1765636433370038463-370038546"
+
+# Search across all pods
+kubectl logs -n gomind-examples -l app.kubernetes.io/part-of=gomind --all-containers | grep "1765636433370038463-370038546"
+```
+
+#### What You'll See in the Trace
+
+A typical orchestration trace shows the complete request flow:
+
+```
+HTTP POST /orchestrate/natural (15.87s)
+└── orchestrator.process_request (15.87s)
+    ├── orchestrator.build_prompt (1.4ms)
+    ├── prompt-builder.build (0.1ms)
+    ├── HTTP POST → geocode_location (594ms)
+    ├── HTTP POST → get_current_weather (610ms)
+    ├── HTTP POST → convert_currency (894ms)
+    ├── HTTP POST → stock_quote (223ms)
+    ├── HTTP POST → get_country_info (200ms)
+    └── HTTP POST → search_news (200ms)
+```
+
+Each span shows:
+- **Duration** (colored bars in the UI)
+- **Tags** (click span to see `request_id`, `capability`, etc.)
+- **Events** (including `error_analyzer.*` events if LLM error analysis occurred)
+
+#### Troubleshooting Checklist
+
+| What You Have | How to Find the Trace |
+|---------------|----------------------|
+| `request_id` from API response | Search Jaeger by tag: `request_id=<value>` |
+| `trace_id` from logs | Direct URL: `http://localhost:16686/trace/<trace_id>` |
+| Time range of issue | Filter by service + time in Jaeger UI |
+| Error message | Search by tag: `error=true` |
+
 ---
 
 ## Best Practices
@@ -1315,6 +1411,107 @@ log.Printf("Message trace_id=%s span_id=%s", tc.TraceID, tc.SpanID)
 | `ProfileDevelopment` | 100% | Local development, see everything |
 | `ProfileStaging` | 10% | Testing environments |
 | `ProfileProduction` | 0.1% | High-traffic production |
+
+---
+
+## LLM Telemetry in Orchestration (Automatic)
+
+When using the orchestration module, **LLM interactions are automatically traced** without any additional developer code. This gives you complete visibility into AI operations within Jaeger.
+
+### What Gets Captured Automatically
+
+The orchestration module emits span events for every LLM interaction:
+
+| Event Name | Description | Key Attributes |
+|------------|-------------|----------------|
+| `llm.plan_generation.request` | AI prompt for routing plan creation | `prompt`, `prompt_length`, `temperature`, `max_tokens` |
+| `llm.plan_generation.response` | AI response for routing plan | `response`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `duration_ms` |
+| `llm.micro_resolution.request` | AI prompt for parameter binding | `capability`, `prompt`, `hint` |
+| `llm.micro_resolution.response` | AI response for parameter binding | `capability`, `response`, `duration_ms` |
+| `llm.synthesis.request` | AI prompt for result synthesis | `original_request`, `prompt`, `step_count`, `temperature`, `max_tokens` |
+| `llm.synthesis.response` | AI response for synthesis | `response`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `duration_ms` |
+| `error_analyzer.llm_error_analysis_start` | Error analysis begins | `error_type`, `original_error`, `capability`, `tool_name` |
+| `error_analyzer.llm_error_analysis_result` | Error analysis result | `reason`, `recoverable`, `suggested_changes`, `has_suggestions` |
+| `error_analyzer.llm_error_analysis_retry` | Automatic retry with suggested fixes | `capability`, `original_params`, `suggested_changes`, `retry_count` |
+
+### What Developers See in Jaeger
+
+When you click on an orchestration span in Jaeger and expand the **Logs** tab, you'll see detailed LLM interactions:
+
+```
+▼ llm.plan_generation.request
+  prompt: "You are an AI orchestrator. Given available tools and a user request..."
+  prompt_length: 2456
+  temperature: 0.3
+  max_tokens: 2000
+
+▼ llm.plan_generation.response
+  response: "Based on the user request, I recommend the following execution plan..."
+  prompt_tokens: 1234
+  completion_tokens: 456
+  total_tokens: 1690
+  duration_ms: 2341
+```
+
+For error recovery scenarios, you'll see the full diagnostic chain:
+
+```
+▼ error_analyzer.llm_error_analysis_start
+  error_type: "invalid_parameter"
+  original_error: "The country parameter '대한민국' is not a valid ISO country code"
+  capability: "get_country_info"
+  tool_name: "country-info-tool"
+
+▼ error_analyzer.llm_error_analysis_result
+  reason: "The country parameter '대한민국' is provided in Korean..."
+  recoverable: true
+  suggested_changes: {"country":"South Korea"}
+  has_suggestions: true
+
+▼ error_analyzer.llm_error_analysis_retry
+  capability: "get_country_info"
+  original_params: {"country":"대한민국"}
+  suggested_changes: {"country":"South Korea"}
+  retry_count: 1
+```
+
+### Zero Developer Configuration Required
+
+This telemetry is **built into the orchestration framework** at:
+- [orchestration/orchestrator.go](../orchestration/orchestrator.go) - Plan generation
+- [orchestration/micro_resolver.go](../orchestration/micro_resolver.go) - Parameter resolution
+- [orchestration/synthesizer.go](../orchestration/synthesizer.go) - Result synthesis
+- [orchestration/error_analyzer.go](../orchestration/error_analyzer.go) - Error analysis and recovery
+
+**Developers don't need to add any code** to get LLM visibility. Simply:
+1. Use the orchestration module as documented
+2. Enable telemetry (as shown in this guide)
+3. View traces in Jaeger
+
+### Use Cases for LLM Telemetry
+
+| Scenario | What to Look For |
+|----------|------------------|
+| Slow orchestration requests | Check `duration_ms` on LLM response events |
+| High AI costs | Sum `total_tokens` across requests |
+| Poor routing decisions | Read the `prompt` and `response` to understand AI reasoning |
+| Failed parameter binding | Check `llm.micro_resolution.*` events |
+| Error recovery debugging | Follow `error_analyzer.*` events for the full recovery chain |
+| Prompt engineering | Export prompts from traces to analyze and improve |
+
+### Example: Debugging LLM Error Recovery
+
+To analyze how the orchestrator recovered from an error:
+
+1. Find the trace in Jaeger using `request_id` or time filter
+2. Locate the span with `error_analyzer.*` events
+3. Examine:
+   - `error_analyzer.llm_error_analysis_start` - What error occurred
+   - `error_analyzer.llm_error_analysis_result` - What the LLM suggested
+   - `error_analyzer.llm_error_analysis_retry` - What parameters were retried
+4. If the retry succeeded, you'll see a subsequent successful tool call span
+
+This automatic visibility into AI decision-making makes debugging orchestration issues straightforward without instrumenting your own code.
 
 ---
 

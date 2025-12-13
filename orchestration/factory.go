@@ -23,6 +23,12 @@ type OrchestratorDependencies struct {
 	// Optional: Custom prompt building (Layer 3)
 	// If nil, DefaultPromptBuilder is used based on config.PromptConfig
 	PromptBuilder PromptBuilder
+
+	// Optional: Enable LLM-based error analysis (Layer 3: Error Analysis)
+	// When true, creates an ErrorAnalyzer that uses LLM to determine if errors
+	// can be fixed with different parameters. This removes the need for tools
+	// to set Retryable flags. See PARAMETER_BINDING_FIX.md for design rationale.
+	EnableErrorAnalyzer bool
 }
 
 // CreateOrchestrator creates an orchestrator with proper module integration and dependency injection
@@ -33,20 +39,21 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 
 	var factoryLogger core.Logger
 	if deps.Logger != nil {
-		factoryLogger = deps.Logger
+		// Apply component-specific logging for orchestration module
+		if cal, ok := deps.Logger.(core.ComponentAwareLogger); ok {
+			factoryLogger = cal.WithComponent("framework/orchestration")
+		} else {
+			factoryLogger = deps.Logger
+		}
 	} else {
-		// Create default production logger with intelligent defaults
-		factoryLogger = core.NewProductionLogger(
-			core.LoggingConfig{
-				Level:  "info",
-				Format: "json",
-				Output: "stdout",
-			},
-			core.DevelopmentConfig{},
-			"orchestrator",
-		)
-		deps.Logger = factoryLogger
+		// Use NoOpLogger to avoid creating a parallel logging setup.
+		// The framework's logging is configured centrally via core.NewFramework().
+		// If you want orchestration logs, pass the agent's Logger in OrchestratorDependencies:
+		//   deps := OrchestratorDependencies{Logger: agent.Logger, ...}
+		// This follows the same pattern as core/agent.go which uses NoOpLogger as the default.
+		factoryLogger = &core.NoOpLogger{}
 	}
+	deps.Logger = factoryLogger
 
 	factoryLogger.Info("Creating orchestrator instance", map[string]interface{}{
 		"operation":               "orchestrator_creation",
@@ -85,7 +92,7 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		}
 
 		// Use the framework's telemetry module
-		otelProvider, err := telemetry.NewOTelProvider("orchestrator", endpoint)
+		otelProvider, err := telemetry.NewOTelProvider("orchestrator", "orchestrator", endpoint)
 		if err != nil {
 			// Resilient runtime behavior - continue without telemetry
 			if factoryLogger != nil {
@@ -149,9 +156,20 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		})
 	}
 
+	// Configure LLM-based error analyzer if enabled (Layer 3: Error Analysis)
+	// This removes the need for tools to set Retryable flags - the LLM decides
+	if deps.EnableErrorAnalyzer && deps.AIClient != nil {
+		errorAnalyzer := NewErrorAnalyzer(deps.AIClient, deps.Logger)
+		orchestrator.SetErrorAnalyzer(errorAnalyzer)
+		factoryLogger.Info("LLM error analyzer enabled", map[string]interface{}{
+			"operation": "error_analyzer_initialization",
+		})
+	}
+
 	factoryLogger.Info("Orchestrator created successfully", map[string]interface{}{
-		"operation": "orchestrator_creation_complete",
-		"success":   true,
+		"operation":            "orchestrator_creation_complete",
+		"success":              true,
+		"error_analyzer":       deps.EnableErrorAnalyzer,
 	})
 
 	return orchestrator, nil
@@ -204,7 +222,7 @@ func CreateOrchestratorWithOptions(deps OrchestratorDependencies, opts ...Orches
 // - Use the default capability provider (sends all capabilities to LLM)
 // - Work with small to medium deployments (up to ~100 agents/tools)
 // - Not require any external services
-// - Use intelligent defaults for all settings (including production logging)
+// - Use NoOpLogger by default (pass Logger in dependencies for logging)
 func CreateSimpleOrchestrator(discovery core.Discovery, aiClient core.AIClient) *AIOrchestrator {
 	// Use proper dependency injection to ensure all framework features work
 	deps := OrchestratorDependencies{

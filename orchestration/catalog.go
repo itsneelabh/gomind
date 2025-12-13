@@ -90,11 +90,17 @@ func NewAgentCatalog(discovery core.Discovery) *AgentCatalog {
 }
 
 // SetLogger sets the logger provider (follows framework design principles)
+// The component is always set to "framework/orchestration" to ensure proper log attribution
+// regardless of which agent or tool is using the orchestration module.
 func (c *AgentCatalog) SetLogger(logger core.Logger) {
 	if logger == nil {
 		c.logger = &core.NoOpLogger{}
 	} else {
-		c.logger = logger
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			c.logger = cal.WithComponent("framework/orchestration")
+		} else {
+			c.logger = logger
+		}
 	}
 }
 

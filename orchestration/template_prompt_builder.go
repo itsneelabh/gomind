@@ -111,9 +111,20 @@ func NewTemplatePromptBuilder(config *PromptConfig) (*TemplatePromptBuilder, err
 	}, nil
 }
 
-// SetLogger sets the logger for debug output
+// SetLogger sets the logger for debug output (follows framework design principles)
+// The component is always set to "framework/orchestration" to ensure proper log attribution
+// regardless of which agent or tool is using the orchestration module.
 func (t *TemplatePromptBuilder) SetLogger(logger core.Logger) {
-	t.logger = logger
+	if logger == nil {
+		t.logger = nil
+	} else {
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			t.logger = cal.WithComponent("framework/orchestration")
+		} else {
+			t.logger = logger
+		}
+	}
+	// Propagate to fallback (it will apply its own WithComponent)
 	if t.fallback != nil {
 		t.fallback.SetLogger(logger)
 	}
