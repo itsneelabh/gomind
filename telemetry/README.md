@@ -9,6 +9,7 @@ Welcome to the observability powerhouse of GoMind! Think of this guide as your f
 - [📊 The Three Types of Metrics](#-the-three-types-of-metrics-and-when-to-use-each)
 - [🎨 Adding Context with Labels](#-adding-context-with-labels)
 - [🔍 Progressive Disclosure: From Simple to Advanced](#-progressive-disclosure-from-simple-to-advanced)
+- [🏷️ Service Type Labeling](#️-service-type-labeling)
 - [🏗️ Production-Ready Configuration](#️-production-ready-configuration)
 - [🐳 Deploying with Docker](#-deploying-with-docker)
 - [☸️ Deploying on Kubernetes](#️-deploying-on-kubernetes)
@@ -240,6 +241,71 @@ telemetry.EmitWithOptions(ctx, "payment.amount", 99.99,
     telemetry.WithUnit(telemetry.UnitDollars),
     telemetry.WithSampleRate(0.1),  // Sample 10% for high-volume metrics
     telemetry.WithTimestamp(eventTime),
+)
+```
+
+## 🏷️ Service Type Labeling
+
+The telemetry module automatically labels metrics with a `service_type` attribute that distinguishes between "tool" and "agent" services. This enables Grafana dashboard segregation and filtering by component type.
+
+### Automatic Service Type Inference
+
+When you create a component using `core.NewTool()` or `core.NewBaseAgent()`, the framework automatically tracks the component type. If you initialize telemetry **after** creating the component, the service type is auto-inferred:
+
+```go
+func main() {
+    // Create component FIRST - this sets the component type
+    tool := core.NewTool("weather-service")  // Sets type to "tool"
+
+    // Initialize telemetry AFTER - auto-infers service_type="tool"
+    config := telemetry.UseProfile(telemetry.ProfileProduction)
+    config.ServiceName = "weather-service"
+    telemetry.Initialize(config)
+
+    // All metrics now include service_type="tool" label
+}
+```
+
+### Manual Service Type Configuration
+
+You can also explicitly set the service type if needed:
+
+```go
+config := telemetry.Config{
+    ServiceName: "my-service",
+    ServiceType: "tool",  // Explicit: "tool" or "agent"
+}
+telemetry.Initialize(config)
+```
+
+### Initialization Order Matters
+
+For automatic inference to work correctly, follow this pattern:
+
+```go
+// ✅ CORRECT: Component created before telemetry
+tool := NewMyTool()           // 1. Sets component type
+initTelemetry("my-service")   // 2. Reads component type
+
+// ❌ WRONG: Telemetry initialized first
+initTelemetry("my-service")   // 1. No component type yet (empty)
+tool := NewMyTool()           // 2. Too late, telemetry already initialized
+```
+
+### Grafana Dashboard Filtering
+
+With service type labeling, you can filter metrics by component type in Prometheus/Grafana:
+
+```promql
+# Request rate for tools only
+sum(rate(gomind_requests_total{service_type="tool"}[5m])) by (service_name)
+
+# Request rate for agents only
+sum(rate(gomind_requests_total{service_type="agent"}[5m])) by (service_name)
+
+# Compare tool vs agent latencies
+histogram_quantile(0.95,
+  sum(rate(gomind_request_duration_ms_bucket[5m])) by (le, service_type)
 )
 ```
 

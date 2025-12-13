@@ -171,6 +171,24 @@ func Initialize(config Config) error {
 	return initErr
 }
 
+// InitializeForComponent initializes telemetry with automatic service type inference.
+// This is the recommended way to initialize telemetry when you have a component,
+// as it automatically sets the ServiceType based on whether it's a Tool or Agent.
+//
+// Example usage:
+//
+//	agent := core.NewBaseAgent("my-agent")
+//	config := telemetry.UseProfile(telemetry.ProfileDevelopment)
+//	config.ServiceName = "my-agent"
+//	if err := telemetry.InitializeForComponent(agent, config); err != nil {
+//	    log.Fatal(err)
+//	}
+func InitializeForComponent(component interface{ GetType() core.ComponentType }, config Config) error {
+	// Automatically infer service type from component
+	config.ServiceType = string(component.GetType())
+	return Initialize(config)
+}
+
 // newRegistry creates a new telemetry registry
 func newRegistry(config Config) (*Registry, error) {
 	// Record start time for initialization metrics
@@ -183,12 +201,17 @@ func newRegistry(config Config) (*Registry, error) {
 	if config.ServiceName == "" {
 		config.ServiceName = "gomind-agent"
 	}
+	// Auto-infer ServiceType from the most recently created component
+	// This allows telemetry.Initialize() to work without explicit ServiceType config
+	if config.ServiceType == "" {
+		config.ServiceType = string(core.GetCurrentComponentType())
+	}
 	if config.CardinalityLimit == 0 {
 		config.CardinalityLimit = 10000
 	}
 
 	// Create OpenTelemetry provider
-	provider, err := NewOTelProvider(config.ServiceName, config.Endpoint)
+	provider, err := NewOTelProvider(config.ServiceName, config.ServiceType, config.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTel provider: %w", err)
 	}

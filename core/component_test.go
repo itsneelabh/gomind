@@ -433,6 +433,145 @@ func TestHealthStatus(t *testing.T) {
 	}
 }
 
+// TestComponentTypeTracking tests the SetCurrentComponentType/GetCurrentComponentType functions
+// used for automatic service type inference in telemetry
+func TestComponentTypeTracking(t *testing.T) {
+	// Test setting and getting tool type
+	SetCurrentComponentType(ComponentTypeTool)
+	if got := GetCurrentComponentType(); got != ComponentTypeTool {
+		t.Errorf("GetCurrentComponentType() = %v, want %v", got, ComponentTypeTool)
+	}
+
+	// Test setting and getting agent type
+	SetCurrentComponentType(ComponentTypeAgent)
+	if got := GetCurrentComponentType(); got != ComponentTypeAgent {
+		t.Errorf("GetCurrentComponentType() = %v, want %v", got, ComponentTypeAgent)
+	}
+
+	// Test that empty ComponentType is distinguishable
+	SetCurrentComponentType("")
+	if got := GetCurrentComponentType(); got != "" {
+		t.Errorf("GetCurrentComponentType() after empty set = %v, want empty", got)
+	}
+}
+
+// TestNewToolSetsComponentType verifies that NewTool sets the global component type to "tool"
+func TestNewToolSetsComponentType(t *testing.T) {
+	// Reset to a known state
+	SetCurrentComponentType("")
+
+	// Create a tool - this should set the component type
+	_ = NewTool("test-tool-component-type")
+
+	// Verify the component type was set
+	got := GetCurrentComponentType()
+	if got != ComponentTypeTool {
+		t.Errorf("After NewTool(), GetCurrentComponentType() = %v, want %v", got, ComponentTypeTool)
+	}
+}
+
+// TestNewBaseAgentSetsComponentType verifies that NewBaseAgent sets the global component type to "agent"
+func TestNewBaseAgentSetsComponentType(t *testing.T) {
+	// Reset to a known state
+	SetCurrentComponentType("")
+
+	// Create an agent - this should set the component type
+	_ = NewBaseAgent("test-agent-component-type")
+
+	// Verify the component type was set
+	got := GetCurrentComponentType()
+	if got != ComponentTypeAgent {
+		t.Errorf("After NewBaseAgent(), GetCurrentComponentType() = %v, want %v", got, ComponentTypeAgent)
+	}
+}
+
+// TestComponentTypeOverwrite verifies that the last created component wins
+// This is the expected behavior for single-component microservices
+func TestComponentTypeOverwrite(t *testing.T) {
+	// Create a tool first
+	_ = NewTool("first-tool")
+	if got := GetCurrentComponentType(); got != ComponentTypeTool {
+		t.Errorf("After first NewTool(), got %v, want %v", got, ComponentTypeTool)
+	}
+
+	// Create an agent - should overwrite
+	_ = NewBaseAgent("second-agent")
+	if got := GetCurrentComponentType(); got != ComponentTypeAgent {
+		t.Errorf("After NewBaseAgent(), got %v, want %v", got, ComponentTypeAgent)
+	}
+
+	// Create another tool - should overwrite back
+	_ = NewTool("third-tool")
+	if got := GetCurrentComponentType(); got != ComponentTypeTool {
+		t.Errorf("After second NewTool(), got %v, want %v", got, ComponentTypeTool)
+	}
+}
+
+// TestComponentTypeThreadSafety verifies concurrent access to component type tracking is safe
+func TestComponentTypeThreadSafety(t *testing.T) {
+	const goroutines = 100
+	const iterations = 1000
+
+	done := make(chan bool, goroutines*2)
+
+	// Half the goroutines set tool type
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				SetCurrentComponentType(ComponentTypeTool)
+				_ = GetCurrentComponentType()
+			}
+			done <- true
+		}()
+	}
+
+	// Half the goroutines set agent type
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				SetCurrentComponentType(ComponentTypeAgent)
+				_ = GetCurrentComponentType()
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < goroutines*2; i++ {
+		<-done
+	}
+
+	// Final value should be either tool or agent (not corrupted)
+	got := GetCurrentComponentType()
+	if got != ComponentTypeTool && got != ComponentTypeAgent {
+		t.Errorf("After concurrent access, got corrupted value: %v", got)
+	}
+}
+
+// BenchmarkComponentTypeTracking benchmarks the component type tracking
+func BenchmarkComponentTypeTracking(b *testing.B) {
+	b.Run("Set", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			SetCurrentComponentType(ComponentTypeTool)
+		}
+	})
+
+	b.Run("Get", func(b *testing.B) {
+		SetCurrentComponentType(ComponentTypeTool)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = GetCurrentComponentType()
+		}
+	})
+
+	b.Run("SetAndGet", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			SetCurrentComponentType(ComponentTypeTool)
+			_ = GetCurrentComponentType()
+		}
+	})
+}
+
 // BenchmarkServiceInfoSerialization benchmarks JSON operations
 func BenchmarkServiceInfoSerialization(b *testing.B) {
 	info := &ServiceInfo{

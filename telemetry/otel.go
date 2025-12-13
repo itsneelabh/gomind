@@ -48,7 +48,8 @@ type OTelProvider struct {
 //
 // The endpoint should be an OTLP/HTTP endpoint (typically port 4318).
 // For backward compatibility, gRPC ports (4317) are automatically converted.
-func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error) {
+// The serviceType parameter should be "tool" or "agent" to enable dashboard segregation.
+func NewOTelProvider(serviceName, serviceType, endpoint string) (*OTelProvider, error) {
 	logger := GetLogger()
 	startTime := time.Now()
 
@@ -61,8 +62,15 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 		return nil, fmt.Errorf("service name cannot be empty")
 	}
 
+	// Default serviceType to empty if not provided (backward compatibility)
+	// Can also be set via GOMIND_SERVICE_TYPE environment variable
+	if serviceType == "" {
+		serviceType = os.Getenv("GOMIND_SERVICE_TYPE")
+	}
+
 	logger.Info("Creating OpenTelemetry provider", map[string]interface{}{
 		"service_name": serviceName,
+		"service_type": serviceType,
 		"endpoint":     endpoint,
 		"protocol":     "OTLP/HTTP",
 	})
@@ -86,14 +94,24 @@ func NewOTelProvider(serviceName string, endpoint string) (*OTelProvider, error)
 	// Create resource with consistent schema
 	logger.Debug("Creating OpenTelemetry resource", map[string]interface{}{
 		"service_name": serviceName,
+		"service_type": serviceType,
 		"version":      "1.0.0",
 		"schema_url":   semconv.SchemaURL,
 	})
 
-	res := resource.NewWithAttributes(
-		semconv.SchemaURL,
+	// Build resource attributes
+	attrs := []attribute.KeyValue{
 		semconv.ServiceNameKey.String(serviceName),
 		semconv.ServiceVersionKey.String("1.0.0"),
+	}
+	// Add service.type if provided (enables tool vs agent segregation in dashboards)
+	if serviceType != "" {
+		attrs = append(attrs, attribute.String("service.type", serviceType))
+	}
+
+	res := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		attrs...,
 	)
 
 	ctx := context.Background()
@@ -465,7 +483,10 @@ func EnableTelemetry(agent *core.BaseAgent, endpoint string) error {
 		}
 	}
 
-	provider, err := NewOTelProvider(agent.GetName(), endpoint)
+	// Automatically infer service type from component
+	serviceType := string(agent.GetType())
+
+	provider, err := NewOTelProvider(agent.GetName(), serviceType, endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to create telemetry provider: %w", err)
 	}

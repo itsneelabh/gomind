@@ -7,6 +7,7 @@ type Config struct {
 	// Basic settings
 	Enabled     bool
 	ServiceName string
+	ServiceType string // "tool" or "agent" - automatically inferred from component type
 	Endpoint    string
 	Provider    string // "otel", "prometheus", "statsd"
 
@@ -96,6 +97,9 @@ func (c Config) WithOverrides(overrides Config) Config {
 	}
 	if overrides.ServiceName != "" {
 		c.ServiceName = overrides.ServiceName
+	}
+	if overrides.ServiceType != "" {
+		c.ServiceType = overrides.ServiceType
 	}
 	if overrides.Endpoint != "" {
 		c.Endpoint = overrides.Endpoint
