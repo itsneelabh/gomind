@@ -239,6 +239,11 @@ type Capability struct {
     InputSummary   *SchemaSummary   // Compact field hints for AI (Phase 2)
     OutputSummary  *SchemaSummary   // Output schema hints (optional)
     SchemaEndpoint string           // Full JSON Schema endpoint (Phase 3)
+
+    // Internal capabilities are excluded from LLM planning catalogs
+    // but remain HTTP-callable. Use for orchestration endpoints,
+    // admin endpoints, or deprecated capabilities.
+    Internal       bool             // Exclude from LLM catalog (default: false)
 }
 
 // SchemaSummary provides compact field hints for AI payload generation (Phase 2)

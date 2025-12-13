@@ -561,8 +561,11 @@ type Capability struct {
     InputTypes  []string         `json:"input_types"` // Expected input formats
     OutputTypes []string         `json:"output_types"`// Output formats
     Handler     http.HandlerFunc `json:"-"`          // The actual function (optional)
+    Internal    bool             `json:"internal"`    // Exclude from LLM catalog (default: false)
 }
 ```
+
+> **Note:** The `Internal` flag marks capabilities that should be excluded from LLM planning catalogs. Internal capabilities remain HTTP-callable but won't appear in the service catalog used for AI orchestration decisions. Use this for orchestration endpoints, admin endpoints, or deprecated capabilities.
 
 ### The Magic of RegisterCapability
 
