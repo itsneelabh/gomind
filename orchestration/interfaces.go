@@ -3,8 +3,10 @@ package orchestration
 import (
 	"context"
 	"os"
+	"strconv"
+	"strings"
 	"time"
-	
+
 	"github.com/itsneelabh/gomind/core"
 )
 
@@ -214,6 +216,13 @@ type OrchestratorConfig struct {
 	// with LLM-based micro-resolution as fallback for complex cases.
 	// This provides more reliable parameter binding than template substitution alone.
 	EnableHybridResolution bool `json:"enable_hybrid_resolution"`
+
+	// Plan Parse Retry configuration
+	// When enabled, retries LLM plan generation if JSON parsing fails.
+	// This handles cases where the LLM produces invalid JSON (arithmetic expressions,
+	// malformed syntax) that cannot be fixed by the cleanup functions.
+	PlanParseRetryEnabled bool `json:"plan_parse_retry_enabled"`
+	PlanParseMaxRetries   int  `json:"plan_parse_max_retries"` // Default: 2
 }
 
 // DefaultConfig returns default orchestrator configuration with intelligent defaults
@@ -245,15 +254,29 @@ func DefaultConfig() *OrchestratorConfig {
 
 		// Hybrid Parameter Resolution defaults
 		EnableHybridResolution: true, // Enable by default for reliable parameter binding
+
+		// Plan Parse Retry defaults
+		PlanParseRetryEnabled: true, // Enable by default for production reliability
+		PlanParseMaxRetries:   2,    // Up to 2 retry attempts after initial failure
 	}
-	
+
 	// Auto-configure based on environment (intelligent configuration)
 	if serviceURL := os.Getenv("GOMIND_CAPABILITY_SERVICE_URL"); serviceURL != "" {
 		// User intent is clear - auto-configure for service provider
 		config.CapabilityProviderType = "service"
 		config.CapabilityService.Endpoint = serviceURL
 	}
-	
+
+	// Plan Parse Retry configuration from environment
+	if retryEnabled := os.Getenv("GOMIND_PLAN_RETRY_ENABLED"); retryEnabled != "" {
+		config.PlanParseRetryEnabled = strings.ToLower(retryEnabled) == "true"
+	}
+	if maxRetries := os.Getenv("GOMIND_PLAN_RETRY_MAX"); maxRetries != "" {
+		if val, err := strconv.Atoi(maxRetries); err == nil && val >= 0 {
+			config.PlanParseMaxRetries = val
+		}
+	}
+
 	return config
 }
 

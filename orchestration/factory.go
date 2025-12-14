@@ -204,6 +204,22 @@ func WithFallback(enabled bool) OrchestratorOption {
 	}
 }
 
+// WithPlanParseRetry creates an option for configuring plan parse retry behavior.
+// When enabled, the orchestrator will retry LLM plan generation if JSON parsing fails
+// due to invalid syntax (e.g., arithmetic expressions, malformed JSON).
+//
+// Parameters:
+//   - enabled: whether to retry on JSON parse failures
+//   - maxRetries: maximum number of retry attempts (0 = no retries, default: 2)
+func WithPlanParseRetry(enabled bool, maxRetries int) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.PlanParseRetryEnabled = enabled
+		if maxRetries >= 0 {
+			c.PlanParseMaxRetries = maxRetries
+		}
+	}
+}
+
 // CreateOrchestratorWithOptions creates an orchestrator with option functions
 func CreateOrchestratorWithOptions(deps OrchestratorDependencies, opts ...OrchestratorOption) (*AIOrchestrator, error) {
 	config := DefaultConfig()

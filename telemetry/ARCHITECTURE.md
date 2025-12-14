@@ -181,6 +181,62 @@ telemetry.EmitWithOptions(ctx, "custom.metric", 99.9,
 
 **Design Goal**: Developers should reach for Level 1 API by default, only dropping to lower levels when needed.
 
+### 4. Module Boundaries for Metrics
+
+**Principle**: The telemetry module defines **contracts**, not implementations for other modules.
+
+**What belongs in `unified_metrics.go`**:
+- Cross-module helper functions that multiple modules need identically (e.g., `RecordAIRequest()`, `RecordToolCall()`)
+- Metric name constants that create a shared vocabulary across modules
+- Module label constants (`ModuleAgent`, `ModuleOrchestration`, `ModuleCore`)
+
+**What does NOT belong in telemetry module files**:
+- Module-specific metrics (e.g., orchestration's `plan_generation.retries`)
+- Metrics that only one module will ever emit
+- Implementation details specific to a single module's internal operations
+
+**Correct Pattern**:
+
+```go
+// ✅ In orchestration/orchestrator.go - Module-specific metrics
+// Use primitive APIs directly for orchestration-local metrics
+telemetry.Counter("plan_generation.retries",
+    "module", telemetry.ModuleOrchestration)
+
+telemetry.Histogram("plan_generation.duration_ms", float64(duration.Milliseconds()),
+    "module", telemetry.ModuleOrchestration,
+    "status", "success")
+
+// ✅ Use cross-module helpers for shared patterns
+telemetry.RecordAIRequest(telemetry.ModuleOrchestration, "plan_generation",
+    float64(llmDuration.Milliseconds()), "success")
+```
+
+**Incorrect Pattern**:
+
+```go
+// ❌ Do NOT add module-specific metrics to unified_metrics.go
+// unified_metrics.go
+const (
+    UnifiedPlanGenerationRetry = "plan_generation.retries"  // WRONG: orchestration-specific
+)
+
+func RecordPlanGenerationRetry(module string) {  // WRONG: only orchestration uses this
+    Counter(UnifiedPlanGenerationRetry, "module", module)
+}
+```
+
+**Rationale**:
+1. **Clear Ownership**: Each module owns its internal metrics
+2. **No Coupling**: Telemetry module doesn't need to know about orchestration internals
+3. **Simpler Maintenance**: Changes to module-specific metrics don't require telemetry module changes
+4. **Contract Stability**: `unified_metrics.go` only changes when cross-module contracts evolve
+
+**When to Add to `unified_metrics.go`**:
+- The metric pattern is used by **2+ modules** with identical semantics
+- The metric is part of a framework-wide observability contract
+- Dashboard queries need to aggregate across modules using the same metric name
+
 ---
 
 ## Global Singleton Pattern

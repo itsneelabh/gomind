@@ -227,5 +227,5 @@ func TestBuildStepContext_WrapsResponseCorrectly(t *testing.T) {
 ## References
 
 - [STEP_REFERENCE_TEMPLATE_BUG.md](./STEP_REFERENCE_TEMPLATE_BUG.md) - Fixed prompt syntax issue
-- [executor.go](./executor.go) - Template substitution logic
-- [default_prompt_builder.go](./default_prompt_builder.go) - Prompt with template instructions
+- [executor.go](../executor.go) - Template substitution logic
+- [default_prompt_builder.go](../default_prompt_builder.go) - Prompt with template instructions

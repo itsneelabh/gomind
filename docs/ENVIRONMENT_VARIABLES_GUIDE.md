@@ -556,10 +556,34 @@ Configure the AI orchestrator for multi-agent coordination.
 | `CAPABILITY_SERVICE_URL` | (fallback) | **Implemented** | Alternative capability service URL | [orchestration/capability_provider.go:81](../orchestration/capability_provider.go#L81) |
 | `GOMIND_CAPABILITY_TOP_K` | `20` | **Implemented** | Number of capabilities to return | [orchestration/capability_provider.go:91](../orchestration/capability_provider.go#L91) |
 | `GOMIND_CAPABILITY_THRESHOLD` | `0.7` | **Implemented** | Minimum similarity threshold | [orchestration/capability_provider.go:103](../orchestration/capability_provider.go#L103) |
+| `GOMIND_PLAN_RETRY_ENABLED` | `true` | **Implemented** | Retry plan generation on JSON parse failures | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_PLAN_RETRY_MAX` | `2` | **Implemented** | Maximum retry attempts for plan parsing (0 = disabled) | [orchestration/interfaces.go](../orchestration/interfaces.go) |
 | `GOMIND_VALIDATE_PAYLOADS` | `false` | **Implemented** | Enable schema validation for AI-generated payloads | [examples/agent-example/orchestration.go:670](../examples/agent-example/orchestration.go#L670) |
 | `GOMIND_AGENT_MAX_RETRIES` | `2` | Example Only | Max retries for agent execution | [examples/agent-example/orchestration.go:157](../examples/agent-example/orchestration.go#L157) |
 | `GOMIND_AGENT_USE_AI_CORRECTION` | `true` | Example Only | Enable AI-based parameter correction | [examples/agent-example/orchestration.go:162](../examples/agent-example/orchestration.go#L162) |
 | `GOMIND_ORCHESTRATOR_MODE` | (none) | Example Only | Orchestrator mode selection | [examples/agent-with-orchestration/main.go:290](../examples/agent-with-orchestration/main.go#L290) |
+
+### Plan Parse Retry
+
+When LLMs generate execution plans, JSON parsing may fail due to:
+- Arithmetic expressions in values (e.g., `"amount": 100 * price`)
+- Malformed JSON syntax (trailing commas, missing quotes)
+- Invalid JSON structures
+
+The retry mechanism provides error feedback to the LLM, allowing it to correct its output:
+
+```bash
+# Disable retry (fail fast on parse errors)
+export GOMIND_PLAN_RETRY_ENABLED=false
+
+# Increase retry attempts (default: 2)
+export GOMIND_PLAN_RETRY_MAX=3
+
+# Disable by setting max retries to 0
+export GOMIND_PLAN_RETRY_MAX=0
+```
+
+See [PLAN_GENERATION_RETRY.md](../orchestration/notes/PLAN_GENERATION_RETRY.md) for implementation details.
 
 ### Example
 
@@ -571,6 +595,10 @@ export GOMIND_ORCHESTRATION_TIMEOUT=5m
 export GOMIND_CAPABILITY_SERVICE_URL="http://capability-service:8080"
 export GOMIND_CAPABILITY_TOP_K=30
 export GOMIND_CAPABILITY_THRESHOLD=0.75
+
+# For plan parse retry configuration
+export GOMIND_PLAN_RETRY_ENABLED=true
+export GOMIND_PLAN_RETRY_MAX=2
 ```
 
 ---

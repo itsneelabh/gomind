@@ -324,6 +324,14 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected cache TTL 5m, got %v", config.CacheTTL)
 	}
 
+	// Check plan parse retry defaults
+	if !config.PlanParseRetryEnabled {
+		t.Error("Expected PlanParseRetryEnabled to be true by default")
+	}
+	if config.PlanParseMaxRetries != 2 {
+		t.Errorf("Expected PlanParseMaxRetries 2, got %d", config.PlanParseMaxRetries)
+	}
+
 	// Check execution options
 	if config.ExecutionOptions.MaxConcurrency != 5 {
 		t.Errorf("Expected max concurrency 5, got %d", config.ExecutionOptions.MaxConcurrency)
@@ -768,4 +776,159 @@ func (m *mockPromptBuilder) BuildPlanningPrompt(ctx context.Context, input Promp
 		return m.buildFunc(ctx, input)
 	}
 	return "mock prompt", nil
+}
+
+// =============================================================================
+// Plan Parse Retry Configuration Tests
+// =============================================================================
+
+// TestDefaultConfig_PlanParseRetry_EnvironmentConfiguration tests env var loading
+func TestDefaultConfig_PlanParseRetry_EnvironmentConfiguration(t *testing.T) {
+	// Save and clear any existing env vars
+	oldEnabled := os.Getenv("GOMIND_PLAN_RETRY_ENABLED")
+	oldMax := os.Getenv("GOMIND_PLAN_RETRY_MAX")
+	defer func() {
+		if oldEnabled != "" {
+			os.Setenv("GOMIND_PLAN_RETRY_ENABLED", oldEnabled)
+		} else {
+			os.Unsetenv("GOMIND_PLAN_RETRY_ENABLED")
+		}
+		if oldMax != "" {
+			os.Setenv("GOMIND_PLAN_RETRY_MAX", oldMax)
+		} else {
+			os.Unsetenv("GOMIND_PLAN_RETRY_MAX")
+		}
+	}()
+
+	t.Run("disable retry via env", func(t *testing.T) {
+		os.Setenv("GOMIND_PLAN_RETRY_ENABLED", "false")
+		os.Unsetenv("GOMIND_PLAN_RETRY_MAX")
+
+		config := DefaultConfig()
+
+		if config.PlanParseRetryEnabled {
+			t.Error("Expected PlanParseRetryEnabled to be false from env")
+		}
+	})
+
+	t.Run("enable retry via env", func(t *testing.T) {
+		os.Setenv("GOMIND_PLAN_RETRY_ENABLED", "true")
+		os.Unsetenv("GOMIND_PLAN_RETRY_MAX")
+
+		config := DefaultConfig()
+
+		if !config.PlanParseRetryEnabled {
+			t.Error("Expected PlanParseRetryEnabled to be true from env")
+		}
+	})
+
+	t.Run("set max retries via env", func(t *testing.T) {
+		os.Unsetenv("GOMIND_PLAN_RETRY_ENABLED")
+		os.Setenv("GOMIND_PLAN_RETRY_MAX", "5")
+
+		config := DefaultConfig()
+
+		if config.PlanParseMaxRetries != 5 {
+			t.Errorf("Expected PlanParseMaxRetries 5, got %d", config.PlanParseMaxRetries)
+		}
+	})
+
+	t.Run("invalid max retries ignored", func(t *testing.T) {
+		os.Unsetenv("GOMIND_PLAN_RETRY_ENABLED")
+		os.Setenv("GOMIND_PLAN_RETRY_MAX", "invalid")
+
+		config := DefaultConfig()
+
+		// Should keep default value of 2
+		if config.PlanParseMaxRetries != 2 {
+			t.Errorf("Expected PlanParseMaxRetries 2 (default), got %d", config.PlanParseMaxRetries)
+		}
+	})
+
+	t.Run("negative max retries ignored", func(t *testing.T) {
+		os.Unsetenv("GOMIND_PLAN_RETRY_ENABLED")
+		os.Setenv("GOMIND_PLAN_RETRY_MAX", "-1")
+
+		config := DefaultConfig()
+
+		// Should keep default value of 2 (negative values are invalid)
+		if config.PlanParseMaxRetries != 2 {
+			t.Errorf("Expected PlanParseMaxRetries 2 (default), got %d", config.PlanParseMaxRetries)
+		}
+	})
+
+	t.Run("zero max retries is valid", func(t *testing.T) {
+		os.Unsetenv("GOMIND_PLAN_RETRY_ENABLED")
+		os.Setenv("GOMIND_PLAN_RETRY_MAX", "0")
+
+		config := DefaultConfig()
+
+		// Zero is valid (means no retries)
+		if config.PlanParseMaxRetries != 0 {
+			t.Errorf("Expected PlanParseMaxRetries 0, got %d", config.PlanParseMaxRetries)
+		}
+	})
+}
+
+// TestWithPlanParseRetry tests the functional option
+func TestWithPlanParseRetry(t *testing.T) {
+	t.Run("enable with max retries", func(t *testing.T) {
+		config := DefaultConfig()
+		opt := WithPlanParseRetry(true, 5)
+		opt(config)
+
+		if !config.PlanParseRetryEnabled {
+			t.Error("Expected PlanParseRetryEnabled to be true")
+		}
+		if config.PlanParseMaxRetries != 5 {
+			t.Errorf("Expected PlanParseMaxRetries 5, got %d", config.PlanParseMaxRetries)
+		}
+	})
+
+	t.Run("disable retry", func(t *testing.T) {
+		config := DefaultConfig()
+		opt := WithPlanParseRetry(false, 0)
+		opt(config)
+
+		if config.PlanParseRetryEnabled {
+			t.Error("Expected PlanParseRetryEnabled to be false")
+		}
+		if config.PlanParseMaxRetries != 0 {
+			t.Errorf("Expected PlanParseMaxRetries 0, got %d", config.PlanParseMaxRetries)
+		}
+	})
+
+	t.Run("negative max retries ignored", func(t *testing.T) {
+		config := DefaultConfig()
+		// Start with known values
+		config.PlanParseMaxRetries = 3
+
+		opt := WithPlanParseRetry(true, -1)
+		opt(config)
+
+		// Should not change the max retries when negative
+		if config.PlanParseMaxRetries != 3 {
+			t.Errorf("Expected PlanParseMaxRetries to remain 3, got %d", config.PlanParseMaxRetries)
+		}
+	})
+}
+
+// TestCreateOrchestratorWithOptions_PlanParseRetry tests orchestrator creation with retry options
+func TestCreateOrchestratorWithOptions_PlanParseRetry(t *testing.T) {
+	deps := OrchestratorDependencies{
+		Discovery: NewMockDiscovery(),
+		AIClient:  NewMockAIClient(),
+	}
+
+	orchestrator, err := CreateOrchestratorWithOptions(deps, WithPlanParseRetry(true, 3))
+	if err != nil {
+		t.Fatalf("Failed to create orchestrator: %v", err)
+	}
+
+	if !orchestrator.config.PlanParseRetryEnabled {
+		t.Error("Expected PlanParseRetryEnabled to be true")
+	}
+	if orchestrator.config.PlanParseMaxRetries != 3 {
+		t.Errorf("Expected PlanParseMaxRetries 3, got %d", orchestrator.config.PlanParseMaxRetries)
+	}
 }

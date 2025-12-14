@@ -262,7 +262,7 @@ Respond with ONLY the corrected JSON parameters object. No explanation, no markd
 	)
 
 	if o.logger != nil {
-		o.logger.Debug("Requesting LLM parameter correction", map[string]interface{}{
+		o.logger.DebugWithContext(ctx, "Requesting LLM parameter correction", map[string]interface{}{
 			"operation":  "layer3_correction_request",
 			"step_id":    step.StepID,
 			"capability": step.Metadata["capability"],
@@ -286,7 +286,7 @@ Respond with ONLY the corrected JSON parameters object. No explanation, no markd
 	}
 
 	if o.logger != nil {
-		o.logger.Debug("LLM parameter correction successful", map[string]interface{}{
+		o.logger.DebugWithContext(ctx, "LLM parameter correction successful", map[string]interface{}{
 			"operation":        "layer3_correction_success",
 			"step_id":          step.StepID,
 			"corrected_params": correctedParams,
@@ -356,11 +356,11 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	requestID := generateRequestID()
 
 	if o.logger != nil {
-		o.logger.Info("Starting request processing", map[string]interface{}{
-			"operation":     "process_request",
-			"request_id":    requestID,
+		o.logger.InfoWithContext(ctx, "Starting request processing", map[string]interface{}{
+			"operation":      "process_request",
+			"request_id":     requestID,
 			"request_length": len(request),
-			"metadata_keys": getMapKeys(metadata),
+			"metadata_keys":  getMapKeys(metadata),
 		})
 	}
 
@@ -380,10 +380,10 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	plan, err := o.generateExecutionPlan(ctx, request, requestID)
 	if err != nil {
 		if o.logger != nil {
-			o.logger.Error("Plan generation failed", map[string]interface{}{
-				"operation":  "plan_generation",
-				"request_id": requestID,
-				"error":      err.Error(),
+			o.logger.ErrorWithContext(ctx, "Plan generation failed", map[string]interface{}{
+				"operation":   "plan_generation",
+				"request_id":  requestID,
+				"error":       err.Error(),
 				"duration_ms": time.Since(startTime).Milliseconds(),
 			})
 		}
@@ -404,18 +404,18 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		toolsUsed := o.extractAgentsFromPlan(plan)
 		parallelGroups := countParallelGroups(plan)
 
-		o.logger.Info("Plan generated successfully", map[string]interface{}{
-			"operation":        "plan_generation",
-			"request_id":       requestID,
-			"plan_id":          plan.PlanID,
-			"step_count":       len(plan.Steps),
-			"tools_selected":   toolsUsed,
-			"parallel_groups":  parallelGroups,
+		o.logger.InfoWithContext(ctx, "Plan generated successfully", map[string]interface{}{
+			"operation":          "plan_generation",
+			"request_id":         requestID,
+			"plan_id":            plan.PlanID,
+			"step_count":         len(plan.Steps),
+			"tools_selected":     toolsUsed,
+			"parallel_groups":    parallelGroups,
 			"generation_time_ms": time.Since(startTime).Milliseconds(),
 		})
 
 		// Log full plan structure at DEBUG level
-		o.logger.Debug("Plan structure details", map[string]interface{}{
+		o.logger.DebugWithContext(ctx, "Plan structure details", map[string]interface{}{
 			"operation":  "plan_structure",
 			"request_id": requestID,
 			"plan_id":    plan.PlanID,
@@ -441,11 +441,11 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	result, err := o.executor.Execute(ctx, plan)
 	if err != nil {
 		if o.logger != nil {
-			o.logger.Error("Plan execution failed", map[string]interface{}{
-				"operation":  "plan_execution",
-				"request_id": requestID,
-				"plan_id":    plan.PlanID,
-				"error":      err.Error(),
+			o.logger.ErrorWithContext(ctx, "Plan execution failed", map[string]interface{}{
+				"operation":   "plan_execution",
+				"request_id":  requestID,
+				"plan_id":     plan.PlanID,
+				"error":       err.Error(),
 				"duration_ms": time.Since(startTime).Milliseconds(),
 			})
 		}
@@ -463,13 +463,13 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 				}
 			}
 		}
-		o.logger.Info("Plan execution completed", map[string]interface{}{
-			"operation":     "plan_execution",
-			"request_id":    requestID,
-			"plan_id":       plan.PlanID,
-			"success":       result != nil && result.Success,
-			"failed_steps":  failedSteps,
-			"duration_ms":   time.Since(startTime).Milliseconds(),
+		o.logger.InfoWithContext(ctx, "Plan execution completed", map[string]interface{}{
+			"operation":    "plan_execution",
+			"request_id":   requestID,
+			"plan_id":      plan.PlanID,
+			"success":      result != nil && result.Success,
+			"failed_steps": failedSteps,
+			"duration_ms":  time.Since(startTime).Milliseconds(),
 		})
 	}
 
@@ -497,7 +497,7 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	o.addToHistory(response)
 	
 	if o.logger != nil {
-		o.logger.Info("Request processing completed successfully", map[string]interface{}{
+		o.logger.InfoWithContext(ctx, "Request processing completed successfully", map[string]interface{}{
 			"operation":         "process_request_complete",
 			"request_id":        requestID,
 			"success":           true,
@@ -523,7 +523,7 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 	planGenStart := time.Now()
 
 	if o.logger != nil {
-		o.logger.Debug("Starting plan generation", map[string]interface{}{
+		o.logger.DebugWithContext(ctx, "Starting plan generation", map[string]interface{}{
 			"operation":  "plan_generation_start",
 			"request_id": requestID,
 		})
@@ -532,97 +532,202 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 	if o.aiClient == nil {
 		return nil, fmt.Errorf("AI client not configured")
 	}
-	
-	// Build prompt with capability information
+
+	// Build initial prompt with capability information
 	prompt, err := o.buildPlanningPrompt(ctx, request)
 	if err != nil {
 		return nil, err
 	}
 
-	if o.logger != nil {
-		o.logger.Debug("LLM prompt constructed", map[string]interface{}{
-			"operation":       "prompt_construction",
-			"request_id":      requestID,
-			"prompt_length":   len(prompt),
-			"estimated_tokens": len(prompt) / 4, // Rough estimate: 4 chars per token
-		})
+	// Determine max attempts: 1 initial + retries (if enabled)
+	maxAttempts := 1
+	if o.config != nil && o.config.PlanParseRetryEnabled {
+		maxAttempts = 1 + o.config.PlanParseMaxRetries
 	}
 
-	if o.logger != nil {
-		o.logger.Debug("Calling LLM for plan generation", map[string]interface{}{
-			"operation":   "llm_call",
-			"request_id":  requestID,
-			"temperature": 0.3,
-			"max_tokens":  2000,
-		})
-	}
+	var lastParseErr error
+	var totalTokensUsed int
 
-	// Telemetry: Record LLM prompt for visibility in Jaeger
-	// Truncate to avoid overwhelming trace storage while preserving useful context
-	telemetry.AddSpanEvent(ctx, "llm.plan_generation.request",
-		attribute.String("request_id", requestID),
-		attribute.String("prompt", truncateString(prompt, 2000)),
-		attribute.Int("prompt_length", len(prompt)),
-		attribute.Float64("temperature", 0.3),
-		attribute.Int("max_tokens", 2000),
-	)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if o.logger != nil {
+			o.logger.DebugWithContext(ctx, "LLM prompt constructed", map[string]interface{}{
+				"operation":        "prompt_construction",
+				"request_id":       requestID,
+				"prompt_length":    len(prompt),
+				"estimated_tokens": len(prompt) / 4, // Rough estimate: 4 chars per token
+				"attempt":          attempt,
+				"max_attempts":     maxAttempts,
+			})
+		}
 
-	// Call LLM
-	llmStartTime := time.Now()
-	aiResponse, err := o.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
-		Temperature:  0.3, // Lower temperature for more deterministic planning
-		MaxTokens:    2000,
-		SystemPrompt: "You are an intelligent orchestrator that creates execution plans for multi-agent systems.",
-	})
-	llmDuration := time.Since(llmStartTime)
+		if o.logger != nil {
+			o.logger.DebugWithContext(ctx, "Calling LLM for plan generation", map[string]interface{}{
+				"operation":   "llm_call",
+				"request_id":  requestID,
+				"temperature": 0.3,
+				"max_tokens":  2000,
+				"attempt":     attempt,
+			})
+		}
 
-	if err != nil {
-		telemetry.AddSpanEvent(ctx, "llm.plan_generation.error",
+		// Telemetry: Record LLM prompt for visibility in Jaeger
+		telemetry.AddSpanEvent(ctx, "llm.plan_generation.request",
 			attribute.String("request_id", requestID),
-			attribute.String("error", err.Error()),
-			attribute.Int64("duration_ms", llmDuration.Milliseconds()),
+			attribute.String("prompt", truncateString(prompt, 2000)),
+			attribute.Int("prompt_length", len(prompt)),
+			attribute.Float64("temperature", 0.3),
+			attribute.Int("max_tokens", 2000),
+			attribute.Int("attempt", attempt),
 		)
-		return nil, err
+
+		// Call LLM
+		llmStartTime := time.Now()
+		aiResponse, err := o.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
+			Temperature:  0.3, // Lower temperature for more deterministic planning
+			MaxTokens:    2000,
+			SystemPrompt: "You are an intelligent orchestrator that creates execution plans for multi-agent systems.",
+		})
+		llmDuration := time.Since(llmStartTime)
+
+		if err != nil {
+			telemetry.AddSpanEvent(ctx, "llm.plan_generation.error",
+				attribute.String("request_id", requestID),
+				attribute.String("error", err.Error()),
+				attribute.Int64("duration_ms", llmDuration.Milliseconds()),
+				attribute.Int("attempt", attempt),
+			)
+			// Unified Metrics: Record failed AI request
+			telemetry.RecordAIRequest(telemetry.ModuleOrchestration, "plan_generation",
+				float64(llmDuration.Milliseconds()), "error")
+			// Record overall plan generation failure (orchestration-local metrics)
+			telemetry.Histogram("plan_generation.duration_ms", float64(time.Since(planGenStart).Milliseconds()),
+				"module", telemetry.ModuleOrchestration, "status", "error")
+			telemetry.Counter("plan_generation.total",
+				"module", telemetry.ModuleOrchestration, "status", "error")
+			return nil, err
+		}
+
+		totalTokensUsed += aiResponse.Usage.TotalTokens
+
+		// Telemetry: Record LLM response for visibility in Jaeger
+		telemetry.AddSpanEvent(ctx, "llm.plan_generation.response",
+			attribute.String("request_id", requestID),
+			attribute.String("response", truncateString(aiResponse.Content, 2000)),
+			attribute.Int("response_length", len(aiResponse.Content)),
+			attribute.Int("prompt_tokens", aiResponse.Usage.PromptTokens),
+			attribute.Int("completion_tokens", aiResponse.Usage.CompletionTokens),
+			attribute.Int("total_tokens", aiResponse.Usage.TotalTokens),
+			attribute.Int64("duration_ms", llmDuration.Milliseconds()),
+			attribute.Int("attempt", attempt),
+		)
+
+		// Unified Metrics: Record successful AI request
+		telemetry.RecordAIRequest(telemetry.ModuleOrchestration, "plan_generation",
+			float64(llmDuration.Milliseconds()), "success")
+		// Record token usage (input and output separately)
+		telemetry.RecordAITokens(telemetry.ModuleOrchestration, "plan_generation",
+			"input", int64(aiResponse.Usage.PromptTokens))
+		telemetry.RecordAITokens(telemetry.ModuleOrchestration, "plan_generation",
+			"output", int64(aiResponse.Usage.CompletionTokens))
+
+		if o.logger != nil {
+			o.logger.DebugWithContext(ctx, "LLM response received", map[string]interface{}{
+				"operation":       "llm_response",
+				"request_id":      requestID,
+				"tokens_used":     aiResponse.Usage.TotalTokens,
+				"response_length": len(aiResponse.Content),
+				"attempt":         attempt,
+			})
+		}
+
+		// Parse the LLM response into a plan
+		plan, parseErr := o.parsePlan(aiResponse.Content)
+		if parseErr == nil {
+			// Success!
+			if o.logger != nil {
+				o.logger.DebugWithContext(ctx, "Plan generation completed successfully", map[string]interface{}{
+					"operation":        "plan_generation_complete",
+					"request_id":       requestID,
+					"plan_id":          plan.PlanID,
+					"step_count":       len(plan.Steps),
+					"total_time_ms":    time.Since(planGenStart).Milliseconds(),
+					"tokens_used":      totalTokensUsed,
+					"attempts_used":    attempt,
+					"retries_required": attempt - 1,
+				})
+			}
+			// Metrics: Record successful plan generation (orchestration-local)
+			telemetry.Histogram("plan_generation.duration_ms", float64(time.Since(planGenStart).Milliseconds()),
+				"module", telemetry.ModuleOrchestration, "status", "success")
+			telemetry.Counter("plan_generation.total",
+				"module", telemetry.ModuleOrchestration, "status", "success")
+			return plan, nil
+		}
+
+		// Parse failed - check if we should retry
+		lastParseErr = parseErr
+
+		// Telemetry: Record parse failure
+		willRetry := attempt < maxAttempts
+		telemetry.AddSpanEvent(ctx, "llm.plan_generation.parse_error",
+			attribute.String("request_id", requestID),
+			attribute.String("error", parseErr.Error()),
+			attribute.Int("attempt", attempt),
+			attribute.Bool("will_retry", willRetry),
+		)
+		// Metrics: Record parse error counter (orchestration-local)
+		willRetryStr := "false"
+		if willRetry {
+			willRetryStr = "true"
+		}
+		telemetry.Counter("plan_generation.parse_errors",
+			"module", telemetry.ModuleOrchestration, "will_retry", willRetryStr)
+
+		if o.logger != nil {
+			o.logger.WarnWithContext(ctx, "Plan parsing failed", map[string]interface{}{
+				"operation":    "plan_parse_error",
+				"request_id":   requestID,
+				"error":        parseErr.Error(),
+				"attempt":      attempt,
+				"max_attempts": maxAttempts,
+				"will_retry":   willRetry,
+			})
+		}
+
+		// If we have retries left, build a new prompt with error feedback
+		if willRetry {
+			// Metrics: Record retry attempt (orchestration-local)
+			telemetry.Counter("plan_generation.retries", "module", telemetry.ModuleOrchestration)
+			prompt, err = o.buildPlanningPromptWithParseError(ctx, request, parseErr)
+			if err != nil {
+				// If we can't build the retry prompt, return the original parse error
+				telemetry.Histogram("plan_generation.duration_ms", float64(time.Since(planGenStart).Milliseconds()),
+					"module", telemetry.ModuleOrchestration, "status", "error")
+				telemetry.Counter("plan_generation.total",
+					"module", telemetry.ModuleOrchestration, "status", "error")
+				return nil, lastParseErr
+			}
+		}
 	}
 
-	// Telemetry: Record LLM response for visibility in Jaeger
-	telemetry.AddSpanEvent(ctx, "llm.plan_generation.response",
-		attribute.String("request_id", requestID),
-		attribute.String("response", truncateString(aiResponse.Content, 2000)),
-		attribute.Int("response_length", len(aiResponse.Content)),
-		attribute.Int("prompt_tokens", aiResponse.Usage.PromptTokens),
-		attribute.Int("completion_tokens", aiResponse.Usage.CompletionTokens),
-		attribute.Int("total_tokens", aiResponse.Usage.TotalTokens),
-		attribute.Int64("duration_ms", llmDuration.Milliseconds()),
-	)
-
+	// All attempts exhausted
 	if o.logger != nil {
-		o.logger.Debug("LLM response received", map[string]interface{}{
-			"operation":       "llm_response",
-			"request_id":      requestID,
-			"tokens_used":     aiResponse.Usage.TotalTokens,
-			"response_length": len(aiResponse.Content),
+		o.logger.ErrorWithContext(ctx, "Plan generation failed after all retries", map[string]interface{}{
+			"operation":     "plan_generation_exhausted",
+			"request_id":    requestID,
+			"error":         lastParseErr.Error(),
+			"attempts_made": maxAttempts,
+			"total_tokens":  totalTokensUsed,
+			"total_time_ms": time.Since(planGenStart).Milliseconds(),
 		})
 	}
 
-	// Parse the LLM response into a plan
-	plan, err := o.parsePlan(aiResponse.Content)
-	if err != nil {
-		return nil, err
-	}
-
-	if o.logger != nil {
-		o.logger.Debug("Plan generation completed successfully", map[string]interface{}{
-			"operation":      "plan_generation_complete",
-			"request_id":     requestID,
-			"plan_id":        plan.PlanID,
-			"step_count":     len(plan.Steps),
-			"total_time_ms":  time.Since(planGenStart).Milliseconds(),
-			"tokens_used":    aiResponse.Usage.TotalTokens,
-		})
-	}
-
-	return plan, nil
+	// Metrics: Record final plan generation failure after all retries (orchestration-local)
+	telemetry.Histogram("plan_generation.duration_ms", float64(time.Since(planGenStart).Milliseconds()),
+		"module", telemetry.ModuleOrchestration, "status", "error")
+	telemetry.Counter("plan_generation.total",
+		"module", telemetry.ModuleOrchestration, "status", "error")
+	return nil, lastParseErr
 }
 
 // buildPlanningPrompt constructs the prompt for the LLM using capability provider
@@ -652,7 +757,7 @@ func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string
 	}
 
 	if o.logger != nil {
-		o.logger.Debug("Capability information retrieved", map[string]interface{}{
+		o.logger.DebugWithContext(ctx, "Capability information retrieved", map[string]interface{}{
 			"operation":       "capability_query",
 			"capability_size": len(capabilityInfo),
 			"provider_type":   o.config.CapabilityProviderType,
@@ -673,7 +778,7 @@ func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string
 		prompt, err := o.promptBuilder.BuildPlanningPrompt(ctx, input)
 		if err != nil {
 			if o.logger != nil {
-				o.logger.Warn("PromptBuilder failed, falling back to default prompt", map[string]interface{}{
+				o.logger.WarnWithContext(ctx, "PromptBuilder failed, falling back to default prompt", map[string]interface{}{
 					"operation": "prompt_builder_fallback",
 					"error":     err.Error(),
 				})
@@ -739,6 +844,37 @@ CRITICAL FORMAT RULES:
 - Do NOT wrap the JSON in code fences
 
 Response (JSON only):`, capabilityInfo, request), nil
+}
+
+// buildPlanningPromptWithParseError constructs a retry prompt that includes the parse error
+// context to help the LLM generate valid JSON on subsequent attempts.
+func (o *AIOrchestrator) buildPlanningPromptWithParseError(ctx context.Context, request string, parseErr error) (string, error) {
+	// Get the base prompt first
+	basePrompt, err := o.buildPlanningPrompt(ctx, request)
+	if err != nil {
+		return "", err
+	}
+
+	// Construct error feedback section
+	errorFeedback := fmt.Sprintf(`
+IMPORTANT: Your previous response could not be parsed as valid JSON.
+
+Parse Error: %s
+
+Common JSON mistakes to avoid:
+- NO arithmetic expressions: "amount": 100 * price is INVALID JSON
+- NO markdown formatting: **bold** and *italic* are INVALID in JSON strings
+- NO code blocks: Do not wrap JSON in triple backticks
+- NO trailing commas: {"a": 1,} is INVALID (remove trailing comma)
+- NO comments: // comments are INVALID in JSON
+- ALL string values must be in double quotes
+- ALL keys must be in double quotes
+
+Please regenerate a VALID JSON execution plan. Start with { and end with }.`,
+		parseErr.Error())
+
+	// Insert error feedback before the base prompt's final instruction
+	return errorFeedback + "\n\n" + basePrompt, nil
 }
 
 // parsePlan parses the LLM response into a RoutingPlan

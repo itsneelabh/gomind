@@ -607,3 +607,197 @@ func (m *mockAIClientForCorrection) GenerateResponse(ctx context.Context, prompt
 	}
 	return &core.AIResponse{Content: m.response}, nil
 }
+
+// =============================================================================
+// Plan Parse Retry Tests
+// =============================================================================
+
+// TestAIOrchestrator_BuildPlanningPromptWithParseError tests the error feedback prompt
+func TestAIOrchestrator_BuildPlanningPromptWithParseError(t *testing.T) {
+	discovery := NewMockDiscovery()
+	aiClient := NewMockAIClient()
+	config := DefaultConfig()
+
+	orchestrator := NewAIOrchestrator(config, discovery, aiClient)
+
+	// Set up a default prompt builder to avoid nil pointer
+	builder, _ := NewDefaultPromptBuilder(nil)
+	orchestrator.SetPromptBuilder(builder)
+
+	// Create a sample parse error
+	parseErr := fmt.Errorf("invalid character '*' after object key:value pair")
+
+	prompt, err := orchestrator.buildPlanningPromptWithParseError(context.Background(), "test request", parseErr)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	// Verify the prompt contains error feedback
+	if !strings.Contains(prompt, "IMPORTANT: Your previous response could not be parsed as valid JSON") {
+		t.Error("Expected error feedback header in prompt")
+	}
+
+	if !strings.Contains(prompt, "invalid character '*'") {
+		t.Error("Expected parse error message in prompt")
+	}
+
+	if !strings.Contains(prompt, "NO arithmetic expressions") {
+		t.Error("Expected arithmetic expression warning in prompt")
+	}
+
+	if !strings.Contains(prompt, "NO markdown formatting") {
+		t.Error("Expected markdown formatting warning in prompt")
+	}
+
+	if !strings.Contains(prompt, "NO trailing commas") {
+		t.Error("Expected trailing comma warning in prompt")
+	}
+}
+
+// TestAIOrchestrator_GenerateExecutionPlan_RetryDisabled tests behavior when retry is disabled
+func TestAIOrchestrator_GenerateExecutionPlan_RetryDisabled(t *testing.T) {
+	discovery := NewMockDiscovery()
+
+	// Mock AI client that returns invalid JSON
+	mockAI := &mockAIClientForRetry{
+		responses: []string{
+			"this is not valid JSON",
+		},
+	}
+
+	config := DefaultConfig()
+	config.PlanParseRetryEnabled = false // Disable retry
+
+	orchestrator := NewAIOrchestrator(config, discovery, mockAI)
+
+	// Set up a default prompt builder
+	builder, _ := NewDefaultPromptBuilder(nil)
+	orchestrator.SetPromptBuilder(builder)
+
+	_, err := orchestrator.generateExecutionPlan(context.Background(), "test request", "test-123")
+
+	if err == nil {
+		t.Fatal("Expected error when parsing invalid JSON")
+	}
+
+	// Should have only made 1 call (no retry)
+	if mockAI.callCount != 1 {
+		t.Errorf("Expected 1 call (no retry), got %d", mockAI.callCount)
+	}
+}
+
+// TestAIOrchestrator_GenerateExecutionPlan_RetrySuccess tests successful retry
+func TestAIOrchestrator_GenerateExecutionPlan_RetrySuccess(t *testing.T) {
+	discovery := NewMockDiscovery()
+
+	// Mock AI client that fails first, then succeeds
+	validJSON := `{
+		"plan_id": "test-123",
+		"original_request": "test request",
+		"mode": "autonomous",
+		"steps": [
+			{
+				"step_id": "step-1",
+				"agent_name": "test-agent",
+				"namespace": "default",
+				"instruction": "do something"
+			}
+		]
+	}`
+
+	mockAI := &mockAIClientForRetry{
+		responses: []string{
+			"invalid JSON with * arithmetic",
+			validJSON,
+		},
+	}
+
+	config := DefaultConfig()
+	config.PlanParseRetryEnabled = true
+	config.PlanParseMaxRetries = 2
+
+	orchestrator := NewAIOrchestrator(config, discovery, mockAI)
+
+	// Set up a default prompt builder
+	builder, _ := NewDefaultPromptBuilder(nil)
+	orchestrator.SetPromptBuilder(builder)
+
+	plan, err := orchestrator.generateExecutionPlan(context.Background(), "test request", "test-123")
+
+	if err != nil {
+		t.Fatalf("Expected successful retry, got error: %v", err)
+	}
+
+	if plan == nil {
+		t.Fatal("Expected plan to be returned")
+	}
+
+	if plan.PlanID != "test-123" {
+		t.Errorf("Expected plan_id 'test-123', got %s", plan.PlanID)
+	}
+
+	// Should have made 2 calls (initial + 1 retry)
+	if mockAI.callCount != 2 {
+		t.Errorf("Expected 2 calls (initial + 1 retry), got %d", mockAI.callCount)
+	}
+}
+
+// TestAIOrchestrator_GenerateExecutionPlan_AllRetriesExhausted tests when all retries fail
+func TestAIOrchestrator_GenerateExecutionPlan_AllRetriesExhausted(t *testing.T) {
+	discovery := NewMockDiscovery()
+
+	// Mock AI client that always returns invalid JSON
+	mockAI := &mockAIClientForRetry{
+		responses: []string{
+			"invalid JSON 1",
+			"invalid JSON 2",
+			"invalid JSON 3",
+		},
+	}
+
+	config := DefaultConfig()
+	config.PlanParseRetryEnabled = true
+	config.PlanParseMaxRetries = 2
+
+	orchestrator := NewAIOrchestrator(config, discovery, mockAI)
+
+	// Set up a default prompt builder
+	builder, _ := NewDefaultPromptBuilder(nil)
+	orchestrator.SetPromptBuilder(builder)
+
+	_, err := orchestrator.generateExecutionPlan(context.Background(), "test request", "test-123")
+
+	if err == nil {
+		t.Fatal("Expected error when all retries exhausted")
+	}
+
+	// Should have made 3 calls (initial + 2 retries)
+	if mockAI.callCount != 3 {
+		t.Errorf("Expected 3 calls (initial + 2 retries), got %d", mockAI.callCount)
+	}
+}
+
+// mockAIClientForRetry is a mock AI client that returns different responses on each call
+type mockAIClientForRetry struct {
+	responses []string
+	callCount int
+}
+
+func (m *mockAIClientForRetry) GenerateResponse(ctx context.Context, prompt string, opts *core.AIOptions) (*core.AIResponse, error) {
+	idx := m.callCount
+	m.callCount++
+
+	if idx >= len(m.responses) {
+		idx = len(m.responses) - 1
+	}
+
+	return &core.AIResponse{
+		Content: m.responses[idx],
+		Usage: core.TokenUsage{
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+		},
+	}, nil
+}
