@@ -22,7 +22,13 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	// Initialize telemetry
+	// Create weather tool FIRST so component type is set for telemetry
+	// The tool constructor calls core.SetCurrentComponentType(ComponentTypeTool)
+	// which enables automatic service_type inference in telemetry
+	tool := NewWeatherTool()
+
+	// Initialize telemetry AFTER tool creation
+	// This ensures core.GetCurrentComponentType() returns "tool" for auto-inference
 	initTelemetry("weather-tool-v2")
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -31,9 +37,6 @@ func main() {
 			log.Printf("Warning: Telemetry shutdown error: %v", err)
 		}
 	}()
-
-	// Create weather tool
-	tool := NewWeatherTool()
 
 	// Get port configuration from environment
 	port := 8096 // default for weather-tool-v2

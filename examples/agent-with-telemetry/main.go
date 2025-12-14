@@ -13,6 +13,7 @@
 //	REDIS_URL                      - Redis connection URL (required)
 //	PORT                           - HTTP server port (default: 8092)
 //	NAMESPACE                      - Kubernetes namespace for service discovery
+//	GOMIND_K8S_SERVICE_NAME        - Service name for registration and telemetry (required)
 //	OPENAI_API_KEY                 - OpenAI API key for AI capabilities
 //	APP_ENV                        - Environment: development, staging, production
 //	OTEL_EXPORTER_OTLP_ENDPOINT    - OpenTelemetry collector endpoint
@@ -58,9 +59,20 @@ func main() {
 		log.Fatalf("❌ Configuration error: %v", err)
 	}
 
-	// 2. Initialize telemetry BEFORE creating agent
-	// This ensures all agent operations are instrumented from the start
-	initTelemetry("research-assistant-telemetry")
+	// Get service name from environment (validated above)
+	serviceName := getServiceName()
+
+	// 2. Create research agent FIRST so component type is set for telemetry
+	// The agent constructor calls core.SetCurrentComponentType(ComponentTypeAgent)
+	// which enables automatic service_type inference in telemetry
+	agent, err := NewResearchAgent()
+	if err != nil {
+		log.Fatalf("Failed to create research agent: %v", err)
+	}
+
+	// 3. Initialize telemetry AFTER agent creation
+	// This ensures core.GetCurrentComponentType() returns "agent" for auto-inference
+	initTelemetry(serviceName)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -68,12 +80,6 @@ func main() {
 			log.Printf("⚠️  Warning: Telemetry shutdown error: %v", err)
 		}
 	}()
-
-	// 3. Create research agent
-	agent, err := NewResearchAgent()
-	if err != nil {
-		log.Fatalf("Failed to create research agent: %v", err)
-	}
 
 	// Initialize schema cache with Redis (for Phase 3 validation caching)
 	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
@@ -114,7 +120,7 @@ func main() {
 
 	// 5. Create framework with configuration
 	framework, err := core.NewFramework(agent,
-		core.WithName("research-assistant-telemetry"),
+		core.WithName(serviceName),
 		core.WithPort(port),
 		core.WithNamespace(os.Getenv("NAMESPACE")),
 		core.WithRedisURL(os.Getenv("REDIS_URL")),
@@ -123,7 +129,7 @@ func main() {
 		core.WithDevelopmentMode(os.Getenv("DEV_MODE") == "true"),
 
 		// Distributed tracing middleware for context propagation
-		core.WithMiddleware(telemetry.TracingMiddleware("research-assistant-telemetry")),
+		core.WithMiddleware(telemetry.TracingMiddleware(serviceName)),
 	)
 	if err != nil {
 		log.Fatalf("Failed to create framework: %v", err)
@@ -135,12 +141,12 @@ func main() {
 	startupMs := float64(startupDuration.Microseconds()) / 1000.0
 	telemetry.Histogram("agent.startup.duration_ms",
 		startupMs,
-		"agent", "research-assistant-telemetry",
+		"agent", serviceName,
 		"status", "success",
 	)
 	telemetry.Gauge("agent.capabilities.count",
 		float64(len(agent.Capabilities)),
-		"agent", "research-assistant-telemetry",
+		"agent", serviceName,
 	)
 
 	// 6b. Perform initial service discovery to populate metrics
@@ -220,6 +226,11 @@ func validateConfig() error {
 		return fmt.Errorf("invalid REDIS_URL format (must start with redis:// or rediss://)")
 	}
 
+	// GOMIND_K8S_SERVICE_NAME is required for consistent naming
+	if os.Getenv("GOMIND_K8S_SERVICE_NAME") == "" {
+		return fmt.Errorf("GOMIND_K8S_SERVICE_NAME environment variable required")
+	}
+
 	// Validate port if set
 	if portStr := os.Getenv("PORT"); portStr != "" {
 		if _, err := strconv.Atoi(portStr); err != nil {
@@ -228,6 +239,12 @@ func validateConfig() error {
 	}
 
 	return nil
+}
+
+// getServiceName returns the service name from GOMIND_K8S_SERVICE_NAME environment variable.
+// This ensures consistent naming across Redis registration, telemetry, and Kubernetes resources.
+func getServiceName() string {
+	return os.Getenv("GOMIND_K8S_SERVICE_NAME")
 }
 
 // initTelemetry sets up telemetry based on environment with graceful degradation

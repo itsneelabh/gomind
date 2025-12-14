@@ -3,8 +3,8 @@ module github.com/itsneelabh/gomind/examples/country-info-tool
 go 1.25
 
 require (
-	github.com/itsneelabh/gomind/core v0.7.5
-	github.com/itsneelabh/gomind/telemetry v0.7.5
+	github.com/itsneelabh/gomind/core v0.7.7
+	github.com/itsneelabh/gomind/telemetry v0.7.7
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0
 	go.opentelemetry.io/otel v1.38.0
 )

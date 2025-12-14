@@ -40,6 +40,10 @@ data:
         namespace: "gomind"
         const_labels:
           cluster: "gomind-examples"
+        # Convert OTel resource attributes to Prometheus labels
+        # This enables service.type → service_type for dashboard segregation
+        resource_to_telemetry_conversion:
+          enabled: true
 
       # Export traces to Jaeger via OTLP gRPC
       otlp/jaeger:

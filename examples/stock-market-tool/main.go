@@ -22,7 +22,13 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	// Initialize telemetry
+	// Create stock market tool FIRST so component type is set for telemetry
+	// The tool constructor calls core.SetCurrentComponentType(ComponentTypeTool)
+	// which enables automatic service_type inference in telemetry
+	tool := NewStockTool()
+
+	// Initialize telemetry AFTER tool creation
+	// This ensures core.GetCurrentComponentType() returns "tool" for auto-inference
 	initTelemetry("stock-service")
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -31,9 +37,6 @@ func main() {
 			log.Printf("⚠️  Warning: Telemetry shutdown error: %v", err)
 		}
 	}()
-
-	// Create stock market tool
-	tool := NewStockTool()
 
 	// Get port configuration from environment
 	port := 8082 // default (8080 is weather, 8081 might be used)

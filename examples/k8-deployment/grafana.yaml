@@ -217,11 +217,30 @@ data:
             },
             "overrides": []
           },
-          "gridPos": {"h": 3, "w": 4, "x": 4, "y": 1},
+          "gridPos": {"h": 3, "w": 2, "x": 4, "y": 1},
           "id": 2,
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
           "pluginVersion": "10.0.0",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "count(count by (exported_job) (gomind_agent_research_duration_ms_count or gomind_orchestration_workflow_duration_ms_count))", "refId": "A"}],
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "count(count by (exported_job) (gomind_request_total{service_type=\"tool\"}))", "refId": "A"}],
+          "title": "Active Tools",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "purple", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 3, "w": 2, "x": 6, "y": 1},
+          "id": 20,
+          "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+          "pluginVersion": "10.0.0",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "count(count by (exported_job) (gomind_request_total{service_type=\"agent\"}))", "refId": "A"}],
           "title": "Active Agents",
           "type": "stat"
         },
@@ -240,7 +259,7 @@ data:
           "id": 3,
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
           "pluginVersion": "10.0.0",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(gomind_agent_tool_call_success_total)", "refId": "A"}],
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(gomind_tool_call_total{status=\"success\"})", "refId": "A"}],
           "title": "Total Tool Calls",
           "type": "stat"
         },
@@ -259,7 +278,7 @@ data:
           "id": 4,
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
           "pluginVersion": "10.0.0",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(gomind_agent_tool_call_errors_total) or vector(0)", "refId": "A"}],
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(gomind_tool_call_errors_total) or vector(0)", "refId": "A"}],
           "title": "Total Errors",
           "type": "stat"
         },
@@ -278,7 +297,7 @@ data:
           "id": 5,
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
           "pluginVersion": "10.0.0",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(gomind_agent_ai_requests_count) or vector(0)", "refId": "A"}],
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(gomind_ai_request_total) or vector(0)", "refId": "A"}],
           "title": "AI Requests",
           "type": "stat"
         },
@@ -297,8 +316,8 @@ data:
           "id": 6,
           "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
           "pluginVersion": "10.0.0",
-          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(gomind_agent_research_duration_ms_count)", "refId": "A"}],
-          "title": "Research Requests",
+          "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(gomind_request_total)", "refId": "A"}],
+          "title": "Total Requests",
           "type": "stat"
         },
         {
@@ -330,11 +349,11 @@ data:
           "options": {"cellHeight": "sm", "footer": {"countRows": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true, "sortBy": [{"desc": true, "displayName": "Requests"}]},
           "pluginVersion": "10.0.0",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (exported_job) (gomind_agent_research_duration_ms_count) or sum by (exported_job) (gomind_orchestration_workflow_duration_ms_count)", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "Requests"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (exported_job) (gomind_agent_tool_call_success_total) or sum by (exported_job) (gomind_orchestration_natural_requests_count)", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "ToolCalls"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (exported_job) (gomind_agent_tool_call_errors_total) or sum by (exported_job) (gomind_agent_research_duration_ms_count) * 0 or sum by (exported_job) (gomind_orchestration_workflow_duration_ms_count) * 0", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "Errors"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (exported_job) (gomind_agent_ai_requests_count) or sum by (exported_job) (gomind_orchestration_ai_synthesis_duration_ms_count) or sum by (exported_job) (gomind_agent_research_duration_ms_count) * 0 or sum by (exported_job) (gomind_orchestration_workflow_duration_ms_count) * 0", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "AIRequests"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (exported_job) (rate(gomind_agent_research_duration_ms_sum[5m]) / rate(gomind_agent_research_duration_ms_count[5m])) or avg by (exported_job) (rate(gomind_orchestration_workflow_duration_ms_sum[5m]) / rate(gomind_orchestration_workflow_duration_ms_count[5m]))", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "AvgLatency"}
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (exported_job) (gomind_request_total)", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "Requests"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (exported_job) (gomind_tool_call_total{status=\"success\"})", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "ToolCalls"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (exported_job) (gomind_tool_call_errors_total) or sum by (exported_job) (gomind_request_total) * 0", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "Errors"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (exported_job) (gomind_ai_request_total) or sum by (exported_job) (gomind_request_total) * 0", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "AIRequests"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (exported_job) (rate(gomind_request_duration_ms_sum[5m]) / rate(gomind_request_duration_ms_count[5m]))", "format": "table", "instant": true, "legendFormat": "{{exported_job}}", "refId": "AvgLatency"}
           ],
           "title": "Agent Status Table",
           "transformations": [
@@ -405,15 +424,15 @@ data:
           "options": {"cellHeight": "sm", "footer": {"countRows": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true, "sortBy": [{"desc": true, "displayName": "Success Calls"}]},
           "pluginVersion": "10.0.0",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (tool) (gomind_agent_tool_call_success_total)", "format": "table", "instant": true, "legendFormat": "{{tool}}", "refId": "SuccessCalls"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (tool) (gomind_agent_tool_call_errors_total) or sum by (tool) (gomind_agent_tool_call_success_total) * 0", "format": "table", "instant": true, "legendFormat": "{{tool}}", "refId": "Errors"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (tool) (gomind_agent_tool_call_retry_count) or sum by (tool) (gomind_agent_tool_call_success_total) * 0", "format": "table", "instant": true, "legendFormat": "{{tool}}", "refId": "Retries"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (tool) (rate(gomind_agent_tool_call_duration_ms_sum[5m]) / rate(gomind_agent_tool_call_duration_ms_count[5m]))", "format": "table", "instant": true, "legendFormat": "{{tool}}", "refId": "AvgLatency"}
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (tool_name) (gomind_tool_call_total{status=\"success\"})", "format": "table", "instant": true, "legendFormat": "{{tool_name}}", "refId": "SuccessCalls"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (tool_name) (gomind_tool_call_errors_total) or sum by (tool_name) (gomind_tool_call_total{status=\"success\"}) * 0", "format": "table", "instant": true, "legendFormat": "{{tool_name}}", "refId": "Errors"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (tool_name) (gomind_tool_call_retries_total) or sum by (tool_name) (gomind_tool_call_total{status=\"success\"}) * 0", "format": "table", "instant": true, "legendFormat": "{{tool_name}}", "refId": "Retries"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "avg by (tool_name) (rate(gomind_tool_call_duration_ms_sum[5m]) / rate(gomind_tool_call_duration_ms_count[5m]))", "format": "table", "instant": true, "legendFormat": "{{tool_name}}", "refId": "AvgLatency"}
           ],
           "title": "Tool Call Performance (by Tool Name)",
           "transformations": [
-            {"id": "seriesToColumns", "options": {"byField": "tool"}},
-            {"id": "organize", "options": {"excludeByName": {"Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true}, "indexByName": {}, "renameByName": {"Value #AvgLatency": "Avg Latency (ms)", "Value #Errors": "Errors", "Value #Retries": "Retries", "Value #SuccessCalls": "Success Calls", "tool": "Tool"}}}
+            {"id": "seriesToColumns", "options": {"byField": "tool_name"}},
+            {"id": "organize", "options": {"excludeByName": {"Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true}, "indexByName": {}, "renameByName": {"Value #AvgLatency": "Avg Latency (ms)", "Value #Errors": "Errors", "Value #Retries": "Retries", "Value #SuccessCalls": "Success Calls", "tool_name": "Tool"}}}
           ],
           "type": "table"
         },
@@ -442,10 +461,10 @@ data:
           "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
           "pluginVersion": "10.0.0",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(gomind_agent_research_duration_ms_sum[5m]) / rate(gomind_agent_research_duration_ms_count[5m])", "legendFormat": "Avg Research Duration", "refId": "A"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, rate(gomind_agent_research_duration_ms_bucket[5m]))", "legendFormat": "P95 Research Duration", "refId": "B"}
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(gomind_request_duration_ms_sum[5m]) / rate(gomind_request_duration_ms_count[5m])", "legendFormat": "Avg Request Duration", "refId": "A"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, rate(gomind_request_duration_ms_bucket[5m]))", "legendFormat": "P95 Request Duration", "refId": "B"}
           ],
-          "title": "Research Operation Duration",
+          "title": "Request Duration",
           "type": "timeseries"
         },
         {
@@ -465,10 +484,10 @@ data:
           "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
           "pluginVersion": "10.0.0",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(gomind_agent_ai_synthesis_duration_ms_sum[5m]) / rate(gomind_agent_ai_synthesis_duration_ms_count[5m])", "legendFormat": "Avg AI Synthesis", "refId": "A"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, rate(gomind_agent_ai_synthesis_duration_ms_bucket[5m]))", "legendFormat": "P95 AI Synthesis", "refId": "B"}
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(gomind_ai_request_duration_ms_sum[5m]) / rate(gomind_ai_request_duration_ms_count[5m])", "legendFormat": "Avg AI Request", "refId": "A"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, rate(gomind_ai_request_duration_ms_bucket[5m]))", "legendFormat": "P95 AI Request", "refId": "B"}
           ],
-          "title": "AI Synthesis Duration",
+          "title": "AI Request Duration",
           "type": "timeseries"
         },
         {
@@ -488,8 +507,8 @@ data:
           "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
           "pluginVersion": "10.0.0",
           "targets": [
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(gomind_agent_tool_call_duration_ms_sum[5m]) / rate(gomind_agent_tool_call_duration_ms_count[5m])", "legendFormat": "Avg Tool Call {{tool}}", "refId": "A"},
-            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, rate(gomind_agent_tool_call_duration_ms_bucket[5m]))", "legendFormat": "P95 Tool Call", "refId": "B"}
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(gomind_tool_call_duration_ms_sum[5m]) / rate(gomind_tool_call_duration_ms_count[5m])", "legendFormat": "Avg Tool Call {{tool_name}}", "refId": "A"},
+            {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, rate(gomind_tool_call_duration_ms_bucket[5m]))", "legendFormat": "P95 Tool Call", "refId": "B"}
           ],
           "title": "Tool Call Duration",
           "type": "timeseries"

@@ -4,8 +4,8 @@ go 1.25
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/itsneelabh/gomind/ai v0.7.5
-	github.com/itsneelabh/gomind/core v0.7.5
+	github.com/itsneelabh/gomind/ai v0.7.7
+	github.com/itsneelabh/gomind/core v0.7.7
 )
 
 require (

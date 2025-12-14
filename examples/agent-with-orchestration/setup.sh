@@ -281,13 +281,9 @@ build_tools() {
 build_docker() {
     log_info "Building Docker images..."
 
-    # Use workspace Dockerfile to build with local (unpublished) gomind changes
-    # This builds from the project root, copying all workspace modules
-    local PROJECT_ROOT="$(dirname "$(dirname "$AGENT_DIR")")"
-
-    log_info "Building from workspace root: $PROJECT_ROOT"
-    docker build -f "$AGENT_DIR/Dockerfile.workspace" -t travel-research-agent:latest "$PROJECT_ROOT"
-    log_success "travel-research-agent:latest built (using workspace)"
+    # Build using the standalone Dockerfile (fetches gomind from GitHub)
+    docker build -t travel-research-agent:latest "$AGENT_DIR"
+    log_success "travel-research-agent:latest built"
 }
 
 # Load images to Kind

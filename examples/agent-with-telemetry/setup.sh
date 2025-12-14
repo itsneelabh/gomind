@@ -98,13 +98,18 @@ cmd_run() {
     ./research-agent-telemetry
 }
 
-# Build Docker image
+# Build Docker image with local workspace dependencies
 cmd_docker_build() {
-    print_header "Building Docker Image"
+    print_header "Building Docker Image (Local Workspace)"
 
-    docker build -t $APP_NAME:latest .
+    print_info "Building from workspace root with local modules..."
+    print_info "This includes any uncommitted changes to core/ai/telemetry modules"
 
-    print_success "Docker image built: $APP_NAME:latest"
+    # Navigate to workspace root and build
+    WORKSPACE_ROOT="$SCRIPT_DIR/../.."
+    docker build -f "$SCRIPT_DIR/Dockerfile.workspace" -t $APP_NAME:latest "$WORKSPACE_ROOT"
+
+    print_success "Docker image built with local workspace: $APP_NAME:latest"
 }
 
 # Create Kind cluster with port mappings for monitoring
@@ -436,7 +441,7 @@ cmd_help() {
     echo "  full-deploy   Complete deployment: cluster + infra + agent + port forwards"
     echo ""
     echo "Kubernetes Deployment Commands:"
-    echo "  docker-build  Build Docker image"
+    echo "  docker-build  Build Docker image with local workspace modules"
     echo "  deploy        Build, load, and deploy to Kubernetes"
     echo "  test          Run test requests against deployed agent"
     echo "  forward       Port forward the agent service only"

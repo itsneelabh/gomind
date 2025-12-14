@@ -21,14 +21,19 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
+	// Create news tool FIRST so component type is set for telemetry
+	// The tool constructor calls core.SetCurrentComponentType(ComponentTypeTool)
+	// which enables automatic service_type inference in telemetry
+	tool := NewNewsTool()
+
+	// Initialize telemetry AFTER tool creation
+	// This ensures core.GetCurrentComponentType() returns "tool" for auto-inference
 	initTelemetry("news-tool")
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		telemetry.Shutdown(ctx)
 	}()
-
-	tool := NewNewsTool()
 
 	port := 8099
 	if portStr := os.Getenv("PORT"); portStr != "" {

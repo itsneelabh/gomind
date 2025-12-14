@@ -193,13 +193,6 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 ) *ToolResult {
 	startTime := time.Now()
 
-	// Track total duration including retries
-	defer func() {
-		telemetry.Histogram("agent.tool_call.duration_ms",
-			float64(time.Since(startTime).Milliseconds()),
-			"tool", tool.Name)
-	}()
-
 	endpoint := capability.Endpoint
 	if endpoint == "" {
 		endpoint = fmt.Sprintf("/api/capabilities/%s", capability.Name)
@@ -214,7 +207,7 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 			"tool":  tool.Name,
 			"error": err.Error(),
 		})
-		telemetry.Counter("agent.tool_call.errors", "tool", tool.Name, "error_type", "payload_generation")
+		telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, "payload_generation")
 		return &ToolResult{
 			ToolName:   tool.Name,
 			Capability: capability.Name,
@@ -242,7 +235,7 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 				"attempt": attempt + 1,
 				"payload": currentPayload,
 			})
-			telemetry.Counter("agent.tool_call.retry", "tool", tool.Name, "attempt", fmt.Sprintf("%d", attempt+1))
+			telemetry.RecordToolCallRetry(telemetry.ModuleAgent, tool.Name)
 		}
 
 		// Make HTTP request
@@ -252,7 +245,7 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 		if err != nil {
 			cancel()
 			r.Logger.Error("Tool call request creation failed", map[string]interface{}{"tool": tool.Name, "error": err.Error()})
-			telemetry.Counter("agent.tool_call.errors", "tool", tool.Name, "error_type", "request_creation")
+			telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, "request_creation")
 			return &ToolResult{
 				ToolName:   tool.Name,
 				Capability: capability.Name,
@@ -273,7 +266,7 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 				"error":   err.Error(),
 				"attempt": attempt + 1,
 			})
-			telemetry.Counter("agent.tool_call.errors", "tool", tool.Name, "error_type", classifyError(err))
+			telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, classifyError(err))
 			if attempt < config.MaxRetries {
 				time.Sleep(config.BackoffDuration)
 				continue // Retry with same payload
@@ -291,7 +284,7 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 		resp.Body.Close()
 		if err != nil {
 			r.Logger.Error("Tool call response reading failed", map[string]interface{}{"tool": tool.Name, "error": err.Error()})
-			telemetry.Counter("agent.tool_call.errors", "tool", tool.Name, "error_type", "response_reading")
+			telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, "response_reading")
 			if attempt < config.MaxRetries {
 				continue
 			}
@@ -332,7 +325,6 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 						"tool":    tool.Name,
 						"attempt": attempt + 1,
 					})
-					telemetry.Counter("agent.retry.success", "tool", tool.Name)
 				}
 
 				r.Logger.Info("Tool call completed", map[string]interface{}{
@@ -341,7 +333,8 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 					"success":    true,
 					"topic":      topic,
 				})
-				telemetry.Counter("agent.tool_call.success", "tool", tool.Name)
+				telemetry.RecordToolCall(telemetry.ModuleAgent, tool.Name,
+					float64(time.Since(startTime).Milliseconds()), "success")
 
 				return &ToolResult{
 					ToolName:   tool.Name,
@@ -375,7 +368,7 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 			"error_msg":   lastError.Message,
 			"attempt":     attempt + 1,
 		})
-		telemetry.Counter("agent.tool_call.errors", "tool", tool.Name, "error_type", fmt.Sprintf("http_%d", resp.StatusCode))
+		telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, fmt.Sprintf("http_%d", resp.StatusCode))
 
 		// ===== HTTP Status Code Decision Flow =====
 
@@ -466,7 +459,6 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 					"attempt":           attempt + 2,
 					"corrected_payload": correctedPayload,
 				})
-				telemetry.Counter("agent.retry.ai_correction", "tool", tool.Name)
 
 				currentPayload = correctedPayload
 				continue // Retry with CORRECTED payload

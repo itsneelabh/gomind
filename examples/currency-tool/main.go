@@ -21,6 +21,13 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
+	// Create currency tool FIRST so component type is set for telemetry
+	// The tool constructor calls core.SetCurrentComponentType(ComponentTypeTool)
+	// which enables automatic service_type inference in telemetry
+	tool := NewCurrencyTool()
+
+	// Initialize telemetry AFTER tool creation
+	// This ensures core.GetCurrentComponentType() returns "tool" for auto-inference
 	initTelemetry("currency-tool")
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -29,8 +36,6 @@ func main() {
 			log.Printf("Warning: Telemetry shutdown error: %v", err)
 		}
 	}()
-
-	tool := NewCurrencyTool()
 
 	port := 8097
 	if portStr := os.Getenv("PORT"); portStr != "" {

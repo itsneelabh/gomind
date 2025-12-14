@@ -61,8 +61,16 @@ func main() {
 		log.Fatalf("❌ Configuration error: %v", err)
 	}
 
-	// 2. Initialize telemetry BEFORE creating agent
-	// This ensures all agent operations are instrumented from the start
+	// 2. Create orchestration agent FIRST so component type is set for telemetry
+	// The agent constructor calls core.SetCurrentComponentType(ComponentTypeAgent)
+	// which enables automatic service_type inference in telemetry
+	agent, err := NewTravelResearchAgent()
+	if err != nil {
+		log.Fatalf("Failed to create travel research agent: %v", err)
+	}
+
+	// 3. Initialize telemetry AFTER agent creation
+	// This ensures core.GetCurrentComponentType() returns "agent" for auto-inference
 	initTelemetry("travel-research-orchestration")
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -71,12 +79,6 @@ func main() {
 			log.Printf("⚠️  Warning: Telemetry shutdown error: %v", err)
 		}
 	}()
-
-	// 3. Create orchestration agent
-	agent, err := NewTravelResearchAgent()
-	if err != nil {
-		log.Fatalf("Failed to create travel research agent: %v", err)
-	}
 
 	// Initialize Redis client for schema cache
 	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {

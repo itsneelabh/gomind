@@ -93,9 +93,9 @@ func (c *CurrencyTool) registerCapabilities() {
 
 		InputSummary: &core.SchemaSummary{
 			RequiredFields: []core.FieldHint{
-				{Name: "from", Type: "string", Example: "USD", Description: "Source currency code (e.g., USD, EUR, GBP)"},
-				{Name: "to", Type: "string", Example: "JPY", Description: "Target currency code (e.g., JPY, EUR, GBP)"},
-				{Name: "amount", Type: "number", Example: "1000", Description: "Amount to convert"},
+				{Name: "from", Type: "string", Example: "USD", Description: "Source currency code (e.g., USD, EUR, GBP). Should come from user request."},
+				{Name: "to", Type: "string", Example: "EUR", Description: "Target currency code - use from country info's currency.code field (e.g., EUR, GBP). DO NOT use example values."},
+				{Name: "amount", Type: "number", Example: "100", Description: "Amount to convert from user request"},
 			},
 		},
 	})

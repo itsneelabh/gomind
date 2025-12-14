@@ -22,7 +22,19 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	// Initialize telemetry
+	// Get API base URL from environment
+	apiBaseURL := os.Getenv("GROCERY_API_URL")
+	if apiBaseURL == "" {
+		apiBaseURL = "http://grocery-store-api.gomind-examples.svc.cluster.local"
+	}
+
+	// Create grocery tool FIRST so component type is set for telemetry
+	// The tool constructor calls core.SetCurrentComponentType(ComponentTypeTool)
+	// which enables automatic service_type inference in telemetry
+	tool := NewGroceryTool(apiBaseURL)
+
+	// Initialize telemetry AFTER tool creation
+	// This ensures core.GetCurrentComponentType() returns "tool" for auto-inference
 	initTelemetry("grocery-service")
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -31,15 +43,6 @@ func main() {
 			log.Printf("Warning: Telemetry shutdown error: %v", err)
 		}
 	}()
-
-	// Get API base URL from environment
-	apiBaseURL := os.Getenv("GROCERY_API_URL")
-	if apiBaseURL == "" {
-		apiBaseURL = "http://grocery-store-api.gomind-examples.svc.cluster.local"
-	}
-
-	// Create grocery tool with API URL
-	tool := NewGroceryTool(apiBaseURL)
 
 	// Get port configuration from environment
 	port := 8083 // default port for grocery-tool

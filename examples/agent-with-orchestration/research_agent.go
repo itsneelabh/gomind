@@ -181,7 +181,7 @@ func NewTravelResearchAgent() (*TravelResearchAgent, error) {
 		DisableKeepAlives:   false,
 		ForceAttemptHTTP2:   true,
 	})
-	tracedClient.Timeout = 60 * time.Second
+	tracedClient.Timeout = 300 * time.Second // Increased for complex multi-tool orchestration
 
 	// Create the travel research agent
 	travelAgent := &TravelResearchAgent{
@@ -219,6 +219,10 @@ func (t *TravelResearchAgent) InitializeOrchestrator(discovery core.Discovery) e
 	config.SynthesisStrategy = orchestration.StrategyLLM
 	config.MetricsEnabled = true
 	config.EnableTelemetry = true
+
+	// Increase timeouts for complex multi-tool orchestration scenarios
+	config.ExecutionOptions.TotalTimeout = 5 * time.Minute   // Overall orchestration timeout (default: 2m)
+	config.ExecutionOptions.StepTimeout = 120 * time.Second  // Per-step timeout for AI planning (default: 30s)
 
 	// Configure PromptBuilder with travel-specific type rules
 	// This ensures the LLM generates execution plans with correct JSON types
@@ -276,11 +280,13 @@ func (t *TravelResearchAgent) InitializeOrchestrator(discovery core.Discovery) e
 	// - Creates the appropriate PromptBuilder based on config
 	// - Injects logger and telemetry
 	// - Sets up telemetry metrics for prompt building
+	// - Configures LLM-based error analysis (Layer 3)
 	deps := orchestration.OrchestratorDependencies{
-		Discovery: discovery,
-		AIClient:  t.AI,
-		Logger:    t.Logger,
-		Telemetry: telemetry.GetTelemetryProvider(),
+		Discovery:           discovery,
+		AIClient:            t.AI,
+		Logger:              t.Logger,
+		Telemetry:           telemetry.GetTelemetryProvider(),
+		EnableErrorAnalyzer: true, // Enable LLM-based error analysis (Layer 3)
 	}
 
 	orchestrator, err := orchestration.CreateOrchestrator(config, deps)
@@ -335,8 +341,8 @@ func (t *TravelResearchAgent) registerPredefinedWorkflows() {
 				Description: "Get current weather at destination",
 				DependsOn:   []string{"geocode"},
 				Parameters: map[string]interface{}{
-					"lat": "{{geocode.data.lat}}",
-					"lon": "{{geocode.data.lon}}",
+					"lat": "{{geocode.response.data.lat}}",
+					"lon": "{{geocode.response.data.lon}}",
 				},
 			},
 			{
@@ -356,7 +362,7 @@ func (t *TravelResearchAgent) registerPredefinedWorkflows() {
 				DependsOn:   []string{"country-info"},
 				Parameters: map[string]interface{}{
 					"from":   "{{base_currency}}",
-					"to":     "{{country-info.data.currency.code}}",
+					"to":     "{{country-info.response.data.currency.code}}",
 					"amount": "{{amount}}",
 				},
 			},
@@ -399,8 +405,8 @@ func (t *TravelResearchAgent) registerPredefinedWorkflows() {
 				Description: "Get current weather",
 				DependsOn:   []string{"geocode"},
 				Parameters: map[string]interface{}{
-					"lat": "{{geocode.data.lat}}",
-					"lon": "{{geocode.data.lon}}",
+					"lat": "{{geocode.response.data.lat}}",
+					"lon": "{{geocode.response.data.lon}}",
 				},
 			},
 		},
@@ -445,6 +451,9 @@ func (t *TravelResearchAgent) registerCapabilities() {
 	registeredCaps := []string{}
 
 	// Capability 1: Natural language orchestration
+	// Internal: true prevents this capability from appearing in the LLM catalog,
+	// which avoids self-referential orchestration loops where the LLM might call
+	// this endpoint recursively instead of delegating to the actual tools.
 	t.RegisterCapability(core.Capability{
 		Name:        "orchestrate_natural",
 		Description: "Process natural language travel requests using AI-powered orchestration",
@@ -452,6 +461,7 @@ func (t *TravelResearchAgent) registerCapabilities() {
 		InputTypes:  []string{"json", "text"},
 		OutputTypes: []string{"json"},
 		Handler:     t.handleNaturalOrchestration,
+		Internal:    true, // Exclude from LLM catalog to prevent recursive self-calls
 		InputSummary: &core.SchemaSummary{
 			RequiredFields: []core.FieldHint{
 				{
@@ -480,6 +490,7 @@ func (t *TravelResearchAgent) registerCapabilities() {
 	registeredCaps = append(registeredCaps, "orchestrate_natural")
 
 	// Capability 2: Execute predefined travel workflow
+	// Internal: true to prevent LLM from triggering recursive orchestration
 	t.RegisterCapability(core.Capability{
 		Name:        "execute_workflow",
 		Description: "Execute a predefined travel research workflow",
@@ -487,6 +498,7 @@ func (t *TravelResearchAgent) registerCapabilities() {
 		InputTypes:  []string{"json"},
 		OutputTypes: []string{"json"},
 		Handler:     t.handleWorkflowExecution,
+		Internal:    true, // Exclude from LLM catalog to prevent recursive orchestration
 		InputSummary: &core.SchemaSummary{
 			RequiredFields: []core.FieldHint{
 				{
@@ -521,10 +533,12 @@ func (t *TravelResearchAgent) registerCapabilities() {
 	registeredCaps = append(registeredCaps, "execute_workflow")
 
 	// Capability 3: Custom workflow execution
+	// Internal: true prevents LLM from calling this directly (caused self-referential loops)
 	t.RegisterCapability(core.Capability{
 		Name:        "execute_custom",
 		Description: "Execute a custom workflow defined in the request",
 		Endpoint:    "/orchestrate/custom",
+		Internal:    true, // Exclude from LLM catalog - orchestration endpoint
 		InputTypes:  []string{"json"},
 		OutputTypes: []string{"json"},
 		Handler:     t.handleCustomWorkflow,
@@ -542,10 +556,12 @@ func (t *TravelResearchAgent) registerCapabilities() {
 	registeredCaps = append(registeredCaps, "execute_custom")
 
 	// Capability 4: List available workflows
+	// Internal: true - utility endpoint, not a tool for LLM
 	t.RegisterCapability(core.Capability{
 		Name:        "list_workflows",
 		Description: "List all available predefined workflows",
 		Endpoint:    "/orchestrate/workflows",
+		Internal:    true, // Exclude from LLM catalog - admin/utility endpoint
 		InputTypes:  []string{},
 		OutputTypes: []string{"json"},
 		Handler:     t.handleListWorkflows,
@@ -553,10 +569,12 @@ func (t *TravelResearchAgent) registerCapabilities() {
 	registeredCaps = append(registeredCaps, "list_workflows")
 
 	// Capability 5: Get execution history
+	// Internal: true - utility endpoint, not a tool for LLM
 	t.RegisterCapability(core.Capability{
 		Name:        "get_history",
 		Description: "Get recent orchestration execution history",
 		Endpoint:    "/orchestrate/history",
+		Internal:    true, // Exclude from LLM catalog - admin/utility endpoint
 		InputTypes:  []string{},
 		OutputTypes: []string{"json"},
 		Handler:     t.handleGetHistory,
@@ -564,10 +582,12 @@ func (t *TravelResearchAgent) registerCapabilities() {
 	registeredCaps = append(registeredCaps, "get_history")
 
 	// Capability 6: Health check with orchestrator status
+	// Internal: true - utility endpoint, not a tool for LLM
 	t.RegisterCapability(core.Capability{
 		Name:        "health",
 		Description: "Health check with orchestrator status and metrics",
 		Endpoint:    "/health",
+		Internal:    true, // Exclude from LLM catalog - utility endpoint
 		InputTypes:  []string{},
 		OutputTypes: []string{"json"},
 		Handler:     t.handleHealth,
@@ -575,10 +595,12 @@ func (t *TravelResearchAgent) registerCapabilities() {
 	registeredCaps = append(registeredCaps, "health")
 
 	// Capability 7: Discover available tools
+	// Internal: true - debugging/discovery endpoint, not a tool for LLM
 	t.RegisterCapability(core.Capability{
 		Name:        "discover_tools",
 		Description: "Discovers available tools and their capabilities",
 		Endpoint:    "/discover",
+		Internal:    true, // Exclude from LLM catalog - discovery/debug endpoint
 		InputTypes:  []string{},
 		OutputTypes: []string{"json"},
 		Handler:     t.handleDiscoverTools,

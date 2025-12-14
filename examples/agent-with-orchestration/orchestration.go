@@ -129,17 +129,16 @@ Provide a well-organized summary that highlights the key information a traveler 
 		MaxTokens:   1000,
 	})
 
-	// Track AI synthesis metrics
+	// Track AI synthesis metrics using unified API
 	duration := time.Since(startTime)
 	if err != nil {
-		telemetry.Counter("orchestration.ai_synthesis", "status", "error")
+		telemetry.RecordAIRequest(telemetry.ModuleOrchestration, "openai",
+			float64(duration.Milliseconds()), "error")
 		return "", err
 	}
 
-	telemetry.Counter("orchestration.ai_synthesis", "status", "success")
-	telemetry.Histogram("orchestration.ai_synthesis.duration_ms",
-		float64(duration.Milliseconds()),
-	)
+	telemetry.RecordAIRequest(telemetry.ModuleOrchestration, "openai",
+		float64(duration.Milliseconds()), "success")
 
 	return response.Content, nil
 }
@@ -213,49 +212,34 @@ func getToolNames(tools []*core.ServiceInfo) []string {
 // Step Execution Tracking
 // ============================================================================
 
-// trackStepExecution records metrics for a workflow step execution
+// trackStepExecution records metrics for a workflow step execution using unified API
 func trackStepExecution(workflowName, stepID, toolName string, duration time.Duration, success bool) {
-	telemetry.Counter("orchestration.step.executions",
-		"workflow", workflowName,
-		"step", stepID,
-		"tool", toolName,
-	)
+	status := "success"
+	if !success {
+		status = "error"
+	}
 
-	telemetry.Histogram("orchestration.step.duration_ms",
-		float64(duration.Milliseconds()),
-		"workflow", workflowName,
-		"step", stepID,
-		"tool", toolName,
-	)
-
-	telemetry.Counter("orchestration.tool_calls",
-		"tool_name", toolName,
-	)
+	// Record tool call with unified metrics API
+	telemetry.RecordToolCall(telemetry.ModuleOrchestration, toolName,
+		float64(duration.Milliseconds()), status)
 
 	if !success {
-		telemetry.Counter("orchestration.step.errors",
-			"workflow", workflowName,
-			"step", stepID,
-			"tool", toolName,
-		)
+		telemetry.RecordToolCallError(telemetry.ModuleOrchestration, toolName, "step_failure")
 	}
 }
 
-// trackWorkflowExecution records metrics for overall workflow execution
+// trackWorkflowExecution records metrics for overall workflow execution using unified API
 func trackWorkflowExecution(workflowName string, duration time.Duration, success bool) {
 	status := "success"
 	if !success {
 		status = "error"
 	}
 
-	telemetry.Counter("orchestration.workflow.executions",
-		"workflow", workflowName,
-		"status", status,
-	)
+	// Use RecordRequest for workflow execution (user-facing operation)
+	telemetry.RecordRequest(telemetry.ModuleOrchestration, workflowName,
+		float64(duration.Milliseconds()), status)
 
-	telemetry.Histogram("orchestration.workflow.duration_ms",
-		float64(duration.Milliseconds()),
-		"workflow", workflowName,
-		"status", status,
-	)
+	if !success {
+		telemetry.RecordRequestError(telemetry.ModuleOrchestration, workflowName, "workflow_failure")
+	}
 }

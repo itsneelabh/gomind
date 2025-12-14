@@ -9,6 +9,15 @@ import (
 	"github.com/itsneelabh/gomind/core"
 )
 
+// getMapKeys returns the keys of a map for debugging purposes
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // handleResearchTopic demonstrates resilient tool orchestration with circuit breakers
 func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Request) {
 	startTime := time.Now()
@@ -263,9 +272,38 @@ func (r *ResearchAgent) handleAnalyzeData(rw http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	data, ok := requestData["data"].(string)
-	if !ok {
-		http.Error(rw, "Missing 'data' field in request", http.StatusBadRequest)
+	// Extract data to analyze
+	// Support both formats:
+	// 1. Agent-wrapped: {"data": {"data": "...", ...}} - from orchestrator calling agent
+	// 2. Direct: {"data": "...", ...} - from direct API calls
+	var data string
+
+	// Check if this is agent-wrapped format (data field is an object containing the actual params)
+	if wrappedData, ok := requestData["data"].(map[string]interface{}); ok {
+		// Agent-wrapped format: extract from nested structure
+		if d, ok := wrappedData["data"].(string); ok {
+			data = d
+		} else if d, ok := wrappedData["content"].(string); ok {
+			data = d
+		} else {
+			// The wrapped data itself might be the content to analyze - serialize it
+			if dataBytes, err := json.Marshal(wrappedData); err == nil {
+				data = string(dataBytes)
+			}
+		}
+	} else if d, ok := requestData["data"].(string); ok {
+		// Direct format: data is a string at top level
+		data = d
+	} else if d, ok := requestData["content"].(string); ok {
+		// Alternative field name for direct calls
+		data = d
+	}
+
+	if data == "" {
+		r.Logger.Error("Missing data field in request", map[string]interface{}{
+			"received_keys": getMapKeys(requestData),
+		})
+		http.Error(rw, "Missing 'data' or 'content' field in request", http.StatusBadRequest)
 		return
 	}
 

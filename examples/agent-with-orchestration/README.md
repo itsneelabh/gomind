@@ -135,6 +135,67 @@ The orchestrator:
 - `synthesized_response`: Natural language summary combining all tool results
 - The AI determines which tools to call based on the request
 
+### Complex Query Examples
+
+These examples demonstrate the orchestrator's ability to handle sophisticated natural language requests that invoke all 5 tools.
+
+#### Example 1: Single Destination (All 5 Tools)
+
+```bash
+curl -X POST http://localhost:8094/orchestrate/natural \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": "I am planning a 2-week vacation to Tokyo, Japan starting next month. Can you help me with: 1) What is the current weather like in Tokyo? 2) What currency do they use in Japan and how much would 5000 USD convert to? 3) Tell me about Japan - population, languages spoken, and capital city. 4) Are there any recent travel news or advisories about Tokyo I should know about?",
+    "use_ai": true
+  }'
+```
+
+**Expected Results:**
+
+| Tool | Data Returned |
+|------|---------------|
+| geocoding-tool | Tokyo coordinates (lat/lon) |
+| weather-tool-v2 | Temperature, conditions, humidity, wind |
+| country-info-tool | Population: 123M, Language: Japanese, Capital: Tokyo |
+| currency-tool | 5000 USD → ~781,749 JPY |
+| news-tool | Current travel advisories |
+
+**Metrics:** ~13 seconds execution, 0.95 confidence
+
+#### Example 2: Multi-Destination Comparison (All 5 Tools × 2 Cities)
+
+```bash
+curl -X POST http://localhost:8094/orchestrate/natural \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": "I want to compare traveling to Paris, France versus Berlin, Germany for a winter holiday. For each city, I need: the current weather conditions, currency information and how much 2000 USD would convert to their local currency, population and what languages are spoken, and any travel news about these cities.",
+    "use_ai": true
+  }'
+```
+
+**Expected Results:**
+
+| Aspect | Paris, France | Berlin, Germany |
+|--------|--------------|-----------------|
+| Weather | ~13°C, overcast | ~10°C, overcast |
+| Currency | Euro (EUR) | Euro (EUR) |
+| 2000 USD | ~1,718 EUR | ~1,718 EUR |
+| Population | 66.35 million | 83.49 million |
+| Language | French | German |
+| Travel News | Current events/advisories | Current events/advisories |
+
+**Metrics:** ~24 seconds execution, 0.95 confidence
+
+#### Why These Queries Work
+
+The orchestrator's **schema-based type coercion** (Layer 2) automatically converts LLM-generated string parameters to the correct types expected by each tool:
+
+- `"35.6897"` (string) → `35.6897` (float64) for coordinates
+- `"5000"` (string) → `5000` (number) for currency amounts
+- `"true"` (string) → `true` (boolean) for flags
+
+This eliminates type mismatch errors that would otherwise cause tool invocations to fail.
+
 ## Quick Start
 
 ### Prerequisites

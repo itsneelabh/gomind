@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/itsneelabh/gomind/ai"
@@ -80,9 +81,12 @@ type ToolResult struct {
 	Duration   string      `json:"duration"`        // Time taken for this call
 }
 
-// NewResearchAgent creates a new AI-powered research assistant with telemetry
+// NewResearchAgent creates a new AI-powered research assistant with telemetry.
+// The agent name is read from GOMIND_K8S_SERVICE_NAME for consistent naming
+// across Redis registration, telemetry, and Kubernetes resources.
 func NewResearchAgent() (*ResearchAgent, error) {
-	agent := core.NewBaseAgent("research-assistant-telemetry")
+	serviceName := os.Getenv("GOMIND_K8S_SERVICE_NAME")
+	agent := core.NewBaseAgent(serviceName)
 
 	// Auto-configured AI client - detects from environment
 	aiClient, err := ai.NewClient() // Auto-detects best available provider
