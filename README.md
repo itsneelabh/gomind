@@ -139,13 +139,16 @@ GoMind uniquely enforces architectural boundaries at compile time through Go int
 // Tools can ONLY register themselves (passive components)
 type Registry interface {
     Register(ctx context.Context, info *ServiceInfo) error
+    UpdateHealth(ctx context.Context, id string, status HealthStatus) error
+    Unregister(ctx context.Context, id string) error
     // No discovery methods - tools cannot find other components
 }
 
 // Agents can BOTH register AND discover (active orchestrators)
 type Discovery interface {
-    Registry  // Inherits registration capability
+    Registry  // Embeds registration capability
     Discover(ctx context.Context, filter DiscoveryFilter) ([]*ServiceInfo, error)
+    FindService(ctx context.Context, serviceName string) ([]*ServiceInfo, error)
     FindByCapability(ctx context.Context, capability string) ([]*ServiceInfo, error)
 }
 ```
@@ -245,37 +248,37 @@ GoMind's architecture enforces a clear separation between Tools (passive compone
 ```mermaid
 graph TD
     App["Your Agent Application"]
-    
+
     App --> Framework
-    
+
     subgraph Framework["GoMind Framework"]
         subgraph CoreLayer["Core Module (Required)"]
             Core["<b>CORE</b><br/>━━━━━━<br/>• Interfaces<br/>• Discovery<br/>• Config"]
             Tools["<b>TOOLS</b><br/>━━━━━━<br/>• Registry only<br/>• Passive<br/>• Task-focused"]
             Agents["<b>AGENTS</b><br/>━━━━━━<br/>• Discovery<br/>• Active<br/>• Orchestrate"]
-            
+
             Core --> Tools
             Core --> Agents
         end
-        
+
         AI["<b>AI</b><br/>━━━━━━<br/>• LLM Client<br/>• Intelligent Agent<br/>• Embeddings"]
-        
+
         Resilience["<b>RESILIENCE</b><br/>━━━━━━<br/>• Circuit Breaker<br/>• Retry Logic<br/>• Timeouts"]
-        
+
         Telemetry["<b>TELEMETRY*</b><br/>━━━━━━<br/>• Metrics<br/>• Tracing<br/>• Observability<br/><i>*Cross-cutting</i>"]
-        
+
         Orchestration["<b>ORCHESTRATION</b><br/>━━━━━━<br/>• Workflow Engine<br/>• Natural Language<br/>• Multi-Agent"]
-        
+
         Core -->|Defines interfaces| AI
-        Core -->|Defines interfaces| Resilience
+        Core -->|  | Resilience
         Core -->|Defines interfaces| Telemetry
         Core -->|Defines interfaces| Orchestration
-        
+
         Telemetry -.->|Implements| Core
         Resilience -->|Uses| Telemetry
         Orchestration -->|Uses| Telemetry
     end
-    
+
     style Core fill:#0277bd,stroke:#01579b,stroke-width:2px,color:#fff
     style Tools fill:#0288d1,stroke:#0277bd,stroke-width:2px,color:#fff
     style Agents fill:#039be5,stroke:#0288d1,stroke-width:2px,color:#fff
@@ -369,7 +372,7 @@ That's it! Your agent is running at `http://localhost:8080` with:
 
 ### Using the Framework (Production-Ready)
 
-For production deployments, use the Framework wrapper that handles configuration, dependency injection, and lifecycle management:
+For production deployments, use the Framework wrapper that handles configuration, dependency injection, and lifecycle management. This example is based on [tool-example](https://github.com/itsneelabh/gomind/tree/main/examples/tool-example):
 
 ```go
 package main
@@ -378,34 +381,48 @@ import (
     "context"
     "log"
     "os"
+    "os/signal"
+    "syscall"
     "github.com/itsneelabh/gomind/core"
 )
 
 func main() {
-    ctx := context.Background()
-
-    // Create your component
-    agent := core.NewBaseAgent("my-agent")
-    agent.RegisterCapability(core.Capability{
-        Name: "process",
-        Description: "Processes data",
+    // Create your tool (passive component)
+    tool := core.NewTool("weather-service")
+    tool.RegisterCapability(core.Capability{
+        Name:        "current_weather",
+        Description: "Gets current weather conditions for a location",
+        Handler:     handleCurrentWeather,  // Your handler function
     })
 
-    // Wrap with Framework for production features
-    // Set environment: export REDIS_URL="redis://localhost:6379"
-    framework, err := core.NewFramework(agent,
+    // Framework handles all the complexity
+    framework, err := core.NewFramework(tool,
+        core.WithName("weather-service"),
         core.WithPort(8080),
-        core.WithRedisURL(os.Getenv("REDIS_URL")),  // e.g., "redis://localhost:6379"
+        core.WithNamespace(os.Getenv("NAMESPACE")),
+        core.WithRedisURL(os.Getenv("REDIS_URL")),
         core.WithDiscovery(true, "redis"),
-        core.WithCORS([]string{"https://app.example.com"}, true),
+        core.WithCORS([]string{"*"}, true),
+        core.WithDevelopmentMode(os.Getenv("DEV_MODE") == "true"),
     )
     if err != nil {
-        log.Fatal(err)
+        log.Fatalf("Failed to create framework: %v", err)
     }
 
-    // Run (handles initialization, registration, and graceful shutdown)
+    // Set up graceful shutdown
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+    go func() {
+        <-sigChan
+        cancel()
+    }()
+
+    // Run the framework (blocking)
     if err := framework.Run(ctx); err != nil {
-        log.Fatal(err)
+        log.Fatalf("Framework error: %v", err)
     }
 }
 ```
@@ -423,102 +440,102 @@ The Framework automatically handles:
 
 **The Problem**: You have multiple AI agents. How do they discover and talk to each other without hardcoding addresses?
 
-**The Solution**: Agents announce themselves and find each other by what they can do.
+**The Solution**: Agents announce themselves and find each other by what they can do. This example is from [agent-example](https://github.com/itsneelabh/gomind/tree/main/examples/agent-example):
 
 ```go
-import (
-    "context"
-    "log"
-    "os"
-    "github.com/itsneelabh/gomind/core"
-)
+// In your agent's handler - Discovery is injected by Framework
+func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Request) {
+    ctx := req.Context()
 
-// Step 1: Your agent introduces itself to the network
-// Set environment: export REDIS_URL="redis://localhost:6379"
-agent := core.NewBaseAgent("weather-agent")
-discovery, err := core.NewRedisDiscovery(os.Getenv("REDIS_URL"))  // e.g., "redis://localhost:6379"
-if err != nil {
-    log.Fatalf("Failed to connect to Redis: %v", err)
+    // Step 1: Discover available tools by type
+    tools, err := r.Discovery.Discover(ctx, core.DiscoveryFilter{
+        Type: core.ComponentTypeTool, // Only look for tools
+    })
+    if err != nil {
+        r.Logger.Error("Failed to discover tools", map[string]interface{}{
+            "error": err.Error(),
+        })
+        return
+    }
+
+    // Step 2: Filter tools by capability
+    var weatherTools []*core.ServiceInfo
+    for _, tool := range tools {
+        for _, cap := range tool.Capabilities {
+            if cap.Name == "current_weather" {
+                weatherTools = append(weatherTools, tool)
+            }
+        }
+    }
+
+    // Step 3: Call the discovered tool
+    for _, tool := range weatherTools {
+        resp, err := http.Post(
+            fmt.Sprintf("%s/api/capabilities/current_weather", tool.Address),
+            "application/json",
+            bytes.NewBuffer(requestPayload),
+        )
+        // Process response...
+    }
 }
-agent.Discovery = discovery
-
-agent.RegisterCapability(core.Capability{
-    Name: "get_weather",
-    Description: "Fetches current weather for any city",
-})
-
-// Step 2: Other agents can find it by capability
-ctx := context.Background()
-weatherAgents, err := discovery.FindByCapability(ctx, "get_weather")
-if err != nil {
-    log.Printf("Failed to find weather agents: %v", err)
-}
-// Returns: [weather-agent at http://10.0.0.5:8080]
 ```
 
 **What Happens Behind the Scenes**:
-- Weather agent registers itself in Redis with a TTL of 30 seconds
-- If it crashes, it's automatically removed after TTL expires
-- Other agents query Redis to find who can do what
-- No hardcoded IPs, no service mesh needed
+- Tools register themselves in Redis with a TTL (default 30 seconds)
+- If a tool crashes, it's automatically removed after TTL expires
+- Agents query Redis to find available tools by type or capability
+- No hardcoded IPs, no service mesh needed - just Redis
 
 ### 2. Talk to Your Agents in Plain English
 
 **The Problem**: You have specialized agents (data fetcher, analyzer, reporter). How do you coordinate them without writing complex orchestration code?
 
-**The Solution**: Just describe what you want. The framework figures out which agents to call and in what order.
+**The Solution**: Just describe what you want. The framework figures out which agents to call and in what order. This example is from [agent-with-orchestration](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-orchestration):
 
 ```go
-import (
-    "context"
-    "log"
-    "github.com/itsneelabh/gomind/ai"
-    "github.com/itsneelabh/gomind/orchestration"
-)
+// Initialize orchestrator after Framework has injected Discovery
+func (t *TravelResearchAgent) InitializeOrchestrator(discovery core.Discovery) error {
+    // Create orchestrator configuration
+    config := orchestration.DefaultConfig()
+    config.RoutingMode = orchestration.ModeAutonomous
+    config.SynthesisStrategy = orchestration.StrategyLLM
+    config.MetricsEnabled = true
 
-// Setup once
-ctx := context.Background()
-aiClient, err := ai.NewClient(
-    ai.WithProvider("openai"),
-    ai.WithAPIKey(apiKey),
-)
-if err != nil {
-    log.Fatalf("Failed to create AI client: %v", err)
-}
-orchestrator := orchestration.NewAIOrchestrator(
-    orchestration.DefaultConfig(),
-    discovery,  // Finds available agents
-    aiClient,   // Understands your request
-)
+    // Create the orchestrator with discovery and AI client
+    t.orchestrator = orchestration.NewAIOrchestrator(config, discovery, t.AI)
 
-// Start the orchestrator
-if err := orchestrator.Start(ctx); err != nil {
-    log.Fatalf("Failed to start orchestrator: %v", err)
-}
-defer orchestrator.Stop()
-
-// Then just ask for what you want
-response, err := orchestrator.ProcessRequest(ctx,
-    "Get weather for NYC, analyze if it's good for outdoor events, and create a recommendation",
-    nil,
-)
-if err != nil {
-    log.Printf("Request failed: %v", err)
+    // Start background processes
+    ctx := context.Background()
+    if err := t.orchestrator.Start(ctx); err != nil {
+        return fmt.Errorf("failed to start orchestrator: %w", err)
+    }
+    return nil
 }
 
-// The orchestrator automatically:
-// 1. Finds weather-agent, analysis-agent, and recommendation-agent
-// 2. Calls weather-agent first
-// 3. Passes weather data to analysis-agent
-// 4. Uses both results for recommendation-agent
-// 5. Returns: "Perfect day for outdoor events! 72°F, sunny, low wind."
+// Handle natural language requests
+func (t *TravelResearchAgent) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+
+    var req OrchestrationRequest
+    json.NewDecoder(r.Body).Decode(&req)
+
+    // Process through AI orchestrator - it discovers tools and coordinates them
+    result, err := t.orchestrator.ProcessRequest(ctx, req.Request, req.Metadata)
+    if err != nil {
+        writeError(w, http.StatusInternalServerError, "Orchestration failed", err)
+        return
+    }
+
+    // Result contains synthesized response from multiple tools
+    json.NewEncoder(w).Encode(result)
+}
 ```
 
 **What Happens Behind the Scenes**:
-- LLM understands your intent and available agent capabilities
-- Creates an execution plan (weather → analysis → recommendation)
-- Runs agents in parallel when possible
-- Caches the routing decision for similar future requests
+- LLM understands your intent and available tool capabilities
+- Creates an execution plan with proper dependencies
+- Runs tools in parallel when possible
+- Synthesizes results using AI
 
 ### 3. Define Repeatable Agent Workflows
 
@@ -552,6 +569,7 @@ steps:
 import (
     "context"
     "log"
+    "os"
     "github.com/itsneelabh/gomind/orchestration"
 )
 
@@ -560,7 +578,13 @@ ctx := context.Background()
 stateStore := orchestration.NewRedisStateStore(discovery)
 engine := orchestration.NewWorkflowEngine(discovery, stateStore, logger)
 
-workflow, err := engine.ParseWorkflowYAML(yamlFile)
+// Read and parse the workflow YAML
+yamlData, err := os.ReadFile("workflow.yaml")
+if err != nil {
+    log.Fatalf("Failed to read workflow file: %v", err)
+}
+
+workflow, err := engine.ParseWorkflowYAML(yamlData)
 if err != nil {
     log.Fatalf("Failed to parse workflow: %v", err)
 }
@@ -587,52 +611,69 @@ if err != nil {
 
 **The Problem**: When external APIs are down or slow, your agents keep trying and failing, creating a cascade of failures.
 
-**The Solution**: Circuit breakers that "fail fast" when something is broken, and smart retries for temporary hiccups.
+**The Solution**: Circuit breakers that "fail fast" when something is broken, and smart retries for temporary hiccups. This example is from [agent-with-resilience](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-resilience):
 
 ```go
-import (
-    "context"
-    "log"
-    "time"
-    "github.com/itsneelabh/gomind/resilience"
-)
-
-// Setup protection for your agent's external calls
-ctx := context.Background()
-config := resilience.DefaultConfig()
-circuitBreaker, err := resilience.NewCircuitBreaker(config)
-if err != nil {
-    log.Fatalf("Failed to create circuit breaker: %v", err)
+// Per-tool circuit breakers managed by the agent
+type ResearchAgent struct {
+    *core.BaseAgent
+    circuitBreakers map[string]*resilience.CircuitBreaker
+    retryConfig     *resilience.RetryConfig
 }
 
-// Wrap any risky operation
-err := circuitBreaker.Execute(ctx, func() error {
-    // Your risky operation here
-    return callExternalAPI()
-})
-if err != nil {
-    log.Printf("Circuit breaker protected us: %v", err)
+// Create circuit breakers using the framework factory
+func (r *ResearchAgent) getOrCreateCircuitBreaker(toolName string) *resilience.CircuitBreaker {
+    r.cbMutex.Lock()
+    defer r.cbMutex.Unlock()
+
+    if cb, exists := r.circuitBreakers[toolName]; exists {
+        return cb
+    }
+
+    // Framework factory auto-detects telemetry and injects logger
+    cb, err := resilience.CreateCircuitBreaker(toolName, resilience.ResilienceDependencies{
+        Logger: r.Logger,
+    })
+    if err != nil {
+        return nil
+    }
+
+    // Listen to state changes for alerting
+    cb.AddStateChangeListener(func(name string, from, to resilience.CircuitState) {
+        r.Logger.Warn("Circuit breaker state changed", map[string]interface{}{
+            "circuit": name, "from": from.String(), "to": to.String(),
+        })
+    })
+
+    r.circuitBreakers[toolName] = cb
+    return cb
 }
 
-// What happens:
-// - First 5 calls fail → Circuit opens → Next calls fail immediately for 30 seconds
-// - After 30 seconds → Tests with 1 call → If it works, circuit closes
-// - Your system stays responsive even when external API is down
+// Use circuit breaker with fail-fast protection
+func (r *ResearchAgent) callToolWithResilience(ctx context.Context, tool *core.ServiceInfo, ...) *ToolResult {
+    cb := r.getOrCreateCircuitBreaker(tool.Name)
 
-// For temporary network issues, use smart retry
-retryConfig := &resilience.RetryConfig{
-    MaxAttempts: 3,  // Try 3 times
-    InitialDelay: 100 * time.Millisecond,  // Wait 100ms
-    BackoffFactor: 2.0,  // Then 200ms, then 400ms
-    JitterEnabled: true,  // Add randomness to prevent thundering herd
-}
+    // Fail fast if circuit is open
+    if !cb.CanExecute() {
+        return &ToolResult{
+            Success: false,
+            Error:   fmt.Sprintf("Circuit breaker open for %s - service unavailable", tool.Name),
+        }
+    }
 
-// This handles temporary network blips automatically
-err = resilience.Retry(ctx, retryConfig, func() error {
-    return fetchDataFromAPI()
-})
-if err != nil {
-    log.Printf("All retries failed: %v", err)
+    // Execute with retry and circuit breaker protection
+    result, err := r.callToolWithIntelligentRetry(ctx, tool, capability, payload, IntelligentRetryConfig{
+        MaxRetries: r.retryConfig.MaxAttempts,
+    })
+
+    // Record success/failure for circuit breaker
+    if err != nil {
+        cb.RecordFailure()
+    } else {
+        cb.RecordSuccess()
+    }
+
+    return result
 }
 ```
 
@@ -642,35 +683,54 @@ if err != nil {
 
 **The Problem**: You need metrics and tracing to debug issues, but setting up Prometheus/Grafana/OpenTelemetry is complex.
 
-**The Solution**: Initialize once, then emit metrics with one line from anywhere, with built-in safety features.
+**The Solution**: Initialize once, then emit metrics with one line from anywhere, with built-in safety features. This example is from [agent-with-telemetry](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-telemetry):
 
 ```go
-import (
-    "context"
-    "log"
-    "github.com/itsneelabh/gomind/telemetry"
-)
+// Initialize telemetry in main() with environment-based profiles
+func initTelemetry(serviceName string) {
+    env := os.Getenv("APP_ENV")
+    if env == "" {
+        env = "development"
+    }
 
-// Initialize once in main() - that's it!
-err := telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
-if err != nil {
-    log.Printf("Telemetry init failed (non-fatal): %v", err)
-    // Your app continues to work even without telemetry
+    // Select profile based on environment
+    var profile telemetry.Profile
+    switch env {
+    case "production", "prod":
+        profile = telemetry.ProfileProduction
+    case "staging", "stage":
+        profile = telemetry.ProfileStaging
+    default:
+        profile = telemetry.ProfileDevelopment
+    }
+
+    config := telemetry.UseProfile(profile)
+    config.ServiceName = serviceName
+
+    // Allow OTEL endpoint override
+    if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+        config.Endpoint = endpoint
+    }
+
+    // Initialize - non-fatal if it fails
+    if err := telemetry.Initialize(config); err != nil {
+        log.Printf("Telemetry init failed (non-fatal): %v", err)
+        return
+    }
+
+    // Enable framework integration for automatic metrics
+    telemetry.EnableFrameworkIntegration(nil)
 }
-defer telemetry.Shutdown(context.Background())
 
-// Then anywhere in any agent, just emit metrics
-telemetry.Counter("agent.tasks.completed", "agent", "analyzer")
-telemetry.Histogram("agent.llm.response_ms", 234.5, "model", "gpt-4")
+// Emit metrics from anywhere
+telemetry.Counter("agent.tasks.completed", "agent", "research-assistant")
+telemetry.Histogram("agent.startup.duration_ms", 150.5, "agent", serviceName)
+telemetry.Gauge("agent.capabilities.count", float64(len(agent.Capabilities)), "agent", serviceName)
 
-// Track a request across multiple agents
-ctx := telemetry.WithBaggage(context.Background(), "request_id", "req-789")
-
-// Every agent that processes this context automatically includes request_id
-agent1.Process(ctx)  // Metrics include: request_id=req-789
-agent2.Process(ctx)  // Metrics include: request_id=req-789
-
-// See the full journey of request req-789 across all agents!
+// Add distributed tracing middleware
+framework, _ := core.NewFramework(agent,
+    core.WithMiddleware(telemetry.TracingMiddleware(serviceName)),
+)
 ```
 
 **Built-in Safety Features**:
@@ -769,87 +829,87 @@ func HandleSupportTicket(ctx context.Context, orchestrator *orchestration.AIOrch
 
 ## Complete Production Setup
 
-Here's how all the pieces come together in production:
+Here's how all the pieces come together in production. This pattern is used in all the [examples](https://github.com/itsneelabh/gomind/tree/main/examples):
 
 ```go
 import (
     "context"
     "log"
     "os"
+    "os/signal"
+    "syscall"
     "github.com/itsneelabh/gomind/core"
     "github.com/itsneelabh/gomind/ai"
-    "github.com/itsneelabh/gomind/orchestration"
     "github.com/itsneelabh/gomind/telemetry"
+
+    // Import AI providers for auto-detection
+    _ "github.com/itsneelabh/gomind/ai/providers/openai"
+    _ "github.com/itsneelabh/gomind/ai/providers/anthropic"
 )
 
 func main() {
-    ctx := context.Background()
-    
-    // 1. Observability (always first!)
-    if err := telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction)); err != nil {
-        log.Printf("Telemetry init failed (continuing anyway): %v", err)
-    }
-    defer telemetry.Shutdown(ctx)
+    // 1. Create your component FIRST (sets component type for telemetry)
+    agent := core.NewBaseAgent("research-assistant")
 
-    // 2. Agent discovery
-    discovery, err := core.NewRedisDiscovery(os.Getenv("REDIS_URL"))
+    // Auto-configure AI client - detects provider from environment
+    aiClient, err := ai.NewClient()  // Auto-detects OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
     if err != nil {
-        log.Fatalf("Failed to connect to Redis: %v", err)
+        log.Printf("AI client creation failed: %v", err)
+    } else {
+        agent.AI = aiClient
     }
 
-    // 3. Create your components (tools and agents)
-    // Tools are passive - they just register themselves
-    dataTool := core.NewTool("data-tool")
-    dataTool.Registry = discovery  // Tools only register
+    // Register capabilities
+    agent.RegisterCapability(core.Capability{
+        Name:        "research_topic",
+        Description: "Researches a topic using discovered tools",
+        Handler:     handleResearchTopic,
+    })
 
-    // Agents are active - they can discover and orchestrate
-    coordinatorAgent := core.NewBaseAgent("coordinator")
-    coordinatorAgent.Discovery = discovery  // Agents get full discovery
+    // 2. Initialize telemetry AFTER component creation
+    initTelemetry("research-assistant")
+    defer telemetry.Shutdown(context.Background())
 
-    // 4. Create AI client for orchestration
-    aiClient, err := ai.NewClient(
-        ai.WithProvider("openai"),
-        ai.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
+    // 3. Create Framework - handles Redis, discovery, HTTP server
+    framework, err := core.NewFramework(agent,
+        core.WithName("research-assistant"),
+        core.WithPort(8090),
+        core.WithNamespace(os.Getenv("NAMESPACE")),
+        core.WithRedisURL(os.Getenv("REDIS_URL")),
+        core.WithDiscovery(true, "redis"),
+        core.WithCORS([]string{"*"}, true),
+        core.WithDevelopmentMode(os.Getenv("DEV_MODE") == "true"),
+        core.WithMiddleware(telemetry.TracingMiddleware("research-assistant")),
     )
     if err != nil {
-        log.Fatalf("Failed to create AI client: %v", err)
+        log.Fatalf("Failed to create framework: %v", err)
     }
 
-    // 5. Add orchestration
-    orchestrator := orchestration.NewAIOrchestrator(
-        orchestration.DefaultConfig(),
-        discovery,
-        aiClient,
-    )
-    
-    if err := orchestrator.Start(ctx); err != nil {
-        log.Fatalf("Failed to start orchestrator: %v", err)
+    // 4. Graceful shutdown
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+    go func() {
+        <-sigChan
+        log.Println("Shutting down gracefully...")
+        cancel()
+    }()
+
+    // 5. Run (blocks until shutdown)
+    if err := framework.Run(ctx); err != nil {
+        log.Fatalf("Framework error: %v", err)
     }
-    defer orchestrator.Stop()
-
-    // 6. Start components
-    go func() {
-        if err := dataTool.Start(ctx, 8081); err != nil {
-            log.Printf("Data tool failed: %v", err)
-        }
-    }()
-
-    go func() {
-        if err := coordinatorAgent.Start(ctx, 8082); err != nil {
-            log.Printf("Coordinator agent failed: %v", err)
-        }
-    }()
-    
-    // Your agents are now:
-    // ✅ Discoverable by capability
-    // ✅ Protected by circuit breakers
-    // ✅ Emitting metrics automatically
-    // ✅ Orchestratable via natural language
-    
-    // Block forever (or until shutdown signal)
-    select {}
 }
 ```
+
+Your agents are now:
+- ✅ Discoverable via Redis with automatic TTL refresh
+- ✅ Protected by circuit breakers (with resilience module)
+- ✅ Emitting metrics to Prometheus/OTEL
+- ✅ Traceable with distributed tracing
+- ✅ Gracefully shutting down on SIGTERM
 
 ## Quick Framework Comparison
 
@@ -951,9 +1011,52 @@ spec:
 
 ## Examples
 
-- [Context Propagation](examples/context_propagation/main.go) - Tracing across agent interactions
-- [Error Handling](examples/error_handling/main.go) - Robust agent error patterns
-- [Telemetry](examples/telemetry/main.go) - Agent metrics and observability
+### Agents (Active Orchestrators)
+
+| Example | Description |
+|---------|-------------|
+| [agent-example](https://github.com/itsneelabh/gomind/tree/main/examples/agent-example) | Research Assistant demonstrating agent pattern, AI integration, service discovery, and 3-phase schema discovery |
+| [agent-with-orchestration](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-orchestration) | Travel Research Agent using AIOrchestrator for dynamic tool coordination and DAG-based workflows |
+| [agent-with-resilience](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-resilience) | Fault tolerance with circuit breakers, retries, timeouts, and graceful degradation |
+| [agent-with-telemetry](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-telemetry) | OpenTelemetry integration with metrics, distributed tracing, and multi-environment profiles |
+| [ai-agent-example](https://github.com/itsneelabh/gomind/tree/main/examples/ai-agent-example) | AI-first architecture where AI drives every decision from understanding to execution to synthesis |
+
+### Tools (Passive Components)
+
+| Example | Description |
+|---------|-------------|
+| [tool-example](https://github.com/itsneelabh/gomind/tree/main/examples/tool-example) | Weather Tool demonstrating passive tool pattern with auto-discovery and capability registration |
+| [weather-tool-v2](https://github.com/itsneelabh/gomind/tree/main/examples/weather-tool-v2) | Weather forecasts using Open-Meteo API (no API key required) |
+| [stock-market-tool](https://github.com/itsneelabh/gomind/tree/main/examples/stock-market-tool) | Real-time stock quotes and company data using Finnhub API |
+| [country-info-tool](https://github.com/itsneelabh/gomind/tree/main/examples/country-info-tool) | Country details (capital, population, languages, currency) using RestCountries API |
+| [currency-tool](https://github.com/itsneelabh/gomind/tree/main/examples/currency-tool) | Currency conversion and exchange rates using Frankfurter API |
+| [geocoding-tool](https://github.com/itsneelabh/gomind/tree/main/examples/geocoding-tool) | Forward and reverse geocoding using Nominatim/OpenStreetMap API |
+| [news-tool](https://github.com/itsneelabh/gomind/tree/main/examples/news-tool) | News search using GNews API |
+
+### Infrastructure
+
+| Example | Description |
+|---------|-------------|
+| [k8-deployment](https://github.com/itsneelabh/gomind/tree/main/examples/k8-deployment) | Kubernetes infrastructure with Redis, OTEL Collector, Prometheus, Jaeger, and Grafana |
+
+See the [Examples README](https://github.com/itsneelabh/gomind/tree/main/examples) for detailed setup instructions and architecture guides.
+
+### Module Usage by Example
+
+| Example | core | ai | orchestration | resilience | telemetry |
+|---------|:----:|:--:|:-------------:|:----------:|:---------:|
+| agent-example | ✓ | ✓ | | | |
+| agent-with-orchestration | ✓ | ✓ | ✓ | | ✓ |
+| agent-with-resilience | ✓ | ✓ | | ✓ | |
+| agent-with-telemetry | ✓ | ✓ | | | ✓ |
+| ai-agent-example | ✓ | ✓ | | | |
+| tool-example | ✓ | | | | ✓ |
+| weather-tool-v2 | ✓ | | | | ✓ |
+| stock-market-tool | ✓ | | | | ✓ |
+| country-info-tool | ✓ | | | | ✓ |
+| currency-tool | ✓ | | | | ✓ |
+| geocoding-tool | ✓ | | | | ✓ |
+| news-tool | ✓ | | | | ✓ |
 
 ## Next Steps
 
