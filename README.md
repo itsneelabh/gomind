@@ -890,7 +890,7 @@ Compare to typical Python agent images:
 - You want agents that stay up when APIs fail
 - You need to run many agents efficiently
 - You value "it just works" over "infinite flexibility"
-- Your team knows Go (or wants fewer moving parts than Python)
+- You have an experienced software engineering team that writes and maintains code in production
 
 ### ❌ Consider Python Frameworks If:
 - You're doing ML research/experimentation
