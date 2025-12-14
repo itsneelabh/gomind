@@ -270,6 +270,8 @@ CRITICAL FORMAT RULES (applies to all LLM providers):
 - Do NOT wrap JSON in code fences (no triple backticks)
 - Do NOT include any explanatory text before or after the JSON
 - String values must be plain text without any markdown formatting
+- Do NOT use arithmetic expressions in JSON values (e.g., "amount": 100 * price is INVALID)
+- If calculations are needed, create separate steps or use literal values only
 - Start your response with { and end with } - nothing else
 
 Response (raw JSON only, no formatting):`,
