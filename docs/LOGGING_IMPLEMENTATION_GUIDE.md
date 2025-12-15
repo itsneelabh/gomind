@@ -985,6 +985,85 @@ When your `travel-research-agent` calls the orchestration module:
 }
 ```
 
+### AI Module Logger Propagation
+
+The AI module (`ai/` package) requires special attention for logging because it operates independently from agents but needs the same production logger for trace correlation.
+
+**How the Framework Propagates the Logger:**
+
+When you register an agent with the Framework (`core.NewFramework()`), the Framework automatically:
+
+1. Detects if the agent's `BaseAgent.AI` field contains an AI client
+2. Checks if the AI client implements `SetLogger(Logger)` via interface detection
+3. Propagates the production logger to the AI client
+4. The AI client wraps the logger with `"framework/ai"` component prefix
+
+**Implementation Details:**
+
+```go
+// core/agent.go - applyConfigToComponent() function
+// Propagate logger to AI client if it exists
+if base.AI != nil {
+    if loggable, ok := base.AI.(interface{ SetLogger(Logger) }); ok {
+        loggable.SetLogger(base.Logger)
+    }
+}
+```
+
+```go
+// ai/providers/base.go - SetLogger method
+func (b *BaseClient) SetLogger(logger core.Logger) {
+    if logger == nil {
+        b.Logger = &core.NoOpLogger{}
+    } else if cal, ok := logger.(core.ComponentAwareLogger); ok {
+        b.Logger = cal.WithComponent("framework/ai")  // Creates "framework/ai" prefix
+    } else {
+        b.Logger = logger
+    }
+}
+```
+
+**Why This Matters:**
+
+Without this propagation, AI module logs would be silent (using `NoOpLogger`). This caused issues where:
+- AI requests worked correctly but produced no logs
+- Trace IDs weren't being captured for AI operations
+- Debugging AI-related issues was difficult
+
+**Result: AI Module Logs with Trace Correlation:**
+
+```json
+{
+  "component": "framework/ai",
+  "level": "DEBUG",
+  "message": "AI HTTP request completed",
+  "operation": "ai_http_success",
+  "trace.span_id": "e75ad960517fa8fe",
+  "trace.trace_id": "5b54aa1e7925acb809e77479b5797f5d"
+}
+```
+
+**Critical: Initialization Order**
+
+For AI logging to work correctly, telemetry must be initialized BEFORE creating your agent:
+
+```go
+func main() {
+    // 1. Set component type
+    core.SetCurrentComponentType(core.ComponentTypeAgent)
+
+    // 2. Initialize telemetry BEFORE agent creation
+    initTelemetry("my-agent")
+
+    // 3. Create agent AFTER telemetry (Framework propagates logger automatically)
+    agent, err := NewMyAgent()
+
+    // 4. Create and start Framework
+    framework, _ := core.NewFramework(agent)
+    framework.Start()
+}
+```
+
 ### Using Logging in Your Agents
 
 When building agents, use the `Logger` from `BaseAgent` for all your application logs:

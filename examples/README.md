@@ -26,6 +26,7 @@ Complete, production-ready examples demonstrating AI-enhanced distributed system
 
 ### Development
 - [🎨 Development Workflow](#-development-workflow) - Build tools, agents, and workflows
+  - [🔧 Critical: AI Telemetry Initialization Order](#-critical-ai-telemetry-initialization-order) - **Must-read for AI logging**
 - [📚 Learning Progression](#-learning-progression) - Structured learning paths
 - [🏗️ Building Your Own Examples](#️-building-your-own-examples) - **Best practices and patterns**
   - [🎯 Workspace Independence](#-the-foundation-workspace-independence) - Most important rule
@@ -653,6 +654,48 @@ cd ai-multi-provider
 # - Fallback mechanisms
 # - AI-driven decision making
 ```
+
+#### 🔧 Critical: AI Telemetry Initialization Order
+
+**For AI tracing and logging to work correctly**, you MUST initialize telemetry BEFORE creating your agent/AI client:
+
+```go
+func main() {
+    // 1. Set component type FIRST
+    core.SetCurrentComponentType(core.ComponentTypeAgent)
+
+    // 2. Initialize telemetry BEFORE agent creation
+    initTelemetry("my-agent")
+    defer telemetry.Shutdown(context.Background())
+
+    // 3. Create agent AFTER telemetry
+    agent, err := NewMyAgent()  // AI client created here
+
+    // 4. Framework auto-propagates logger to AI client
+    framework, _ := core.NewFramework(agent)
+}
+```
+
+**Why this matters:**
+- If you create the AI client before telemetry, `telemetry.GetTelemetryProvider()` returns `nil`
+- AI spans (`ai.generate_response`, `ai.http_attempt`) won't appear in Jaeger
+- AI logs will be silent (using `NoOpLogger` instead of production logger)
+
+**Framework-Driven Logger Propagation:**
+
+The Framework automatically propagates the production logger to your AI client during component registration. You don't need to manually call `ai.WithLogger()` - just ensure telemetry is initialized before agent creation.
+
+**Result: AI logs appear with trace IDs:**
+```json
+{
+  "component": "framework/ai",
+  "level": "DEBUG",
+  "message": "AI HTTP request completed",
+  "trace.trace_id": "5b54aa1e7925acb809e77479b5797f5d"
+}
+```
+
+See [Distributed Tracing Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md#ai-module-distributed-tracing) for complete AI telemetry setup.
 
 ### 2. Integration Testing
 ```bash

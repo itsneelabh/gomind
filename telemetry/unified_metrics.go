@@ -27,6 +27,10 @@ const (
 
 	// ModuleCore identifies metrics from the core module
 	ModuleCore = "core"
+
+	// ModuleAI identifies metrics from the ai module
+	// Used for internal AI operations: provider failover, retries, detection
+	ModuleAI = "ai"
 )
 
 // Unified metric names - use these constants to ensure consistent naming.

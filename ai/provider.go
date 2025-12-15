@@ -44,7 +44,8 @@ type AIConfig struct {
 	Temperature float32
 	MaxTokens   int
 
-	Logger core.Logger
+	Logger    core.Logger
+	Telemetry core.Telemetry
 
 	// Advanced options
 	Headers map[string]string
@@ -161,6 +162,15 @@ func WithExtra(key string, value interface{}) AIOption {
 func WithLogger(logger core.Logger) AIOption {
 	return func(c *AIConfig) {
 		c.Logger = logger
+	}
+}
+
+// WithTelemetry sets the telemetry provider for distributed tracing
+// This enables spans to be created for AI operations, providing visibility
+// in distributed tracing systems like Jaeger.
+func WithTelemetry(telemetry core.Telemetry) AIOption {
+	return func(c *AIConfig) {
+		c.Telemetry = telemetry
 	}
 }
 

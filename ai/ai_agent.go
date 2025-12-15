@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
 )
 
 // AIAgent extends BaseAgent with AI capabilities and full discovery powers
@@ -131,11 +132,11 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 	startTime := time.Now()
 
 	if a.Logger != nil {
-		a.Logger.Info("Starting ThinkAndAct process", map[string]interface{}{
-			"operation":    "ai_think_and_act_start",
-			"agent_id":     a.ID,
-			"task":         truncateString(task, 150),
-			"task_length":  len(task),
+		a.Logger.InfoWithContext(ctx, "Starting ThinkAndAct process", map[string]interface{}{
+			"operation":   "ai_think_and_act_start",
+			"agent_id":    a.ID,
+			"task":        truncateString(task, 150),
+			"task_length": len(task),
 		})
 	}
 
@@ -144,8 +145,12 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 		client = a.aiClient
 	}
 	if client == nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "think_and_act",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("ThinkAndAct failed - no AI client configured", map[string]interface{}{
+			a.Logger.ErrorWithContext(ctx, "ThinkAndAct failed - no AI client configured", map[string]interface{}{
 				"operation": "ai_think_and_act_error",
 				"agent_id":  a.ID,
 				"phase":     "initialization",
@@ -159,7 +164,7 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 	thinkPrompt := fmt.Sprintf("Analyze this task and break it down: %s", task)
 
 	if a.Logger != nil {
-		a.Logger.Info("Starting think phase", map[string]interface{}{
+		a.Logger.InfoWithContext(ctx, "Starting think phase", map[string]interface{}{
 			"operation":     "ai_think_phase_start",
 			"agent_id":      a.ID,
 			"prompt_length": len(thinkPrompt),
@@ -168,8 +173,12 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 
 	thinkResp, err := client.GenerateResponse(ctx, thinkPrompt, nil)
 	if err != nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "think_and_act",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("Think phase failed", map[string]interface{}{
+			a.Logger.ErrorWithContext(ctx, "Think phase failed", map[string]interface{}{
 				"operation":  "ai_think_phase_error",
 				"agent_id":   a.ID,
 				"error":      err.Error(),
@@ -181,13 +190,13 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 	}
 
 	if a.Logger != nil {
-		a.Logger.Info("Think phase completed", map[string]interface{}{
-			"operation":           "ai_think_phase_complete",
-			"agent_id":            a.ID,
-			"thought_content":     truncateString(thinkResp.Content, 200),
-			"thought_length":      len(thinkResp.Content),
-			"prompt_tokens":       thinkResp.Usage.PromptTokens,
-			"completion_tokens":   thinkResp.Usage.CompletionTokens,
+		a.Logger.InfoWithContext(ctx, "Think phase completed", map[string]interface{}{
+			"operation":         "ai_think_phase_complete",
+			"agent_id":          a.ID,
+			"thought_content":   truncateString(thinkResp.Content, 200),
+			"thought_length":    len(thinkResp.Content),
+			"prompt_tokens":     thinkResp.Usage.PromptTokens,
+			"completion_tokens": thinkResp.Usage.CompletionTokens,
 		})
 	}
 
@@ -195,7 +204,7 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 	actPrompt := fmt.Sprintf("Based on this analysis: %s\nExecute: %s", thinkResp.Content, task)
 
 	if a.Logger != nil {
-		a.Logger.Info("Starting act phase", map[string]interface{}{
+		a.Logger.InfoWithContext(ctx, "Starting act phase", map[string]interface{}{
 			"operation":     "ai_act_phase_start",
 			"agent_id":      a.ID,
 			"prompt_length": len(actPrompt),
@@ -204,15 +213,19 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 
 	actResp, err := client.GenerateResponse(ctx, actPrompt, nil)
 	if err != nil {
+		// Record error metric (partial failure - thinking succeeded)
+		telemetry.RecordRequest(telemetry.ModuleAI, "think_and_act",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("Act phase failed with thinking preserved", map[string]interface{}{
-				"operation":        "ai_act_phase_error",
-				"agent_id":         a.ID,
-				"error":            err.Error(),
-				"error_type":       fmt.Sprintf("%T", err),
-				"phase":            "acting",
-				"thinking_result":  truncateString(thinkResp.Content, 100),
-				"partial_success":  true, // thinking succeeded
+			a.Logger.ErrorWithContext(ctx, "Act phase failed with thinking preserved", map[string]interface{}{
+				"operation":       "ai_act_phase_error",
+				"agent_id":        a.ID,
+				"error":           err.Error(),
+				"error_type":      fmt.Sprintf("%T", err),
+				"phase":           "acting",
+				"thinking_result": truncateString(thinkResp.Content, 100),
+				"partial_success": true, // thinking succeeded
 			})
 		}
 		return thinkResp.Content, "", fmt.Errorf("action failed: %w", err)
@@ -221,8 +234,12 @@ func (a *AIAgent) ThinkAndAct(ctx context.Context, task string) (string, string,
 	totalDuration := time.Since(startTime)
 	totalTokens := calculateTokensUsage(thinkResp, actResp)
 
+	// Record orchestration metrics
+	telemetry.RecordRequest(telemetry.ModuleAI, "think_and_act",
+		float64(totalDuration.Milliseconds()), "success")
+
 	if a.Logger != nil {
-		a.Logger.Info("ThinkAndAct completed successfully", map[string]interface{}{
+		a.Logger.InfoWithContext(ctx, "ThinkAndAct completed successfully", map[string]interface{}{
 			"operation":               "ai_think_and_act_complete",
 			"agent_id":                a.ID,
 			"total_duration_ms":       totalDuration.Milliseconds(),
@@ -244,17 +261,17 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	startTime := time.Now()
 
 	if a.Logger != nil {
-		a.Logger.Info("Starting AI-assisted component processing", map[string]interface{}{
-			"operation":        "ai_process_with_ai_start",
-			"agent_id":         a.ID,
-			"request":          truncateString(request, 150),
-			"request_length":   len(request),
+		a.Logger.InfoWithContext(ctx, "Starting AI-assisted component processing", map[string]interface{}{
+			"operation":      "ai_process_with_ai_start",
+			"agent_id":       a.ID,
+			"request":        truncateString(request, 150),
+			"request_length": len(request),
 		})
 	}
 
 	// Discover available tools
 	if a.Logger != nil {
-		a.Logger.Info("Discovering tools for AI processing", map[string]interface{}{
+		a.Logger.InfoWithContext(ctx, "Discovering tools for AI processing", map[string]interface{}{
 			"operation": "ai_tool_discovery_start",
 			"agent_id":  a.ID,
 			"filter":    "ComponentTypeTool",
@@ -266,7 +283,7 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	})
 	if err != nil {
 		if a.Logger != nil {
-			a.Logger.Error("Failed to discover tools for AI processing", map[string]interface{}{
+			a.Logger.ErrorWithContext(ctx, "Failed to discover tools for AI processing", map[string]interface{}{
 				"operation":  "ai_tool_discovery_error",
 				"agent_id":   a.ID,
 				"error":      err.Error(),
@@ -275,11 +292,11 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 			})
 		}
 	} else if a.Logger != nil {
-		a.Logger.Info("Tools discovered for AI processing", map[string]interface{}{
-			"operation":   "ai_tool_discovery_complete",
-			"agent_id":    a.ID,
-			"tool_count":  len(tools),
-			"tool_names":  func() []string {
+		a.Logger.InfoWithContext(ctx, "Tools discovered for AI processing", map[string]interface{}{
+			"operation":  "ai_tool_discovery_complete",
+			"agent_id":   a.ID,
+			"tool_count": len(tools),
+			"tool_names": func() []string {
 				names := make([]string, len(tools))
 				for i, tool := range tools {
 					names[i] = tool.Name
@@ -291,7 +308,7 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 
 	// Discover other agents if needed
 	if a.Logger != nil {
-		a.Logger.Info("Discovering agents for AI processing", map[string]interface{}{
+		a.Logger.InfoWithContext(ctx, "Discovering agents for AI processing", map[string]interface{}{
 			"operation": "ai_agent_discovery_start",
 			"agent_id":  a.ID,
 			"filter":    "ComponentTypeAgent",
@@ -303,7 +320,7 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	})
 	if err != nil {
 		if a.Logger != nil {
-			a.Logger.Error("Failed to discover agents for AI processing", map[string]interface{}{
+			a.Logger.ErrorWithContext(ctx, "Failed to discover agents for AI processing", map[string]interface{}{
 				"operation":  "ai_agent_discovery_error",
 				"agent_id":   a.ID,
 				"error":      err.Error(),
@@ -312,11 +329,11 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 			})
 		}
 	} else if a.Logger != nil {
-		a.Logger.Info("Agents discovered for AI processing", map[string]interface{}{
-			"operation":    "ai_agent_discovery_complete",
-			"agent_id":     a.ID,
-			"agent_count":  len(agents),
-			"agent_names":  func() []string {
+		a.Logger.InfoWithContext(ctx, "Agents discovered for AI processing", map[string]interface{}{
+			"operation":   "ai_agent_discovery_complete",
+			"agent_id":    a.ID,
+			"agent_count": len(agents),
+			"agent_names": func() []string {
 				names := make([]string, len(agents))
 				for i, agent := range agents {
 					names[i] = agent.Name
@@ -330,15 +347,15 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 	contextPrompt := a.buildContextPrompt(tools, agents, request)
 
 	if a.Logger != nil {
-		a.Logger.Info("Processing request with AI", map[string]interface{}{
-			"operation":       "ai_processing_start",
-			"agent_id":        a.ID,
-			"prompt_length":   len(contextPrompt),
-			"tool_count":      len(tools),
-			"agent_count":     len(agents),
-			"ai_model":        "gpt-4",
-			"temperature":     0.7,
-			"max_tokens":      1000,
+		a.Logger.InfoWithContext(ctx, "Processing request with AI", map[string]interface{}{
+			"operation":     "ai_processing_start",
+			"agent_id":      a.ID,
+			"prompt_length": len(contextPrompt),
+			"tool_count":    len(tools),
+			"agent_count":   len(agents),
+			"ai_model":      "gpt-4",
+			"temperature":   0.7,
+			"max_tokens":    1000,
 		})
 	}
 
@@ -348,8 +365,12 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 		client = a.aiClient
 	}
 	if client == nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "process_with_ai",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("ProcessWithAI failed - no AI client configured", map[string]interface{}{
+			a.Logger.ErrorWithContext(ctx, "ProcessWithAI failed - no AI client configured", map[string]interface{}{
 				"operation": "ai_processing_error",
 				"agent_id":  a.ID,
 				"phase":     "ai_processing",
@@ -365,8 +386,12 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 		MaxTokens:   1000,
 	})
 	if err != nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "process_with_ai",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("AI processing failed", map[string]interface{}{
+			a.Logger.ErrorWithContext(ctx, "AI processing failed", map[string]interface{}{
 				"operation":  "ai_processing_error",
 				"agent_id":   a.ID,
 				"error":      err.Error(),
@@ -379,19 +404,23 @@ func (a *AIAgent) ProcessWithAI(ctx context.Context, request string) (*core.AIRe
 
 	totalDuration := time.Since(startTime)
 
+	// Record AI processing metrics
+	telemetry.RecordRequest(telemetry.ModuleAI, "process_with_ai",
+		float64(totalDuration.Milliseconds()), "success")
+
 	if a.Logger != nil {
-		a.Logger.Info("AI processing completed successfully", map[string]interface{}{
-			"operation":           "ai_process_with_ai_complete",
-			"agent_id":            a.ID,
-			"total_duration_ms":   totalDuration.Milliseconds(),
-			"response_content":    truncateString(response.Content, 200),
-			"response_length":     len(response.Content),
-			"prompt_tokens":       response.Usage.PromptTokens,
-			"completion_tokens":   response.Usage.CompletionTokens,
-			"total_tokens":        response.Usage.TotalTokens,
-			"tokens_per_second":   float64(response.Usage.TotalTokens) / totalDuration.Seconds(),
-			"components_used":     len(tools) + len(agents),
-			"status":              "success",
+		a.Logger.InfoWithContext(ctx, "AI processing completed successfully", map[string]interface{}{
+			"operation":         "ai_process_with_ai_complete",
+			"agent_id":          a.ID,
+			"total_duration_ms": totalDuration.Milliseconds(),
+			"response_content":  truncateString(response.Content, 200),
+			"response_length":   len(response.Content),
+			"prompt_tokens":     response.Usage.PromptTokens,
+			"completion_tokens": response.Usage.CompletionTokens,
+			"total_tokens":      response.Usage.TotalTokens,
+			"tokens_per_second": float64(response.Usage.TotalTokens) / totalDuration.Seconds(),
+			"components_used":   len(tools) + len(agents),
+			"status":            "success",
 		})
 	}
 
@@ -403,13 +432,13 @@ func (a *AIAgent) DiscoverAndOrchestrate(ctx context.Context, userQuery string) 
 	startTime := time.Now()
 
 	if a.Logger != nil {
-		a.Logger.Info("Starting AI agent orchestration", map[string]interface{}{
-			"operation":          "ai_orchestration_start",
-			"agent_id":           a.ID,
-			"agent_name":         a.Name,
-			"user_query":         truncateString(userQuery, 200),
-			"user_query_length":  len(userQuery),
-			"timestamp":          startTime.Format(time.RFC3339),
+		a.Logger.InfoWithContext(ctx, "Starting AI agent orchestration", map[string]interface{}{
+			"operation":         "ai_orchestration_start",
+			"agent_id":          a.ID,
+			"agent_name":        a.Name,
+			"user_query":        truncateString(userQuery, 200),
+			"user_query_length": len(userQuery),
+			"timestamp":         startTime.Format(time.RFC3339),
 		})
 	}
 
@@ -424,8 +453,12 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		client = a.aiClient
 	}
 	if client == nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "discover_and_orchestrate",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("AI orchestration failed - no client configured", map[string]interface{}{
+			a.Logger.ErrorWithContext(ctx, "AI orchestration failed - no client configured", map[string]interface{}{
 				"operation": "ai_orchestration_error",
 				"agent_id":  a.ID,
 				"phase":     "intent_analysis",
@@ -436,13 +469,13 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 	}
 
 	if a.Logger != nil {
-		a.Logger.Info("Analyzing user intent with AI", map[string]interface{}{
-			"operation":       "ai_intent_analysis_start",
-			"agent_id":        a.ID,
-			"prompt_length":   len(intentPrompt),
-			"ai_model":        "gpt-4",
-			"temperature":     0.3,
-			"max_tokens":      200,
+		a.Logger.InfoWithContext(ctx, "Analyzing user intent with AI", map[string]interface{}{
+			"operation":     "ai_intent_analysis_start",
+			"agent_id":      a.ID,
+			"prompt_length": len(intentPrompt),
+			"ai_model":      "gpt-4",
+			"temperature":   0.3,
+			"max_tokens":    200,
 		})
 	}
 
@@ -452,11 +485,15 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		MaxTokens:   200,
 	})
 	if err != nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "discover_and_orchestrate",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("Intent analysis failed", map[string]interface{}{
-				"operation": "ai_intent_analysis_error",
-				"agent_id":  a.ID,
-				"error":     err.Error(),
+			a.Logger.ErrorWithContext(ctx, "Intent analysis failed", map[string]interface{}{
+				"operation":  "ai_intent_analysis_error",
+				"agent_id":   a.ID,
+				"error":      err.Error(),
 				"error_type": fmt.Sprintf("%T", err),
 			})
 		}
@@ -464,20 +501,20 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 	}
 
 	if a.Logger != nil {
-		a.Logger.Info("User intent analyzed successfully", map[string]interface{}{
-			"operation":           "ai_intent_analysis_complete",
-			"agent_id":            a.ID,
-			"intent_content":      truncateString(intentResp.Content, 150),
-			"intent_length":       len(intentResp.Content),
-			"prompt_tokens":       intentResp.Usage.PromptTokens,
-			"completion_tokens":   intentResp.Usage.CompletionTokens,
-			"total_tokens":        intentResp.Usage.TotalTokens,
+		a.Logger.InfoWithContext(ctx, "User intent analyzed successfully", map[string]interface{}{
+			"operation":         "ai_intent_analysis_complete",
+			"agent_id":          a.ID,
+			"intent_content":    truncateString(intentResp.Content, 150),
+			"intent_length":     len(intentResp.Content),
+			"prompt_tokens":     intentResp.Usage.PromptTokens,
+			"completion_tokens": intentResp.Usage.CompletionTokens,
+			"total_tokens":      intentResp.Usage.TotalTokens,
 		})
 	}
 
 	// 2. Discover available components
 	if a.Logger != nil {
-		a.Logger.Info("Starting component discovery", map[string]interface{}{
+		a.Logger.InfoWithContext(ctx, "Starting component discovery", map[string]interface{}{
 			"operation": "ai_component_discovery_start",
 			"agent_id":  a.ID,
 			"filter":    "{}",
@@ -486,11 +523,15 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 
 	allComponents, err := a.Discover(ctx, core.DiscoveryFilter{})
 	if err != nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "discover_and_orchestrate",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("Component discovery failed", map[string]interface{}{
-				"operation": "ai_component_discovery_error",
-				"agent_id":  a.ID,
-				"error":     err.Error(),
+			a.Logger.ErrorWithContext(ctx, "Component discovery failed", map[string]interface{}{
+				"operation":  "ai_component_discovery_error",
+				"agent_id":   a.ID,
+				"error":      err.Error(),
 				"error_type": fmt.Sprintf("%T", err),
 			})
 		}
@@ -499,11 +540,11 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 
 	if a.Logger != nil {
 		componentTypes := extractComponentTypes(allComponents)
-		a.Logger.Info("Component discovery completed", map[string]interface{}{
-			"operation":        "ai_component_discovery_complete",
-			"agent_id":         a.ID,
-			"component_count":  len(allComponents),
-			"component_types":  componentTypes,
+		a.Logger.InfoWithContext(ctx, "Component discovery completed", map[string]interface{}{
+			"operation":       "ai_component_discovery_complete",
+			"agent_id":        a.ID,
+			"component_count": len(allComponents),
+			"component_types": componentTypes,
 			"discovered_names": func() []string {
 				names := make([]string, len(allComponents))
 				for i, comp := range allComponents {
@@ -516,10 +557,10 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 
 	if len(allComponents) == 0 {
 		if a.Logger != nil {
-			a.Logger.Warn("No components available for orchestration", map[string]interface{}{
-				"operation": "ai_orchestration_warning",
-				"agent_id":  a.ID,
-				"reason":    "no_components_discovered",
+			a.Logger.WarnWithContext(ctx, "No components available for orchestration", map[string]interface{}{
+				"operation":  "ai_orchestration_warning",
+				"agent_id":   a.ID,
+				"reason":     "no_components_discovered",
 				"suggestion": "Check service registry or component availability",
 			})
 		}
@@ -530,7 +571,7 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 	planPrompt := a.buildPlanPrompt(allComponents, userQuery, intentResp.Content)
 
 	if a.Logger != nil {
-		a.Logger.Info("Creating execution plan with AI", map[string]interface{}{
+		a.Logger.InfoWithContext(ctx, "Creating execution plan with AI", map[string]interface{}{
 			"operation":       "ai_plan_creation_start",
 			"agent_id":        a.ID,
 			"prompt_length":   len(planPrompt),
@@ -547,11 +588,15 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 		MaxTokens:   500,
 	})
 	if err != nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "discover_and_orchestrate",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("Execution plan creation failed", map[string]interface{}{
-				"operation": "ai_plan_creation_error",
-				"agent_id":  a.ID,
-				"error":     err.Error(),
+			a.Logger.ErrorWithContext(ctx, "Execution plan creation failed", map[string]interface{}{
+				"operation":  "ai_plan_creation_error",
+				"agent_id":   a.ID,
+				"error":      err.Error(),
 				"error_type": fmt.Sprintf("%T", err),
 			})
 		}
@@ -560,15 +605,15 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 
 	// 4. Enhanced execution plan logging
 	if a.Logger != nil {
-		a.Logger.Info("Execution plan created successfully", map[string]interface{}{
-			"operation":           "ai_plan_creation_complete",
-			"agent_id":            a.ID,
-			"plan_content":        truncateString(planResp.Content, 300),
-			"plan_length":         len(planResp.Content),
-			"component_count":     len(allComponents),
-			"prompt_tokens":       planResp.Usage.PromptTokens,
-			"completion_tokens":   planResp.Usage.CompletionTokens,
-			"total_tokens":        planResp.Usage.TotalTokens,
+		a.Logger.InfoWithContext(ctx, "Execution plan created successfully", map[string]interface{}{
+			"operation":         "ai_plan_creation_complete",
+			"agent_id":          a.ID,
+			"plan_content":      truncateString(planResp.Content, 300),
+			"plan_length":       len(planResp.Content),
+			"component_count":   len(allComponents),
+			"prompt_tokens":     planResp.Usage.PromptTokens,
+			"completion_tokens": planResp.Usage.CompletionTokens,
+			"total_tokens":      planResp.Usage.TotalTokens,
 		})
 	}
 
@@ -579,13 +624,13 @@ List the types of capabilities needed (e.g., "database_query", "calculation", "d
 Generate a response to the original user query: "%s"`, planResp.Content, userQuery)
 
 	if a.Logger != nil {
-		a.Logger.Info("Synthesizing final response", map[string]interface{}{
-			"operation":       "ai_synthesis_start",
-			"agent_id":        a.ID,
-			"prompt_length":   len(synthesisPrompt),
-			"ai_model":        "gpt-4",
-			"temperature":     0.7,
-			"max_tokens":      1000,
+		a.Logger.InfoWithContext(ctx, "Synthesizing final response", map[string]interface{}{
+			"operation":     "ai_synthesis_start",
+			"agent_id":      a.ID,
+			"prompt_length": len(synthesisPrompt),
+			"ai_model":      "gpt-4",
+			"temperature":   0.7,
+			"max_tokens":    1000,
 		})
 	}
 
@@ -595,11 +640,15 @@ Generate a response to the original user query: "%s"`, planResp.Content, userQue
 		MaxTokens:   1000,
 	})
 	if err != nil {
+		// Record error metric
+		telemetry.RecordRequest(telemetry.ModuleAI, "discover_and_orchestrate",
+			float64(time.Since(startTime).Milliseconds()), "error")
+
 		if a.Logger != nil {
-			a.Logger.Error("Response synthesis failed", map[string]interface{}{
-				"operation": "ai_synthesis_error",
-				"agent_id":  a.ID,
-				"error":     err.Error(),
+			a.Logger.ErrorWithContext(ctx, "Response synthesis failed", map[string]interface{}{
+				"operation":  "ai_synthesis_error",
+				"agent_id":   a.ID,
+				"error":      err.Error(),
 				"error_type": fmt.Sprintf("%T", err),
 			})
 		}
@@ -609,20 +658,24 @@ Generate a response to the original user query: "%s"`, planResp.Content, userQue
 	totalDuration := time.Since(startTime)
 	totalTokens := calculateTokensUsage(intentResp, planResp, finalResp)
 
+	// Record orchestration metrics
+	telemetry.RecordRequest(telemetry.ModuleAI, "discover_and_orchestrate",
+		float64(totalDuration.Milliseconds()), "success")
+
 	if a.Logger != nil {
-		a.Logger.Info("AI orchestration completed successfully", map[string]interface{}{
-			"operation":                "ai_orchestration_complete",
-			"agent_id":                 a.ID,
-			"total_duration_ms":        totalDuration.Milliseconds(),
-			"total_duration_seconds":   totalDuration.Seconds(),
-			"component_count":          len(allComponents),
-			"response_content":         truncateString(finalResp.Content, 200),
-			"response_length":          len(finalResp.Content),
-			"total_prompt_tokens":      totalTokens.PromptTokens,
-			"total_completion_tokens":  totalTokens.CompletionTokens,
-			"total_tokens":             totalTokens.TotalTokens,
-			"tokens_per_second":        float64(totalTokens.TotalTokens) / totalDuration.Seconds(),
-			"ai_calls_made":            3, // intent, plan, synthesis
+		a.Logger.InfoWithContext(ctx, "AI orchestration completed successfully", map[string]interface{}{
+			"operation":               "ai_orchestration_complete",
+			"agent_id":                a.ID,
+			"total_duration_ms":       totalDuration.Milliseconds(),
+			"total_duration_seconds":  totalDuration.Seconds(),
+			"component_count":         len(allComponents),
+			"response_content":        truncateString(finalResp.Content, 200),
+			"response_length":         len(finalResp.Content),
+			"total_prompt_tokens":     totalTokens.PromptTokens,
+			"total_completion_tokens": totalTokens.CompletionTokens,
+			"total_tokens":            totalTokens.TotalTokens,
+			"tokens_per_second":       float64(totalTokens.TotalTokens) / totalDuration.Seconds(),
+			"ai_calls_made":           3, // intent, plan, synthesis
 			"phases_completed": []string{
 				"intent_analysis",
 				"component_discovery",

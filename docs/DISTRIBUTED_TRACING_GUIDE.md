@@ -19,6 +19,7 @@ Welcome to the complete guide on distributed tracing in GoMind! Think of this as
 - [Troubleshooting](#-troubleshooting)
 - [Quick Reference](#-quick-reference)
 - [LLM Telemetry in Orchestration (Automatic)](#llm-telemetry-in-orchestration-automatic)
+- [AI Module Distributed Tracing](#ai-module-distributed-tracing)
 
 ---
 
@@ -1512,6 +1513,135 @@ To analyze how the orchestrator recovered from an error:
 4. If the retry succeeded, you'll see a subsequent successful tool call span
 
 This automatic visibility into AI decision-making makes debugging orchestration issues straightforward without instrumenting your own code.
+
+---
+
+## AI Module Distributed Tracing
+
+In addition to the orchestration module's LLM telemetry (which captures prompt/response events), the **AI module itself** emits distributed tracing spans for each AI request. These spans give you visibility into the actual AI API calls, including token usage, retry behavior, and HTTP-level details.
+
+### Critical: Initialization Order
+
+**The most common issue with AI tracing is initialization order.** The telemetry module MUST be initialized BEFORE creating the AI client.
+
+```go
+func main() {
+    // ✅ CORRECT ORDER
+
+    // 1. Set component type for service_type labeling
+    core.SetCurrentComponentType(core.ComponentTypeAgent)
+
+    // 2. Initialize telemetry BEFORE creating agent/AI client
+    initTelemetry("my-agent")
+    defer telemetry.Shutdown(context.Background())
+
+    // 3. Create agent/AI client AFTER telemetry is initialized
+    // The AI client will now receive the telemetry provider
+    agent, err := NewMyAgent()  // Internally uses ai.WithTelemetry(telemetry.GetTelemetryProvider())
+}
+```
+
+If you create the AI client before telemetry is initialized, `telemetry.GetTelemetryProvider()` returns `nil` and no AI spans will be captured.
+
+### AI Spans Captured
+
+When properly configured, the AI module emits these spans:
+
+| Span Name | Description | Key Attributes |
+|-----------|-------------|----------------|
+| `ai.generate_response` | Overall AI request | `ai.provider`, `ai.model`, `ai.prompt_tokens`, `ai.completion_tokens`, `ai.total_tokens`, `ai.prompt_length`, `ai.response_length` |
+| `ai.http_attempt` | Each HTTP attempt (including retries) | `ai.attempt`, `ai.max_retries`, `ai.is_retry`, `ai.attempt_status`, `ai.attempt_duration_ms`, `http.status_code` |
+
+### Enabling AI Telemetry in Your Agent
+
+When creating an AI client, pass the telemetry provider:
+
+```go
+import (
+    "github.com/itsneelabh/gomind/ai"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func NewMyAgent() (*MyAgent, error) {
+    // Get telemetry provider (must be initialized first!)
+    aiClient, err := ai.NewClient(
+        ai.WithTelemetry(telemetry.GetTelemetryProvider()),
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    // Use the AI client in your agent
+    return &MyAgent{aiClient: aiClient}, nil
+}
+```
+
+### What You'll See in Jaeger
+
+When you expand a trace containing AI operations, you'll see:
+
+```
+travel-research-orchestration: HTTP POST /orchestrate/natural (15.87s)
+└── orchestrator.process_request (15.87s)
+    ├── orchestrator.build_prompt (1.4ms)
+    ├── ai.generate_response (2.34s)                    ← AI module span
+    │   └── ai.http_attempt (2.33s)                     ← HTTP-level span
+    │       └── [attributes: ai.provider=openai, ai.model=gpt-4.1-mini, ...]
+    ├── HTTP POST → geocoding-tool (594ms)
+    ├── HTTP POST → weather-tool-v2 (610ms)
+    └── ai.generate_response (1.89s)                    ← Another AI call
+        └── ai.http_attempt (1.88s)
+```
+
+### Troubleshooting: AI Spans Not Appearing
+
+If you don't see `ai.generate_response` or `ai.http_attempt` spans:
+
+1. **Check initialization order**: Telemetry MUST be initialized before creating the AI client
+2. **Verify telemetry is enabled**: Check your logs for "Telemetry initialized successfully"
+3. **Confirm AI client has telemetry**: Ensure you pass `ai.WithTelemetry(telemetry.GetTelemetryProvider())`
+4. **Check sampling rate**: In production profile (0.1% sampling), most traces won't be captured
+
+### Framework-Driven Logger Propagation
+
+**Important:** The GoMind Framework automatically propagates the logger to the AI client when you register components. You don't need to manually call `ai.WithLogger()` - the Framework handles this during component registration in `core.NewFramework()`.
+
+**How It Works:**
+
+The Framework's `applyConfigToComponent()` function automatically:
+1. Detects if the agent has an AI client (via the `AI` field on `BaseAgent`)
+2. Checks if the AI client implements `SetLogger(Logger)`
+3. Propagates the production logger to the AI client
+4. The AI client wraps the logger with the `"framework/ai"` component prefix
+
+**Root Cause of Silent AI Logs:**
+
+If AI logs were silent (no output despite AI requests working), the cause is typically:
+- AI client was created **before** telemetry was initialized
+- The Framework hadn't yet propagated the production logger to the AI client
+- AI client was still using the default `NoOpLogger`
+
+**The Fix:**
+Ensure telemetry is initialized BEFORE creating your agent/AI client (as shown in the initialization order above). The Framework will then automatically propagate the production logger.
+
+**Example AI Module Log (after fix):**
+```json
+{
+  "component": "framework/ai",
+  "level": "DEBUG",
+  "message": "AI HTTP request completed",
+  "operation": "ai_http_success",
+  "trace.span_id": "e75ad960517fa8fe",
+  "trace.trace_id": "5b54aa1e7925acb809e77479b5797f5d"
+}
+```
+
+### Working Examples
+
+See these examples for production-ready AI telemetry patterns:
+
+- `examples/agent-with-orchestration/` - Full orchestration with AI telemetry
+- `examples/agent-with-telemetry/` - Agent with comprehensive telemetry
 
 ---
 

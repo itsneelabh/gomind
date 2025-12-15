@@ -101,6 +101,16 @@ func (f *Framework) Run(ctx context.Context) error {
 - **No circular dependencies** - Impossible by architectural design
 - **Interface-based decoupling** - Core defines `Telemetry` interface only
 
+**Modules Allowed to Import Telemetry**:
+
+| Module | Can Import Telemetry | Reason |
+|--------|---------------------|--------|
+| `core` | ❌ No | Foundation layer, cannot import optional modules |
+| `ai` | ✅ Yes | AI operations need metrics/tracing for production visibility |
+| `resilience` | ✅ Yes | Circuit breaker state, retry metrics |
+| `orchestration` | ✅ Yes | Workflow execution metrics, plan generation tracking |
+| `ui` | ❌ No (planned) | Currently uses core interfaces only; telemetry support planned |
+
 ```go
 // ✅ Applications MUST do this
 // examples/tool-example/main.go

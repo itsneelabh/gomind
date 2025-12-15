@@ -1,8 +1,11 @@
 package ai
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 func TestProviderOptions(t *testing.T) {
@@ -244,5 +247,60 @@ func TestProviderConstants(t *testing.T) {
 		if string(tt.provider) != tt.expected {
 			t.Errorf("Provider constant %v = %q, want %q", tt.provider, string(tt.provider), tt.expected)
 		}
+	}
+}
+
+// mockTelemetry for testing
+type mockTelemetry struct{}
+
+func (m *mockTelemetry) StartSpan(ctx context.Context, name string) (context.Context, core.Span) {
+	return ctx, &mockSpan{}
+}
+
+func (m *mockTelemetry) RecordMetric(name string, value float64, labels map[string]string) {}
+
+type mockSpan struct{}
+
+func (m *mockSpan) End()                                       {}
+func (m *mockSpan) SetAttribute(key string, value interface{}) {}
+func (m *mockSpan) RecordError(err error)                      {}
+
+func TestWithTelemetry(t *testing.T) {
+	tests := []struct {
+		name      string
+		telemetry core.Telemetry
+		expectNil bool
+	}{
+		{
+			name:      "with telemetry",
+			telemetry: &mockTelemetry{},
+			expectNil: false,
+		},
+		{
+			name:      "with nil telemetry",
+			telemetry: nil,
+			expectNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &AIConfig{}
+			opt := WithTelemetry(tt.telemetry)
+			opt(config)
+
+			if tt.expectNil {
+				if config.Telemetry != nil {
+					t.Error("expected nil telemetry")
+				}
+			} else {
+				if config.Telemetry == nil {
+					t.Error("expected non-nil telemetry")
+				}
+				if config.Telemetry != tt.telemetry {
+					t.Error("telemetry not set correctly")
+				}
+			}
+		})
 	}
 }

@@ -962,6 +962,12 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 
 		// Create component-specific logger for agent log filtering
 		base.Logger = createComponentLogger(config.logger, "agent/"+base.ID)
+		// Propagate logger to AI client if it exists
+		if base.AI != nil {
+			if loggable, ok := base.AI.(interface{ SetLogger(Logger) }); ok {
+				loggable.SetLogger(base.Logger)
+			}
+		}
 		return
 
 	case *BaseTool:
@@ -978,6 +984,12 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 
 		// Create component-specific logger for tool log filtering
 		base.Logger = createComponentLogger(config.logger, "tool/"+base.ID)
+		// Propagate logger to AI client if it exists
+		if base.AI != nil {
+			if loggable, ok := base.AI.(interface{ SetLogger(Logger) }); ok {
+				loggable.SetLogger(base.Logger)
+			}
+		}
 		return
 	}
 
@@ -1013,6 +1025,12 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 
 				// Create component-specific logger for agent log filtering
 				base.Logger = createComponentLogger(config.logger, "agent/"+base.ID)
+				// Propagate logger to AI client if it exists
+				if base.AI != nil {
+					if loggable, ok := base.AI.(interface{ SetLogger(Logger) }); ok {
+						loggable.SetLogger(base.Logger)
+					}
+				}
 				return
 			}
 		}
@@ -1033,6 +1051,12 @@ func applyConfigToComponent(component HTTPComponent, config *Config) {
 
 				// Create component-specific logger for tool log filtering
 				base.Logger = createComponentLogger(config.logger, "tool/"+base.ID)
+				// Propagate logger to AI client if it exists
+				if base.AI != nil {
+					if loggable, ok := base.AI.(interface{ SetLogger(Logger) }); ok {
+						loggable.SetLogger(base.Logger)
+					}
+				}
 				return
 			}
 		}

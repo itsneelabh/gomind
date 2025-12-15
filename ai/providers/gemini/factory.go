@@ -50,11 +50,30 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		}
 	}
 
-	// Create logger (nil will use NoOpLogger)
-	var logger core.Logger
+	// Get logger from config with proper component wrapping
+	logger := config.Logger
+	if logger == nil {
+		logger = &core.NoOpLogger{}
+	} else if cal, ok := logger.(core.ComponentAwareLogger); ok {
+		logger = cal.WithComponent("framework/ai")
+	}
+
+	// Log provider initialization
+	logger.Info("Gemini provider initialized", map[string]interface{}{
+		"operation":   "ai_provider_init",
+		"provider":    "gemini",
+		"base_url":    baseURL,
+		"has_api_key": apiKey != "",
+		"model":       config.Model,
+	})
 
 	// Create the client with full configuration
 	client := NewClient(apiKey, baseURL, logger)
+
+	// Set telemetry for distributed tracing
+	if config.Telemetry != nil {
+		client.SetTelemetry(config.Telemetry)
+	}
 
 	// Apply timeout if specified
 	if config.Timeout > 0 {

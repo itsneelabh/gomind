@@ -78,12 +78,30 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		return &errorClient{err: err}
 	}
 	
-	// Create logger (nil will use NoOpLogger)
-	var logger core.Logger
-	
+	// Get logger from config with proper component wrapping
+	logger := config.Logger
+	if logger == nil {
+		logger = &core.NoOpLogger{}
+	} else if cal, ok := logger.(core.ComponentAwareLogger); ok {
+		logger = cal.WithComponent("framework/ai")
+	}
+
+	// Log provider initialization
+	logger.Info("Bedrock provider initialized", map[string]interface{}{
+		"operation": "ai_provider_init",
+		"provider":  "bedrock",
+		"region":    region,
+		"model":     config.Model,
+	})
+
 	// Create the client
 	client := NewClient(awsCfg, region.(string), logger)
-	
+
+	// Set telemetry for distributed tracing
+	if config.Telemetry != nil {
+		client.SetTelemetry(config.Telemetry)
+	}
+
 	// Apply timeout if specified
 	if config.Timeout > 0 {
 		client.BaseClient.HTTPClient.Timeout = config.Timeout

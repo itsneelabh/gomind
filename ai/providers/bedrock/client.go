@@ -43,9 +43,21 @@ func NewClient(cfg aws.Config, region string, logger core.Logger) *Client {
 
 // GenerateResponse generates a response using AWS Bedrock's Converse API
 func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
+	// Start distributed tracing span
+	ctx, span := c.StartSpan(ctx, "ai.generate_response")
+	defer span.End()
+
+	// Set initial span attributes
+	span.SetAttribute("ai.provider", "bedrock")
+	span.SetAttribute("ai.prompt_length", len(prompt))
+
 	// Apply defaults
 	options = c.ApplyDefaults(options)
-	
+
+	// Add model to span attributes after defaults are applied
+	span.SetAttribute("ai.model", options.Model)
+	span.SetAttribute("ai.region", c.region)
+
 	// Log request
 	c.LogRequest("bedrock", options.Model, prompt)
 	startTime := time.Now()
@@ -98,14 +110,33 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	// Make the request to AWS Bedrock
 	output, err := c.bedrockClient.Converse(ctx, input)
 	if err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock request failed - converse error", map[string]interface{}{
+				"operation": "ai_request_error",
+				"provider":  "bedrock",
+				"error":     err.Error(),
+				"phase":     "request_execution",
+			})
+		}
+		span.RecordError(err)
 		return nil, fmt.Errorf("bedrock converse error: %w", err)
 	}
-	
+
 	// Extract text content from response
 	if output.Output == nil {
-		return nil, fmt.Errorf("no output in Bedrock response")
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock request failed - no output", map[string]interface{}{
+				"operation": "ai_request_error",
+				"provider":  "bedrock",
+				"error":     "no_output",
+				"phase":     "response_validation",
+			})
+		}
+		noOutputErr := fmt.Errorf("no output in Bedrock response")
+		span.RecordError(noOutputErr)
+		return nil, noOutputErr
 	}
-	
+
 	var content string
 	switch v := output.Output.(type) {
 	case *types.ConverseOutputMemberMessage:
@@ -116,19 +147,39 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 			}
 		}
 	default:
-		return nil, fmt.Errorf("unexpected output type from Bedrock")
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock request failed - unexpected output type", map[string]interface{}{
+				"operation": "ai_request_error",
+				"provider":  "bedrock",
+				"error":     "unexpected_output_type",
+				"phase":     "response_validation",
+			})
+		}
+		unexpectedErr := fmt.Errorf("unexpected output type from Bedrock")
+		span.RecordError(unexpectedErr)
+		return nil, unexpectedErr
 	}
-	
+
 	if content == "" {
-		return nil, fmt.Errorf("no text content in Bedrock response")
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock request failed - empty response", map[string]interface{}{
+				"operation": "ai_request_error",
+				"provider":  "bedrock",
+				"error":     "no_text_content",
+				"phase":     "response_validation",
+			})
+		}
+		emptyErr := fmt.Errorf("no text content in Bedrock response")
+		span.RecordError(emptyErr)
+		return nil, emptyErr
 	}
-	
+
 	// Build the response
 	result := &core.AIResponse{
 		Content: content,
 		Model:   options.Model,
 	}
-	
+
 	// Add usage information if available
 	if output.Usage != nil {
 		result.Usage = core.TokenUsage{
@@ -137,12 +188,18 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 			TotalTokens:      int(*output.Usage.TotalTokens),
 		}
 	}
-	
+
+	// Add token usage to span for cost tracking and debugging
+	span.SetAttribute("ai.prompt_tokens", result.Usage.PromptTokens)
+	span.SetAttribute("ai.completion_tokens", result.Usage.CompletionTokens)
+	span.SetAttribute("ai.total_tokens", result.Usage.TotalTokens)
+	span.SetAttribute("ai.response_length", len(result.Content))
+
 	// Add stop reason if available
 	if output.StopReason != "" {
-		// Store in metadata if needed
+		span.SetAttribute("ai.stop_reason", string(output.StopReason))
 	}
-	
+
 	// Log response
 	c.LogResponse("bedrock", result.Model, result.Usage, time.Since(startTime))
 	c.LogResponseContent("bedrock", result.Model, result.Content)
@@ -153,9 +210,32 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 // StreamResponse generates a streaming response using AWS Bedrock's ConverseStream API
 func (c *Client) StreamResponse(ctx context.Context, prompt string, options *core.AIOptions, stream chan<- string) error {
 	defer close(stream)
-	
+
+	// Start distributed tracing span for streaming
+	ctx, span := c.StartSpan(ctx, "ai.stream_response")
+	defer span.End()
+
+	// Set initial span attributes
+	span.SetAttribute("ai.provider", "bedrock")
+	span.SetAttribute("ai.prompt_length", len(prompt))
+	span.SetAttribute("ai.streaming", true)
+
 	// Apply defaults
 	options = c.ApplyDefaults(options)
+
+	// Add model to span attributes after defaults are applied
+	span.SetAttribute("ai.model", options.Model)
+	span.SetAttribute("ai.region", c.region)
+
+	// Log streaming request
+	if c.Logger != nil {
+		c.Logger.Info("Bedrock stream request initiated", map[string]interface{}{
+			"operation":     "ai_stream_request",
+			"provider":      "bedrock",
+			"model":         options.Model,
+			"prompt_length": len(prompt),
+		})
+	}
 	
 	// Build messages for ConverseStream API
 	messages := []types.Message{
@@ -197,19 +277,28 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	// Start the stream
 	output, err := c.bedrockClient.ConverseStream(ctx, input)
 	if err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock stream request failed - stream error", map[string]interface{}{
+				"operation": "ai_stream_error",
+				"provider":  "bedrock",
+				"error":     err.Error(),
+				"phase":     "stream_start",
+			})
+		}
+		span.RecordError(err)
 		return fmt.Errorf("bedrock stream error: %w", err)
 	}
-	
+
 	// Process the stream
 	eventStream := output.GetStream()
 	defer eventStream.Close()
-	
+
 	for {
 		event, ok := <-eventStream.Events()
 		if !ok {
 			break
 		}
-		
+
 		switch v := event.(type) {
 		case *types.ConverseStreamOutputMemberContentBlockDelta:
 			if v.Value.Delta != nil {
@@ -218,69 +307,143 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 					select {
 					case stream <- d.Value:
 					case <-ctx.Done():
+						if c.Logger != nil {
+							c.Logger.Warn("Bedrock stream cancelled by context", map[string]interface{}{
+								"operation": "ai_stream_cancelled",
+								"provider":  "bedrock",
+								"error":     ctx.Err().Error(),
+							})
+						}
+						span.RecordError(ctx.Err())
+						span.SetAttribute("ai.stream_cancelled", true)
 						return ctx.Err()
 					}
 				}
 			}
 		case *types.ConverseStreamOutputMemberMessageStop:
 			// Stream ended normally
+			if c.Logger != nil {
+				c.Logger.Debug("Bedrock stream completed", map[string]interface{}{
+					"operation": "ai_stream_complete",
+					"provider":  "bedrock",
+				})
+			}
+			span.SetAttribute("ai.stream_completed", true)
 			return nil
 		}
 	}
-	
+
 	// Check for stream errors
 	if err := eventStream.Err(); err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock stream error during processing", map[string]interface{}{
+				"operation": "ai_stream_error",
+				"provider":  "bedrock",
+				"error":     err.Error(),
+				"phase":     "stream_processing",
+			})
+		}
+		span.RecordError(err)
 		return fmt.Errorf("bedrock stream error: %w", err)
 	}
-	
+
 	return nil
 }
 
 // InvokeModel provides direct access to specific model APIs (for advanced use cases)
 // This bypasses the Converse API and uses model-specific formats
 func (c *Client) InvokeModel(ctx context.Context, modelID string, body []byte) ([]byte, error) {
+	// Start distributed tracing span
+	ctx, span := c.StartSpan(ctx, "ai.invoke_model")
+	defer span.End()
+
+	// Set span attributes
+	span.SetAttribute("ai.provider", "bedrock")
+	span.SetAttribute("ai.model", modelID)
+	span.SetAttribute("ai.body_length", len(body))
+
 	input := &bedrockruntime.InvokeModelInput{
 		ModelId:     aws.String(modelID),
 		Body:        body,
 		ContentType: aws.String("application/json"),
 		Accept:      aws.String("application/json"),
 	}
-	
+
 	output, err := c.bedrockClient.InvokeModel(ctx, input)
 	if err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock invoke model failed", map[string]interface{}{
+				"operation": "ai_request_error",
+				"provider":  "bedrock",
+				"model":     modelID,
+				"error":     err.Error(),
+				"phase":     "model_invocation",
+			})
+		}
+		span.RecordError(err)
 		return nil, fmt.Errorf("bedrock invoke model error: %w", err)
 	}
-	
+
+	span.SetAttribute("ai.response_length", len(output.Body))
 	return output.Body, nil
 }
 
 // GetEmbeddings generates embeddings using Amazon Titan Embed model
 func (c *Client) GetEmbeddings(ctx context.Context, text string) ([]float32, error) {
+	// Start distributed tracing span
+	ctx, span := c.StartSpan(ctx, "ai.get_embeddings")
+	defer span.End()
+
+	// Set span attributes
+	span.SetAttribute("ai.provider", "bedrock")
+	span.SetAttribute("ai.model", ModelTitanEmbed)
+	span.SetAttribute("ai.text_length", len(text))
+
 	// Build request for Titan Embed model
 	request := map[string]interface{}{
 		"inputText": text,
 	}
-	
+
 	body, err := json.Marshal(request)
 	if err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock embeddings failed - marshal error", map[string]interface{}{
+				"operation": "ai_request_error",
+				"provider":  "bedrock",
+				"error":     err.Error(),
+				"phase":     "request_preparation",
+			})
+		}
+		span.RecordError(err)
 		return nil, fmt.Errorf("failed to marshal embed request: %w", err)
 	}
-	
+
 	// Invoke Titan Embed model
 	responseBody, err := c.InvokeModel(ctx, ModelTitanEmbed, body)
 	if err != nil {
+		// Error already logged and recorded in InvokeModel span
 		return nil, err
 	}
-	
+
 	// Parse response
 	var response struct {
 		Embedding []float32 `json:"embedding"`
 	}
-	
+
 	if err := json.Unmarshal(responseBody, &response); err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("Bedrock embeddings failed - parse response error", map[string]interface{}{
+				"operation": "ai_request_error",
+				"provider":  "bedrock",
+				"error":     err.Error(),
+				"phase":     "response_parse",
+			})
+		}
+		span.RecordError(err)
 		return nil, fmt.Errorf("failed to parse embed response: %w", err)
 	}
-	
+
+	span.SetAttribute("ai.embedding_dimensions", len(response.Embedding))
 	return response.Embedding, nil
 }
 

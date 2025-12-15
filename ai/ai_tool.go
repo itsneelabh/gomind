@@ -14,38 +14,110 @@ import (
 type AITool struct {
 	*core.BaseTool // Tool, no discovery
 	aiClient       core.AIClient
+	logger         core.Logger
+}
+
+// AIToolOption configures an AITool
+type AIToolOption func(*aiToolConfig)
+
+type aiToolConfig struct {
+	logger core.Logger
+}
+
+// WithAIToolLogger sets the logger for the AI tool
+func WithAIToolLogger(logger core.Logger) AIToolOption {
+	return func(c *aiToolConfig) {
+		c.logger = logger
+	}
 }
 
 // NewAITool creates a new tool with AI capabilities but no discovery
-func NewAITool(name string, apiKey string) (*AITool, error) {
+func NewAITool(name string, apiKey string, opts ...AIToolOption) (*AITool, error) {
+	// Apply options
+	config := &aiToolConfig{}
+	for _, opt := range opts {
+		opt(config)
+	}
+
+	// Initialize logger with component wrapping
+	logger := config.logger
+	if logger == nil {
+		logger = &core.NoOpLogger{}
+	} else if cal, ok := logger.(core.ComponentAwareLogger); ok {
+		logger = cal.WithComponent("framework/ai")
+	}
+
 	tool := core.NewTool(name)
+
+	logger.Info("Creating AI tool", map[string]interface{}{
+		"operation":   "ai_tool_create",
+		"tool_name":   name,
+		"has_api_key": apiKey != "",
+	})
 
 	// Create AI client
 	aiClient, err := NewClient(
 		WithProvider("openai"),
 		WithAPIKey(apiKey),
+		WithLogger(logger),
 	)
 	if err != nil {
+		logger.Error("Failed to create AI client for tool", map[string]interface{}{
+			"operation": "ai_tool_create",
+			"tool_name": name,
+			"error":     err.Error(),
+		})
 		return nil, fmt.Errorf("failed to create AI client: %w", err)
 	}
 
 	tool.AI = aiClient
 
+	logger.Info("AI tool created successfully", map[string]interface{}{
+		"operation": "ai_tool_create",
+		"tool_name": name,
+		"status":    "success",
+	})
+
 	return &AITool{
 		BaseTool: tool,
 		aiClient: aiClient,
+		logger:   logger,
 	}, nil
 }
 
 // ProcessWithAI processes input using AI (but cannot discover other components)
 func (t *AITool) ProcessWithAI(ctx context.Context, input string) (string, error) {
+	if t.logger != nil {
+		t.logger.Debug("Processing with AI", map[string]interface{}{
+			"operation":    "ai_tool_process",
+			"tool_name":    t.BaseTool.Name,
+			"input_length": len(input),
+		})
+	}
+
 	response, err := t.aiClient.GenerateResponse(ctx, input, &core.AIOptions{
 		Model:       "gpt-3.5-turbo",
 		Temperature: 0.7,
 		MaxTokens:   500,
 	})
 	if err != nil {
+		if t.logger != nil {
+			t.logger.Error("AI processing failed", map[string]interface{}{
+				"operation": "ai_tool_process",
+				"tool_name": t.BaseTool.Name,
+				"error":     err.Error(),
+			})
+		}
 		return "", fmt.Errorf("AI processing failed: %w", err)
+	}
+
+	if t.logger != nil {
+		t.logger.Debug("AI processing completed", map[string]interface{}{
+			"operation":     "ai_tool_process",
+			"tool_name":     t.BaseTool.Name,
+			"output_length": len(response.Content),
+			"status":        "success",
+		})
 	}
 
 	return response.Content, nil
@@ -53,6 +125,15 @@ func (t *AITool) ProcessWithAI(ctx context.Context, input string) (string, error
 
 // RegisterAICapability registers an AI-powered capability for the tool
 func (t *AITool) RegisterAICapability(name, description, prompt string) {
+	if t.logger != nil {
+		t.logger.Info("Registering AI capability", map[string]interface{}{
+			"operation":       "ai_capability_register",
+			"tool_name":       t.BaseTool.Name,
+			"capability_name": name,
+			"endpoint":        fmt.Sprintf("/ai/%s", name),
+		})
+	}
+
 	capability := core.Capability{
 		Name:        name,
 		Description: description,
@@ -61,6 +142,13 @@ func (t *AITool) RegisterAICapability(name, description, prompt string) {
 			// Read request body
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
+				if t.logger != nil {
+					t.logger.Error("Failed to read request body", map[string]interface{}{
+						"operation":       "ai_capability_invoke",
+						"capability_name": name,
+						"error":           err.Error(),
+					})
+				}
 				http.Error(w, "Failed to read request", http.StatusBadRequest)
 				return
 			}
@@ -75,7 +163,7 @@ func (t *AITool) RegisterAICapability(name, description, prompt string) {
 
 			// Return response
 			w.Header().Set("Content-Type", "text/plain")
-			w.Write([]byte(response))
+			_, _ = w.Write([]byte(response))
 		},
 	}
 

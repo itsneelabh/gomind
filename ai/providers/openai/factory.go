@@ -26,6 +26,8 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 	logger := config.Logger
 	if logger == nil {
 		logger = &core.NoOpLogger{}
+	} else if cal, ok := logger.(core.ComponentAwareLogger); ok {
+		logger = cal.WithComponent("framework/ai")
 	}
 
 	// Phase 2: Resolve model aliases
@@ -47,6 +49,11 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 
 	// Create the client with resolved configuration
 	client := NewClient(apiKey, baseURL, logger)
+
+	// Set telemetry for distributed tracing
+	if config.Telemetry != nil {
+		client.SetTelemetry(config.Telemetry)
+	}
 
 	// Apply timeout if specified
 	if config.Timeout > 0 {

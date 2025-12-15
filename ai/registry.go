@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
 )
 
 // ProviderFactory defines the interface for AI provider factories
@@ -125,6 +127,7 @@ type ProviderInfo struct {
 
 // detectBestProvider finds the best available provider from registry
 func detectBestProvider(logger core.Logger) (string, error) {
+	startTime := time.Now()
 	var candidates []candidate
 
 	if logger != nil {
@@ -167,6 +170,12 @@ func detectBestProvider(logger core.Logger) (string, error) {
 	}
 
 	if len(candidates) == 0 {
+		// Record detection failure metric
+		telemetry.Counter("ai.provider.detection",
+			"module", telemetry.ModuleAI,
+			"status", "no_providers",
+		)
+
 		if logger != nil {
 			logger.Error("No AI providers detected in environment", map[string]interface{}{
 				"operation":         "ai_provider_detection",
@@ -184,6 +193,22 @@ func detectBestProvider(logger core.Logger) (string, error) {
 	})
 
 	selected := candidates[0].name
+	detectionDuration := time.Since(startTime)
+
+	// Record successful detection metrics
+	telemetry.Histogram("ai.provider.detection.duration_ms",
+		float64(detectionDuration.Milliseconds()),
+		"module", telemetry.ModuleAI,
+		"status", "success",
+	)
+	telemetry.Counter("ai.provider.detection",
+		"module", telemetry.ModuleAI,
+		"status", "success",
+	)
+	telemetry.Counter("ai.provider.selected",
+		"module", telemetry.ModuleAI,
+		"provider", selected,
+	)
 
 	if logger != nil {
 		logger.Info("AI provider selected", map[string]interface{}{

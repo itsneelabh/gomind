@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/itsneelabh/gomind/core"
+	"github.com/itsneelabh/gomind/telemetry"
 )
 
 // ChainClient implements automatic failover across multiple providers (Phase 3)
@@ -53,9 +54,17 @@ func NewChainClient(opts ...ChainOption) (*ChainClient, error) {
 		}
 	}
 
+	// Wrap logger with component for consistent attribution
+	logger := config.Logger
+	if logger == nil {
+		logger = &core.NoOpLogger{}
+	} else if cal, ok := logger.(core.ComponentAwareLogger); ok {
+		logger = cal.WithComponent("framework/ai")
+	}
+
 	client := &ChainClient{
 		providers: make([]core.AIClient, 0, len(config.ProviderAliases)),
-		logger:    config.Logger,
+		logger:    logger,
 	}
 
 	// Create a client for each provider alias
@@ -69,13 +78,12 @@ func NewChainClient(opts ...ChainOption) (*ChainClient, error) {
 		if err != nil {
 			// Runtime failures (e.g., missing API keys) are warnings, not errors
 			// This allows partial chain creation when some providers aren't configured
-			if config.Logger != nil {
-				config.Logger.Warn("Provider not available (will skip in chain)", map[string]interface{}{
-					"alias": alias,
-					"error": err.Error(),
-					"note":  "This provider will be skipped during failover",
-				})
-			}
+			logger.Warn("Provider not available (will skip in chain)", map[string]interface{}{
+				"operation": "ai_chain_init",
+				"alias":     alias,
+				"error":     err.Error(),
+				"note":      "This provider will be skipped during failover",
+			})
 			continue // Skip unavailable providers gracefully
 		}
 		client.providers = append(client.providers, provider)
@@ -87,12 +95,11 @@ func NewChainClient(opts ...ChainOption) (*ChainClient, error) {
 		return nil, fmt.Errorf("configuration error: no providers could be initialized (check API keys)")
 	}
 
-	if config.Logger != nil {
-		config.Logger.Info("Chain client initialized", map[string]interface{}{
-			"requested_providers": len(config.ProviderAliases),
-			"available_providers": successCount,
-		})
-	}
+	logger.Info("Chain client initialized", map[string]interface{}{
+		"operation":           "ai_chain_init",
+		"requested_providers": len(config.ProviderAliases),
+		"available_providers": successCount,
+	})
 
 	return client, nil
 }
@@ -121,11 +128,19 @@ func (c *ChainClient) GenerateResponse(ctx context.Context, prompt string, optio
 		// This follows the framework principle: "External API calls must be protected by circuit breakers"
 		resp, err := provider.GenerateResponse(ctx, prompt, options)
 		if err == nil {
-			if c.logger != nil && i > 0 {
-				c.logger.Info("Failover succeeded", map[string]interface{}{
-					"failed_attempts":      i,
-					"successful_provider":  i,
-				})
+			if i > 0 {
+				// Record successful failover metric
+				telemetry.Counter("ai.chain.failover",
+					"module", telemetry.ModuleAI,
+					"failed_count", fmt.Sprintf("%d", i),
+				)
+
+				if c.logger != nil {
+					c.logger.Info("Failover succeeded", map[string]interface{}{
+						"failed_attempts":     i,
+						"successful_provider": i,
+					})
+				}
 			}
 			return resp, nil
 		}
@@ -146,6 +161,20 @@ func (c *ChainClient) GenerateResponse(ctx context.Context, prompt string, optio
 				"remaining": len(c.providers) - i - 1,
 			})
 		}
+	}
+
+	// Record chain exhausted metric - all providers failed
+	telemetry.Counter("ai.chain.exhausted",
+		"module", telemetry.ModuleAI,
+		"providers_tried", fmt.Sprintf("%d", len(c.providers)),
+	)
+
+	if c.logger != nil {
+		c.logger.Error("All chain providers exhausted", map[string]interface{}{
+			"operation":       "ai_chain_exhausted",
+			"providers_tried": len(c.providers),
+			"final_error":     lastErr.Error(),
+		})
 	}
 
 	return nil, fmt.Errorf("all %d providers failed, last error: %w", len(c.providers), lastErr)

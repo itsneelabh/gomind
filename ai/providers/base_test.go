@@ -3,7 +3,6 @@ package providers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -386,74 +385,6 @@ func TestBaseClient_Logging(t *testing.T) {
 	}
 }
 
-func TestIsRetryableError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "rate limit error",
-			err:  fmt.Errorf("API error (429): rate limit"),
-			want: true,
-		},
-		{
-			name: "server error 500",
-			err:  fmt.Errorf("API error (500): internal error"),
-			want: true,
-		},
-		{
-			name: "server error 502",
-			err:  fmt.Errorf("API error (502): bad gateway"),
-			want: true,
-		},
-		{
-			name: "server error 503",
-			err:  fmt.Errorf("API error (503): service unavailable"),
-			want: true,
-		},
-		{
-			name: "server error 504",
-			err:  fmt.Errorf("API error (504): gateway timeout"),
-			want: true,
-		},
-		{
-			name: "timeout error",
-			err:  context.DeadlineExceeded,
-			want: true,
-		},
-		{
-			name: "bad request",
-			err:  fmt.Errorf("API error (400): bad request"),
-			want: false,
-		},
-		{
-			name: "unauthorized",
-			err:  fmt.Errorf("API error (401): unauthorized"),
-			want: false,
-		},
-		{
-			name: "not found",
-			err:  fmt.Errorf("API error (404): not found"),
-			want: false,
-		},
-		{
-			name: "other error",
-			err:  errors.New("some other error"),
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isRetryableError(tt.err)
-			if got != tt.want {
-				t.Errorf("isRetryableError() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestBaseClient_ContextCancellation(t *testing.T) {
 	// Test that context cancellation is respected
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -478,5 +409,247 @@ func TestBaseClient_ContextCancellation(t *testing.T) {
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled error, got %v", err)
+	}
+}
+
+// mockTelemetry tracks telemetry calls for testing
+type mockTelemetry struct {
+	spanStarted bool
+	spanName    string
+}
+
+func (m *mockTelemetry) StartSpan(ctx context.Context, name string) (context.Context, core.Span) {
+	m.spanStarted = true
+	m.spanName = name
+	return ctx, &mockSpan{}
+}
+
+func (m *mockTelemetry) RecordMetric(name string, value float64, labels map[string]string) {}
+
+// mockSpan tracks span operations for testing
+type mockSpan struct {
+	ended      bool
+	attributes map[string]interface{}
+	errors     []error
+}
+
+func (m *mockSpan) End() {
+	m.ended = true
+}
+
+func (m *mockSpan) SetAttribute(key string, value interface{}) {
+	if m.attributes == nil {
+		m.attributes = make(map[string]interface{})
+	}
+	m.attributes[key] = value
+}
+
+func (m *mockSpan) RecordError(err error) {
+	m.errors = append(m.errors, err)
+}
+
+func TestBaseClient_SetTelemetry(t *testing.T) {
+	client := NewBaseClient(30*time.Second, nil)
+
+	// Initially telemetry should be nil
+	if client.Telemetry != nil {
+		t.Error("expected nil telemetry initially")
+	}
+
+	// Set telemetry
+	telemetry := &mockTelemetry{}
+	client.SetTelemetry(telemetry)
+
+	if client.Telemetry != telemetry {
+		t.Error("telemetry not set correctly")
+	}
+
+	// Set to nil
+	client.SetTelemetry(nil)
+	if client.Telemetry != nil {
+		t.Error("expected nil telemetry after setting nil")
+	}
+}
+
+func TestBaseClient_StartSpan(t *testing.T) {
+	tests := []struct {
+		name           string
+		telemetry      core.Telemetry
+		spanName       string
+		expectSpanType string
+	}{
+		{
+			name:           "with telemetry",
+			telemetry:      &mockTelemetry{},
+			spanName:       "test.operation",
+			expectSpanType: "*providers.mockSpan",
+		},
+		{
+			name:           "without telemetry",
+			telemetry:      nil,
+			spanName:       "test.operation",
+			expectSpanType: "*core.NoOpSpan",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewBaseClient(30*time.Second, nil)
+			client.Telemetry = tt.telemetry
+
+			ctx := context.Background()
+			newCtx, span := client.StartSpan(ctx, tt.spanName)
+
+			if newCtx == nil {
+				t.Error("expected non-nil context")
+			}
+
+			if span == nil {
+				t.Error("expected non-nil span")
+			}
+
+			// Verify span type
+			spanType := ""
+			switch span.(type) {
+			case *mockSpan:
+				spanType = "*providers.mockSpan"
+			case *core.NoOpSpan:
+				spanType = "*core.NoOpSpan"
+			}
+
+			if spanType != tt.expectSpanType {
+				t.Errorf("expected span type %s, got %s", tt.expectSpanType, spanType)
+			}
+
+			// Verify telemetry was called when present
+			if mt, ok := tt.telemetry.(*mockTelemetry); ok {
+				if !mt.spanStarted {
+					t.Error("expected span to be started")
+				}
+				if mt.spanName != tt.spanName {
+					t.Errorf("expected span name %q, got %q", tt.spanName, mt.spanName)
+				}
+			}
+		})
+	}
+}
+
+func TestBaseClient_LogResponseContent(t *testing.T) {
+	logger := &mockLogger{}
+	client := NewBaseClient(30*time.Second, logger)
+
+	// Call LogResponseContent
+	client.LogResponseContent("test-provider", "test-model", "This is a test response")
+
+	// Verify debug call was made
+	if len(logger.debugCalls) != 1 {
+		t.Errorf("expected 1 debug call, got %d", len(logger.debugCalls))
+	}
+
+	fields := logger.debugCalls[0]
+	if fields["provider"] != "test-provider" {
+		t.Errorf("expected provider test-provider, got %v", fields["provider"])
+	}
+	if fields["model"] != "test-model" {
+		t.Errorf("expected model test-model, got %v", fields["model"])
+	}
+	if fields["response"] != "This is a test response" {
+		t.Errorf("expected response 'This is a test response', got %v", fields["response"])
+	}
+	if fields["response_length"] != 23 {
+		t.Errorf("expected response_length 23, got %v", fields["response_length"])
+	}
+}
+
+func TestDefaultRetryConfig(t *testing.T) {
+	config := DefaultRetryConfig()
+
+	// Verify defaults
+	if config.MaxRetries != 3 {
+		t.Errorf("expected MaxRetries 3, got %d", config.MaxRetries)
+	}
+
+	if config.RetryDelay != time.Second {
+		t.Errorf("expected RetryDelay 1s, got %v", config.RetryDelay)
+	}
+
+	if config.ShouldRetry == nil {
+		t.Fatal("expected non-nil ShouldRetry function")
+	}
+
+	// Test ShouldRetry function with various scenarios
+	tests := []struct {
+		name     string
+		resp     *http.Response
+		err      error
+		expected bool
+	}{
+		{
+			name:     "network error",
+			resp:     nil,
+			err:      errors.New("network error"),
+			expected: true,
+		},
+		{
+			name:     "500 server error",
+			resp:     &http.Response{StatusCode: 500},
+			err:      nil,
+			expected: true,
+		},
+		{
+			name:     "502 bad gateway",
+			resp:     &http.Response{StatusCode: 502},
+			err:      nil,
+			expected: true,
+		},
+		{
+			name:     "429 rate limit",
+			resp:     &http.Response{StatusCode: 429},
+			err:      nil,
+			expected: true,
+		},
+		{
+			name:     "400 bad request",
+			resp:     &http.Response{StatusCode: 400},
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "200 success",
+			resp:     &http.Response{StatusCode: 200},
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "401 unauthorized",
+			resp:     &http.Response{StatusCode: 401},
+			err:      nil,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := config.ShouldRetry(tt.resp, tt.err)
+			if result != tt.expected {
+				t.Errorf("expected ShouldRetry=%v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestHandleError_DefaultCase(t *testing.T) {
+	client := NewBaseClient(30*time.Second, nil)
+
+	// Test with an unknown status code (not handled by specific cases)
+	err := client.HandleError(418, []byte("I'm a teapot"), "TestProvider")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	expected := "TestProvider API error (status 418): I'm a teapot"
+	if err.Error() != expected {
+		t.Errorf("expected error %q, got %q", expected, err.Error())
 	}
 }

@@ -349,3 +349,67 @@ func TestRegisterAICapabilityWithNilAIClient(t *testing.T) {
 
 	tool.Capabilities[0].Handler(recorder, req)
 }
+
+// aiToolTestLogger for testing WithAIToolLogger
+type aiToolTestLogger struct {
+	infoCalls  []string
+	errorCalls []string
+	debugCalls []string
+}
+
+func (l *aiToolTestLogger) Info(msg string, fields map[string]interface{}) {
+	l.infoCalls = append(l.infoCalls, msg)
+}
+func (l *aiToolTestLogger) Error(msg string, fields map[string]interface{}) {
+	l.errorCalls = append(l.errorCalls, msg)
+}
+func (l *aiToolTestLogger) Warn(msg string, fields map[string]interface{})  {}
+func (l *aiToolTestLogger) Debug(msg string, fields map[string]interface{}) {}
+func (l *aiToolTestLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
+func (l *aiToolTestLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
+func (l *aiToolTestLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
+func (l *aiToolTestLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
+
+func TestWithAIToolLogger(t *testing.T) {
+	tests := []struct {
+		name      string
+		logger    core.Logger
+		expectNil bool
+	}{
+		{
+			name:      "with logger",
+			logger:    &aiToolTestLogger{},
+			expectNil: false,
+		},
+		{
+			name:      "with nil logger",
+			logger:    nil,
+			expectNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &aiToolConfig{}
+			opt := WithAIToolLogger(tt.logger)
+			opt(config)
+
+			if tt.expectNil {
+				if config.logger != nil {
+					t.Error("expected nil logger in config")
+				}
+			} else {
+				if config.logger == nil {
+					t.Error("expected non-nil logger in config")
+				}
+				if config.logger != tt.logger {
+					t.Error("logger not set correctly in config")
+				}
+			}
+		})
+	}
+}

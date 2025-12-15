@@ -1724,6 +1724,105 @@ For a complete deep-dive into distributed tracing with GoMind, including:
 
 See the **[Distributed Tracing and Log Correlation Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md)**.
 
+## 🤖 AI Module Distributed Tracing
+
+The GoMind AI module supports distributed tracing, allowing you to see AI operations (`ai.generate_response`, `ai.http_attempt`) as part of your request traces in Jaeger.
+
+### Critical: Initialization Order
+
+**The telemetry module MUST be initialized BEFORE creating your AI client.** Otherwise, `telemetry.GetTelemetryProvider()` returns `nil` and AI spans won't be captured.
+
+```go
+func main() {
+    // ✅ CORRECT ORDER
+
+    // 1. Set component type (for service_type label)
+    core.SetCurrentComponentType(core.ComponentTypeAgent)
+
+    // 2. Initialize telemetry BEFORE creating AI client
+    initTelemetry("my-agent")
+    defer telemetry.Shutdown(context.Background())
+
+    // 3. Create AI client AFTER telemetry - now it gets the provider
+    aiClient, err := ai.NewClient(
+        ai.WithTelemetry(telemetry.GetTelemetryProvider()),
+    )
+
+    // 4. Create your agent with the AI client
+    agent := NewMyAgent(aiClient)
+}
+```
+
+```go
+// ❌ WRONG ORDER - AI telemetry won't work!
+func main() {
+    agent := NewMyAgent()  // Creates AI client internally
+    initTelemetry("my-agent")  // Too late! AI client already created without telemetry
+}
+```
+
+### Framework-Driven Logger Propagation
+
+**Important:** The GoMind Framework automatically propagates the logger to the AI client when you register components. This happens in `core.NewFramework()` during component registration via the `applyConfigToComponent()` function.
+
+**How It Works:**
+
+1. When you create an agent with `core.NewBaseAgent()`, the AI client initially has a `NoOpLogger` (silent logger)
+2. When you call `core.NewFramework()` and register your agent, the Framework:
+   - Checks if the AI client implements `SetLogger(Logger)`
+   - Automatically calls `SetLogger()` with the production logger
+   - The AI client wraps the logger with component prefix `"framework/ai"`
+
+**Result:** AI module logs appear with `"component": "framework/ai"` and include trace IDs for correlation.
+
+```go
+// ai/providers/base.go - SetLogger method
+func (b *BaseClient) SetLogger(logger core.Logger) {
+    if logger == nil {
+        b.Logger = &core.NoOpLogger{}
+    } else if cal, ok := logger.(core.ComponentAwareLogger); ok {
+        b.Logger = cal.WithComponent("framework/ai")  // Creates "framework/ai" prefix
+    } else {
+        b.Logger = logger
+    }
+}
+```
+
+**Developer Benefit:** You don't need to manually pass loggers to the AI client. The Framework handles this automatically during component registration. Just ensure telemetry is initialized before agent creation (as shown above).
+
+**Example AI Module Log Output:**
+```json
+{
+  "component": "framework/ai",
+  "level": "DEBUG",
+  "message": "AI HTTP request completed",
+  "operation": "ai_http_success",
+  "trace.span_id": "e75ad960517fa8fe",
+  "trace.trace_id": "5b54aa1e7925acb809e77479b5797f5d"
+}
+```
+
+### AI Spans Captured
+
+When properly configured, the AI module emits these spans:
+
+| Span Name | Description | Key Attributes |
+|-----------|-------------|----------------|
+| `ai.generate_response` | Overall AI request | `ai.provider`, `ai.model`, `ai.prompt_tokens`, `ai.completion_tokens`, `ai.total_tokens` |
+| `ai.http_attempt` | Each HTTP attempt (including retries) | `ai.attempt`, `ai.max_retries`, `ai.is_retry`, `http.status_code`, `ai.attempt_duration_ms` |
+
+### Viewing AI Traces in Jaeger
+
+1. Open Jaeger UI: `http://localhost:16686`
+2. Select your agent service (e.g., `travel-research-orchestration`)
+3. Find a trace and expand it
+4. Look for `ai.generate_response` and `ai.http_attempt` spans nested under your request spans
+5. Click on a span to see detailed attributes (token counts, model, provider, etc.)
+
+### Complete Example
+
+See `examples/agent-with-orchestration/` for a working example with AI telemetry.
+
 ## 🎉 Summary
 
 The telemetry module is your application's dashboard, giving you visibility into what's happening in production. It's designed to be:
