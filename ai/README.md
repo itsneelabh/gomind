@@ -18,7 +18,7 @@ Multi-provider LLM integration with automatic detection, universal compatibility
 - [🚀 Advanced Features](#-advanced-features)
 - [🎯 Common Use Cases](#-common-use-cases)
 - [💡 Best Practices](#-best-practices)
-- [🔮 Roadmap](#-roadmap)
+- [📖 Related Documentation](#-related-documentation)
 - [🎉 Summary](#-summary)
 
 ## 🎯 What Does This Module Do?
@@ -50,6 +50,20 @@ client, _ := ai.NewClient(
 // Your code doesn't change! Same interface, different providers
 response, _ := client.GenerateResponse(ctx, "Hello AI!", nil)
 ```
+
+### Key Concepts at a Glance
+
+| Concept | What It Does | Example |
+|---------|--------------|---------|
+| **Single Client** | Direct connection to one provider | `ai.NewClient(ai.WithProviderAlias("openai"))` |
+| **Chain Client** | Auto-failover across multiple providers | `ai.NewChainClient(ai.WithProviderChain("openai", "anthropic"))` |
+| **Provider Aliases** | Clean identifiers with auto-configuration | `openai.groq` auto-configures Groq endpoint and API key |
+| **Model Aliases** | Portable model names | `smart` → `o3` (OpenAI), `claude-sonnet-4-5` (Anthropic) |
+| **Env Overrides** | Runtime model configuration | `GOMIND_OPENAI_MODEL_SMART=gpt-4.1` overrides the "smart" alias |
+
+**Failover behavior**: Authentication errors (401) **allow failover** because each provider has its own API key. True client errors (400, malformed input) **do not failover** because the same input would fail everywhere.
+
+> 📖 **For detailed configuration, operational scenarios, and Kubernetes deployment guides, see [AI Providers Setup Guide](../docs/AI_PROVIDERS_SETUP_GUIDE.md).**
 
 ## 🚀 Quick Start
 
@@ -327,17 +341,19 @@ export ANTHROPIC_API_KEY=sk-ant-emergency-key
 export DEEPSEEK_BASE_URL=https://eu.api.deepseek.com
 ```
 
-### Smart Failover: When NOT to Retry
+### Smart Failover: Error Classification
 
-Chain Client is smart about errors:
+Chain Client is smart about which errors trigger failover:
 
-- **Retryable (tries next provider)**: Network errors, timeouts, server errors (5xx), rate limits
-- **Non-retryable (fails immediately)**: Invalid API key (401), bad request (400), content policy violations
+- **Retryable (tries next provider)**: Network errors, timeouts, server errors (5xx), rate limits, **authentication errors (401)**
+- **Non-retryable (fails immediately)**: Bad request (400), content policy violations, malformed requests
+
+**Why authentication errors trigger failover**: Each provider has its own API key. If OpenAI's key is invalid, DeepSeek might still work with a valid key. This enables resilient multi-provider setups.
 
 ```go
-// If your API key is wrong, Chain Client won't waste time trying other providers
+// Authentication errors trigger failover to the next provider
 response, err := client.GenerateResponse(ctx, prompt, nil)
-// Error: "Authentication failed (not retrying): invalid API key"
+// If OpenAI returns 401 → tries DeepSeek → tries Groq → returns first success
 ```
 
 ### Partial Chain: Some Providers Missing API Keys
@@ -382,7 +398,7 @@ When you buy a t-shirt, you don't say "I want a garment measuring 22 inches acro
 // Using different providers means remembering different model names
 openai, _ := ai.NewClient(
     ai.WithProviderAlias("openai"),
-    ai.WithModel("gpt-4"),  // OpenAI's name for smart model
+    ai.WithModel("o3"),  // OpenAI's name for smart model
 )
 
 deepseek, _ := ai.NewClient(
@@ -392,7 +408,7 @@ deepseek, _ := ai.NewClient(
 
 groq, _ := ai.NewClient(
     ai.WithProviderAlias("openai.groq"),
-    ai.WithModel("mixtral-8x7b-32768"),  // Groq's name for smart model
+    ai.WithModel("llama-3.3-70b-versatile"),  // Groq's name for smart model
 )
 ```
 
@@ -401,7 +417,7 @@ groq, _ := ai.NewClient(
 // Same model alias works across all providers!
 openai, _ := ai.NewClient(
     ai.WithProviderAlias("openai"),
-    ai.WithModel("smart"),  // Automatically uses gpt-4
+    ai.WithModel("smart"),  // Automatically uses o3
 )
 
 deepseek, _ := ai.NewClient(
@@ -411,18 +427,58 @@ deepseek, _ := ai.NewClient(
 
 groq, _ := ai.NewClient(
     ai.WithProviderAlias("openai.groq"),
-    ai.WithModel("smart"),  // Automatically uses mixtral-8x7b-32768
+    ai.WithModel("smart"),  // Automatically uses llama-3.3-70b-versatile
 )
 ```
 
 ### Standard Model Aliases
 
-| Alias | Purpose | OpenAI | DeepSeek | Groq | Together | xAI | Qwen |
-|-------|---------|--------|----------|------|----------|-----|------|
-| **`fast`** | Quick responses, lower cost | `gpt-3.5-turbo` | `deepseek-chat` | `llama-3.3-70b-versatile` | `meta-llama/Llama-3-8b-chat-hf` | `grok-2` | `qwen-turbo` |
-| **`smart`** | Best reasoning, higher quality | `gpt-4` | `deepseek-reasoner` | `mixtral-8x7b-32768` | `meta-llama/Llama-3-70b-chat-hf` | `grok-2` | `qwen-plus` |
-| **`code`** | Code generation & analysis | `gpt-4` | `deepseek-coder` | `llama-3.3-70b-versatile` | `deepseek-ai/deepseek-coder-33b-instruct` | `grok-2` | `qwen-plus` |
-| **`vision`** | Image understanding | `gpt-4-vision-preview` | _(not supported)_ | _(not supported)_ | _(not supported)_ | _(not supported)_ | _(not supported)_ |
+| Alias | Purpose | OpenAI | Anthropic | Gemini | DeepSeek | Groq | xAI | Qwen |
+|-------|---------|--------|-----------|--------|----------|------|-----|------|
+| **`default`** | General use, balanced | `gpt-4.1-mini` | `claude-sonnet-4-5` | `gemini-2.5-flash` | `deepseek-chat` | `llama-3.3-70b-versatile` | `grok-3-beta` | `qwen-plus` |
+| **`fast`** | Quick responses, lower cost | `gpt-4.1-mini` | `claude-haiku-4-5` | `gemini-2.5-flash-lite` | `deepseek-chat` | `llama-3.1-8b-instant` | `grok-2` | `qwen-turbo` |
+| **`smart`** | Best reasoning, higher quality | `o3` | `claude-sonnet-4-5` | `gemini-2.5-pro` | `deepseek-reasoner` | `llama-3.3-70b-versatile` | `grok-3-beta` | `qwen-max` |
+| **`premium`** | Maximum intelligence | `o3` | `claude-opus-4-5` | `gemini-3-pro-preview` | `deepseek-reasoner` | `llama-3.3-70b-versatile` | `grok-3-beta` | `qwen-max` |
+| **`code`** | Code generation & analysis | `o3` | `claude-sonnet-4-5` | `gemini-2.5-pro` | `deepseek-chat` | `llama-3.3-70b-versatile` | `grok-3-mini-beta` | `qwen3-coder-plus` |
+| **`vision`** | Image understanding | `gpt-4.1` | `claude-sonnet-4-5` | `gemini-2.5-flash` | _(not supported)_ | _(not supported)_ | `grok-2-vision-latest` | _(not supported)_ |
+
+> **Note**: Model names shown are abbreviated for readability. Actual model IDs include version dates (e.g., `claude-sonnet-4-5-20250929`). See provider documentation for full model IDs.
+
+### Environment Variable Overrides
+
+You can override any model alias at runtime using environment variables, without changing code:
+
+```bash
+# Pattern: GOMIND_{PROVIDER}_MODEL_{ALIAS}=actual-model-name
+
+# Override OpenAI aliases
+export GOMIND_OPENAI_MODEL_DEFAULT=gpt-4.1-mini
+export GOMIND_OPENAI_MODEL_SMART=gpt-4.1
+
+# Override Anthropic aliases
+export GOMIND_ANTHROPIC_MODEL_SMART=claude-opus-4-5-20251101
+export GOMIND_ANTHROPIC_MODEL_FAST=claude-haiku-4-5-20251001
+
+# Override Gemini aliases
+export GOMIND_GEMINI_MODEL_FAST=gemini-2.0-flash
+
+# For OpenAI-compatible providers, strip the "openai." prefix
+export GOMIND_DEEPSEEK_MODEL_SMART=deepseek-reasoner
+export GOMIND_GROQ_MODEL_DEFAULT=llama-3.3-70b-versatile
+export GOMIND_XAI_MODEL_SMART=grok-3-beta
+export GOMIND_QWEN_MODEL_CODE=qwen3-coder-plus
+export GOMIND_OLLAMA_MODEL_DEFAULT=mistral:7b
+```
+
+**Resolution Priority**:
+1. **Environment variable** (highest) - `GOMIND_OPENAI_MODEL_SMART`
+2. **Hardcoded alias** - Built-in mapping in `modelAliases`
+3. **Pass-through** (lowest) - Use model name as-is
+
+This enables:
+- **Per-environment configuration**: Use cheaper models in dev, premium models in prod
+- **Runtime model switching**: Change models without redeploying
+- **Kubernetes ConfigMap integration**: Manage models via ConfigMaps/Secrets
 
 ### Write Once, Switch Providers Anytime
 
@@ -436,9 +492,9 @@ func createAIClient(provider string) (core.AIClient, error) {
 }
 
 // Switch providers just by changing the argument!
-client, _ := createAIClient("openai")          // Uses gpt-4
+client, _ := createAIClient("openai")          // Uses o3
 client, _ := createAIClient("openai.deepseek") // Uses deepseek-reasoner
-client, _ := createAIClient("openai.groq")     // Uses mixtral-8x7b-32768
+client, _ := createAIClient("openai.groq")     // Uses llama-3.3-70b-versatile
 
 // Your business logic never changes!
 response, _ := client.GenerateResponse(ctx, "Analyze this data...", nil)
@@ -468,7 +524,7 @@ client, _ := ai.NewClient(
 // Explicit for control
 client, _ := ai.NewClient(
     ai.WithProviderAlias("openai"),
-    ai.WithModel("gpt-4-0125-preview"),  // Exactly this version
+    ai.WithModel("gpt-4.1-2025-04-14"),  // Exactly this version
 )
 ```
 
@@ -480,9 +536,9 @@ Here's how provider aliases, chain client, and model aliases work together beaut
 // Create a resilient multi-provider system with portable model names!
 client, _ := ai.NewChainClient(
     ai.WithProviderChain(
-        "openai",           // Primary: Use OpenAI's "smart" model (gpt-4)
+        "openai",           // Primary: Use OpenAI's "smart" model (o3)
         "openai.deepseek",  // Backup: Use DeepSeek's "smart" model (deepseek-reasoner)
-        "openai.groq",      // Emergency: Use Groq's "smart" model (mixtral-8x7b-32768)
+        "openai.groq",      // Emergency: Use Groq's "smart" model (llama-3.3-70b-versatile)
     ),
 )
 
@@ -940,6 +996,26 @@ client, _ := ai.NewClient(
     └────────┘ └─────┘ └──────┘
 ```
 
+### Module Dependencies
+
+The AI module follows GoMind's architectural principles:
+
+```
+ai → core + telemetry
+```
+
+| Dependency | Purpose |
+|------------|---------|
+| `core` | Interfaces (`AIClient`, `Logger`), base types |
+| `telemetry` | Metrics and distributed tracing for production visibility |
+
+**Why telemetry?** The AI module makes external API calls that need observability:
+- Request latency and token usage tracking
+- Provider failover metrics (chain client)
+- Distributed trace spans for debugging
+
+See [ai/ARCHITECTURE.md](./ARCHITECTURE.md) for detailed architectural documentation.
+
 ### AI-Enhanced Components: Tools vs Agents
 
 The AI module provides two types of AI-enhanced components:
@@ -1372,6 +1448,86 @@ Your code stays the same:
 ```go
 client, _ := ai.NewClient()  // Auto-detects from environment
 ```
+
+## 📊 Distributed Tracing for AI Operations
+
+The AI module supports distributed tracing via OpenTelemetry, allowing you to see AI operations (`ai.generate_response`, `ai.http_attempt`) in Jaeger as part of your request traces.
+
+### Enabling AI Telemetry
+
+Pass a telemetry provider when creating the AI client:
+
+```go
+import (
+    "github.com/itsneelabh/gomind/ai"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+// Initialize telemetry FIRST (critical!)
+telemetry.Initialize(telemetry.Config{
+    ServiceName: "my-agent",
+    Endpoint:    "http://otel-collector:4318",
+})
+defer telemetry.Shutdown(context.Background())
+
+// Create AI client WITH telemetry provider
+aiClient, err := ai.NewClient(
+    ai.WithTelemetry(telemetry.GetTelemetryProvider()),
+)
+```
+
+### ⚠️ Critical: Initialization Order
+
+**Telemetry MUST be initialized BEFORE creating the AI client.** If you create the AI client first, `telemetry.GetTelemetryProvider()` returns `nil` and no AI spans will be captured.
+
+```go
+// ✅ CORRECT: Telemetry first, then AI client
+func main() {
+    initTelemetry("my-service")
+    defer telemetry.Shutdown(context.Background())
+
+    aiClient, _ := ai.NewClient(
+        ai.WithTelemetry(telemetry.GetTelemetryProvider()),
+    )
+    // AI spans will appear in Jaeger!
+}
+
+// ❌ WRONG: AI client created before telemetry
+func main() {
+    aiClient, _ := ai.NewClient(
+        ai.WithTelemetry(telemetry.GetTelemetryProvider()), // Returns nil!
+    )
+    initTelemetry("my-service")  // Too late
+    // No AI spans in traces
+}
+```
+
+### Spans Captured
+
+| Span Name | Description | Key Attributes |
+|-----------|-------------|----------------|
+| `ai.generate_response` | Overall AI request | `ai.provider`, `ai.model`, `ai.prompt_tokens`, `ai.completion_tokens`, `ai.total_tokens`, `ai.prompt_length`, `ai.response_length` |
+| `ai.http_attempt` | Each HTTP attempt | `ai.attempt`, `ai.max_retries`, `ai.is_retry`, `ai.attempt_status`, `ai.attempt_duration_ms`, `http.status_code` |
+
+### Viewing in Jaeger
+
+1. Open Jaeger: `http://localhost:16686`
+2. Select your service
+3. Find a trace with AI operations
+4. Expand to see `ai.generate_response` and `ai.http_attempt` spans
+5. Click spans to see token counts, model info, and timing
+
+### Complete Example
+
+See `examples/agent-with-orchestration/` for a production-ready example with full AI telemetry integration.
+
+## 📖 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| **[AI Providers Setup Guide](../docs/AI_PROVIDERS_SETUP_GUIDE.md)** | Comprehensive guide for configuring providers, operational scenarios, Kubernetes deployment, and troubleshooting |
+| **[ARCHITECTURE.md](./ARCHITECTURE.md)** | Technical architecture and design decisions |
+| **[MODEL_ALIAS_CROSS_PROVIDER_PROPOSAL.md](./MODEL_ALIAS_CROSS_PROVIDER_PROPOSAL.md)** | Implementation details for model aliases and chain client fixes |
 
 ## 🎉 Summary
 
