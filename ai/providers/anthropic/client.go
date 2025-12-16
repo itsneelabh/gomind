@@ -34,7 +34,10 @@ func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
 	}
 
 	base := providers.NewBaseClient(30*time.Second, logger)
-	base.DefaultModel = "claude-3-5-sonnet-20240620"
+	// Use "default" alias so resolveModel() is always called, enabling env var overrides
+	// The actual model is resolved at request-time via modelAliases["default"]
+	// or GOMIND_ANTHROPIC_MODEL_DEFAULT env var
+	base.DefaultModel = "default"
 	base.DefaultMaxTokens = 1000
 
 	return &Client{
@@ -68,6 +71,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	// Apply defaults
 	options = c.ApplyDefaults(options)
+
+	// Resolve model alias (e.g., "smart" -> "claude-3-5-sonnet-20241022")
+	options.Model = resolveModel(options.Model)
 
 	// Add model to span attributes after defaults are applied
 	span.SetAttribute("ai.model", options.Model)

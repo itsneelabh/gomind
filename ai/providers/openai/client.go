@@ -16,23 +16,28 @@ import (
 // Client implements core.AIClient for OpenAI
 type Client struct {
 	*providers.BaseClient
-	apiKey  string
-	baseURL string
+	apiKey        string
+	baseURL       string
+	providerAlias string // For request-time alias resolution (e.g., "openai.deepseek")
 }
 
 // NewClient creates a new OpenAI client with configuration
-func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
+func NewClient(apiKey, baseURL, providerAlias string, logger core.Logger) *Client {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
 
 	base := providers.NewBaseClient(30*time.Second, logger)
-	base.DefaultModel = "gpt-4.1-mini-2025-04-14" // Latest GPT-4.1-mini: 1M context, 50% faster, better reasoning
+	// Use "default" alias so ResolveModel() is always called, enabling env var overrides
+	// The actual model is resolved at request-time via ModelAliases["openai"]["default"]
+	// or GOMIND_OPENAI_MODEL_DEFAULT env var
+	base.DefaultModel = "default"
 
 	return &Client{
-		BaseClient: base,
-		apiKey:     apiKey,
-		baseURL:    baseURL,
+		BaseClient:    base,
+		apiKey:        apiKey,
+		baseURL:       baseURL,
+		providerAlias: providerAlias,
 	}
 }
 
@@ -60,6 +65,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	// Apply defaults
 	options = c.ApplyDefaults(options)
+
+	// Resolve model alias at request time (e.g., "smart" -> "gpt-4")
+	options.Model = ResolveModel(c.providerAlias, options.Model)
 
 	// Add model to span attributes after defaults are applied
 	span.SetAttribute("ai.model", options.Model)

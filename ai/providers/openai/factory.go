@@ -30,11 +30,8 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		logger = cal.WithComponent("framework/ai")
 	}
 
-	// Phase 2: Resolve model aliases
-	// This enables portable model names like "smart" to work across providers
-	if config.Model != "" {
-		config.Model = ResolveModel(config.ProviderAlias, config.Model)
-	}
+	// Note: Model alias resolution moved to request-time in GenerateResponse
+	// This enables Chain Client to pass portable aliases to all providers
 
 	logger.Info("OpenAI provider initialized", map[string]interface{}{
 		"operation":      "ai_provider_init",
@@ -48,7 +45,7 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 	})
 
 	// Create the client with resolved configuration
-	client := NewClient(apiKey, baseURL, logger)
+	client := NewClient(apiKey, baseURL, config.ProviderAlias, logger)
 
 	// Set telemetry for distributed tracing
 	if config.Telemetry != nil {
@@ -66,8 +63,27 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 	}
 
 	// Apply model defaults
+	// CRITICAL: Use the "default" ALIAS (not resolved model name) to enable env var overrides
+	//
+	// How it works:
+	// 1. DefaultModel is set to "default" (the alias)
+	// 2. When GenerateResponse() calls ApplyDefaults(), options.Model = "default"
+	// 3. ResolveModel() resolves "default" by checking:
+	//    a. Env var GOMIND_{PROVIDER}_MODEL_DEFAULT (highest priority)
+	//    b. ModelAliases[provider]["default"] (fallback)
+	//
+	// This enables runtime model override for ALL calls via:
+	//   GOMIND_OPENAI_MODEL_DEFAULT=gpt-4o-mini
+	//   GOMIND_GROQ_MODEL_DEFAULT=llama-3.2-90b-vision
+	//
+	// Priority:
+	// 1. Explicit config.Model (highest) - use as-is, may be alias or concrete name
+	// 2. "default" alias (enables env var override for all unspecified models)
 	if config.Model != "" {
 		client.DefaultModel = config.Model
+	} else {
+		// Use "default" alias so ALL calls go through ResolveModel() and respect env vars
+		client.DefaultModel = "default"
 	}
 
 	// Apply temperature default
@@ -160,9 +176,23 @@ func (f *Factory) resolveCredentials(config *ai.AIConfig) (apiKey, baseURL strin
 		)
 		return apiKey, baseURL
 
+	case "openai":
+		// Explicit "openai" request - use ONLY OpenAI credentials, no auto-detection
+		// This fixes the bug where ChainClient with ["openai", "anthropic", "openai.groq"]
+		// would auto-detect Groq when OPENAI_API_KEY is not set, causing credential-model mismatch.
+		// See: ai/MODEL_ALIAS_CROSS_PROVIDER_PROPOSAL.md - "BUG: OpenAI Factory Auto-Detection"
+		apiKey = firstNonEmpty(config.APIKey, os.Getenv("OPENAI_API_KEY"))
+		baseURL = firstNonEmpty(
+			config.BaseURL,
+			os.Getenv("OPENAI_BASE_URL"),
+			"https://api.openai.com/v1",
+		)
+		return apiKey, baseURL
+
 	default:
-		// "openai" or empty - vanilla OpenAI or auto-detection fallback
-		// If ProviderAlias is explicitly "openai" or not set, use OpenAI or auto-detect
+		// Empty ProviderAlias ("" or unset) - true auto-detection mode
+		// This is the ONLY path where auto-detection should run.
+		// Used when user wants automatic provider selection based on available API keys.
 
 		// Auto-detection path (backward compatibility with Phase 1)
 		// This maintains zero-config experience when ProviderAlias is not set

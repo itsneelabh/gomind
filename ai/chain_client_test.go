@@ -89,6 +89,12 @@ func TestPhase3_NoProvidersAvailableFails(t *testing.T) {
 
 
 // TestPhase3_ErrorClassification verifies isClientError function
+//
+// IMPORTANT: In a provider chain, auth errors SHOULD trigger failover because
+// each provider has its own API key. Auth failure on OpenAI should try Anthropic.
+//
+// Non-retryable (isClientError=true): bad request, content policy, invalid parameter, malformed
+// Retryable (isClientError=false): auth errors, server errors, timeouts, network errors
 func TestPhase3_ErrorClassification(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -96,71 +102,94 @@ func TestPhase3_ErrorClassification(t *testing.T) {
 		isClientErr bool
 		description string
 	}{
+		// Auth errors SHOULD failover (each provider has different API key)
 		{
-			name:        "Authentication error is client error",
+			name:        "Authentication error allows failover",
 			err:         errors.New("authentication failed"),
-			isClientErr: true,
-			description: "4xx errors shouldn't be retried",
+			isClientErr: false,
+			description: "Auth errors should try next provider",
 		},
 		{
-			name:        "Unauthorized is client error",
+			name:        "Unauthorized allows failover",
 			err:         errors.New("unauthorized access"),
-			isClientErr: true,
-			description: "401 errors are client errors",
+			isClientErr: false,
+			description: "401 errors should try next provider",
 		},
 		{
-			name:        "Invalid request is client error",
-			err:         errors.New("invalid request parameters"),
+			name:        "API key error allows failover",
+			err:         errors.New("api key is invalid"),
+			isClientErr: false,
+			description: "API key errors should try next provider",
+		},
+		{
+			name:        "401 status allows failover",
+			err:         errors.New("status code 401"),
+			isClientErr: false,
+			description: "401 status should try next provider",
+		},
+		// True client errors should NOT failover (same bad input fails everywhere)
+		{
+			name:        "Invalid parameter is client error",
+			err:         errors.New("invalid parameter value"),
 			isClientErr: true,
-			description: "400 errors are client errors",
+			description: "Invalid params would fail on any provider",
 		},
 		{
 			name:        "Bad request is client error",
 			err:         errors.New("bad request format"),
 			isClientErr: true,
-			description: "Malformed requests shouldn't retry",
+			description: "Malformed requests would fail on any provider",
 		},
 		{
-			name:        "API key error is client error",
-			err:         errors.New("api key is invalid"),
+			name:        "Content policy is client error",
+			err:         errors.New("content policy violation"),
 			isClientErr: true,
-			description: "Missing/invalid API keys are client errors",
+			description: "Policy violations would fail on any provider",
 		},
 		{
-			name:        "Not found is client error",
-			err:         errors.New("resource not found"),
+			name:        "Malformed input is client error",
+			err:         errors.New("malformed JSON input"),
 			isClientErr: true,
-			description: "404 errors are client errors",
+			description: "Malformed input would fail on any provider",
 		},
-		{
-			name:        "Forbidden is client error",
-			err:         errors.New("forbidden access to resource"),
-			isClientErr: true,
-			description: "403 errors are client errors",
-		},
+		// Server/network errors should failover
 		{
 			name:        "Server error is retryable",
 			err:         errors.New("internal server error"),
 			isClientErr: false,
-			description: "5xx errors should be retried",
+			description: "5xx errors should try next provider",
 		},
 		{
 			name:        "Timeout is retryable",
 			err:         errors.New("request timeout"),
 			isClientErr: false,
-			description: "Timeouts should be retried",
+			description: "Timeouts should try next provider",
 		},
 		{
 			name:        "Network error is retryable",
 			err:         errors.New("network connection failed"),
 			isClientErr: false,
-			description: "Network errors should be retried",
+			description: "Network errors should try next provider",
 		},
 		{
 			name:        "Unknown error is retryable",
 			err:         errors.New("some random error"),
 			isClientErr: false,
-			description: "Conservative: unknown errors should retry",
+			description: "Conservative: unknown errors should try next provider",
+		},
+		// Edge cases - not found and forbidden are NOT in client error patterns
+		// so they default to retryable (conservative approach)
+		{
+			name:        "Not found allows failover",
+			err:         errors.New("resource not found"),
+			isClientErr: false,
+			description: "Not found defaults to retryable",
+		},
+		{
+			name:        "Forbidden allows failover",
+			err:         errors.New("forbidden access to resource"),
+			isClientErr: false,
+			description: "Forbidden defaults to retryable",
 		},
 	}
 
@@ -272,11 +301,12 @@ func (m *chainMockAIClient) GenerateResponse(ctx context.Context, prompt string,
 // TestPhase3_FailoverBehavior verifies automatic failover logic
 func TestPhase3_FailoverBehavior(t *testing.T) {
 	tests := []struct {
-		name           string
-		providers      []core.AIClient
-		expectSuccess  bool
-		expectedCalls  map[string]int
-		description    string
+		name            string
+		providers       []core.AIClient
+		providerAliases []string // Required: must match providers length
+		expectSuccess   bool
+		expectedCalls   map[string]int
+		description     string
 	}{
 		{
 			name: "First provider succeeds",
@@ -284,9 +314,10 @@ func TestPhase3_FailoverBehavior(t *testing.T) {
 				&chainMockAIClient{name: "provider1", shouldFail: false},
 				&chainMockAIClient{name: "provider2", shouldFail: false},
 			},
-			expectSuccess: true,
-			expectedCalls: map[string]int{"provider1": 1, "provider2": 0},
-			description:   "Should use first provider only",
+			providerAliases: []string{"provider1", "provider2"},
+			expectSuccess:   true,
+			expectedCalls:   map[string]int{"provider1": 1, "provider2": 0},
+			description:     "Should use first provider only",
 		},
 		{
 			name: "Failover to second provider",
@@ -294,19 +325,32 @@ func TestPhase3_FailoverBehavior(t *testing.T) {
 				&chainMockAIClient{name: "provider1", shouldFail: true, failWith: errors.New("server error")},
 				&chainMockAIClient{name: "provider2", shouldFail: false},
 			},
-			expectSuccess: true,
-			expectedCalls: map[string]int{"provider1": 1, "provider2": 1},
-			description:   "Should failover on server error",
+			providerAliases: []string{"provider1", "provider2"},
+			expectSuccess:   true,
+			expectedCalls:   map[string]int{"provider1": 1, "provider2": 1},
+			description:     "Should failover on server error",
 		},
 		{
-			name: "Client error stops failover",
+			name: "Auth error allows failover",
 			providers: []core.AIClient{
 				&chainMockAIClient{name: "provider1", shouldFail: true, failWith: errors.New("invalid api key")},
 				&chainMockAIClient{name: "provider2", shouldFail: false},
 			},
-			expectSuccess: false,
-			expectedCalls: map[string]int{"provider1": 1, "provider2": 0},
-			description:   "Should not retry client errors",
+			providerAliases: []string{"provider1", "provider2"},
+			expectSuccess:   true,
+			expectedCalls:   map[string]int{"provider1": 1, "provider2": 1},
+			description:     "Auth errors should try next provider (different API keys)",
+		},
+		{
+			name: "True client error stops failover",
+			providers: []core.AIClient{
+				&chainMockAIClient{name: "provider1", shouldFail: true, failWith: errors.New("bad request: invalid prompt format")},
+				&chainMockAIClient{name: "provider2", shouldFail: false},
+			},
+			providerAliases: []string{"provider1", "provider2"},
+			expectSuccess:   false,
+			expectedCalls:   map[string]int{"provider1": 1, "provider2": 0},
+			description:     "Bad request errors should not retry (same input fails everywhere)",
 		},
 		{
 			name: "All providers fail",
@@ -314,17 +358,19 @@ func TestPhase3_FailoverBehavior(t *testing.T) {
 				&chainMockAIClient{name: "provider1", shouldFail: true, failWith: errors.New("server error")},
 				&chainMockAIClient{name: "provider2", shouldFail: true, failWith: errors.New("server error")},
 			},
-			expectSuccess: false,
-			expectedCalls: map[string]int{"provider1": 1, "provider2": 1},
-			description:   "Should try all providers before failing",
+			providerAliases: []string{"provider1", "provider2"},
+			expectSuccess:   false,
+			expectedCalls:   map[string]int{"provider1": 1, "provider2": 1},
+			description:     "Should try all providers before failing",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &ChainClient{
-				providers: tt.providers,
-				logger:    &core.NoOpLogger{},
+				providers:       tt.providers,
+				providerAliases: tt.providerAliases,
+				logger:          &core.NoOpLogger{},
 			}
 
 			ctx := context.Background()
@@ -406,5 +452,118 @@ func clearAllChainEnvVars() {
 	}
 	for _, v := range vars {
 		os.Unsetenv(v)
+	}
+}
+
+// ================================
+// Tests for cloneAIOptions (Options Mutation Bug Fix)
+// ================================
+//
+// These tests verify the cloneAIOptions function that prevents mutation
+// bleeding during chain failover. See: ai/MODEL_ALIAS_CROSS_PROVIDER_PROPOSAL.md
+//
+
+// TestCloneAIOptions_NilInput verifies nil input returns nil output
+func TestCloneAIOptions_NilInput(t *testing.T) {
+	result := cloneAIOptions(nil)
+	if result != nil {
+		t.Errorf("Expected nil output for nil input, got %+v", result)
+	}
+}
+
+// TestCloneAIOptions_CopiesAllFields verifies all fields are copied correctly
+func TestCloneAIOptions_CopiesAllFields(t *testing.T) {
+	original := &core.AIOptions{
+		Model:        "gpt-4",
+		Temperature:  0.7,
+		MaxTokens:    1000,
+		SystemPrompt: "You are a helpful assistant.",
+	}
+
+	clone := cloneAIOptions(original)
+
+	// Verify clone is not nil
+	if clone == nil {
+		t.Fatal("Expected non-nil clone, got nil")
+	}
+
+	// Verify clone is a different pointer
+	if clone == original {
+		t.Error("Clone should be a different pointer than original")
+	}
+
+	// Verify all fields are copied
+	if clone.Model != original.Model {
+		t.Errorf("Model mismatch: got %q, want %q", clone.Model, original.Model)
+	}
+	if clone.Temperature != original.Temperature {
+		t.Errorf("Temperature mismatch: got %v, want %v", clone.Temperature, original.Temperature)
+	}
+	if clone.MaxTokens != original.MaxTokens {
+		t.Errorf("MaxTokens mismatch: got %d, want %d", clone.MaxTokens, original.MaxTokens)
+	}
+	if clone.SystemPrompt != original.SystemPrompt {
+		t.Errorf("SystemPrompt mismatch: got %q, want %q", clone.SystemPrompt, original.SystemPrompt)
+	}
+}
+
+// TestCloneAIOptions_MutationIsolation verifies mutation of clone doesn't affect original
+// This is the critical behavior that fixes the chain failover bug
+func TestCloneAIOptions_MutationIsolation(t *testing.T) {
+	original := &core.AIOptions{
+		Model:        "smart",
+		Temperature:  0.5,
+		MaxTokens:    500,
+		SystemPrompt: "Original prompt",
+	}
+
+	clone := cloneAIOptions(original)
+
+	// Mutate the clone (simulates what ApplyDefaults does)
+	clone.Model = "gpt-4.1-mini-2025-04-14" // Resolved model name
+	clone.Temperature = 0.8
+	clone.MaxTokens = 2000
+	clone.SystemPrompt = "Modified prompt"
+
+	// Verify original is unchanged
+	if original.Model != "smart" {
+		t.Errorf("Original Model was mutated: got %q, want %q", original.Model, "smart")
+	}
+	if original.Temperature != 0.5 {
+		t.Errorf("Original Temperature was mutated: got %v, want %v", original.Temperature, 0.5)
+	}
+	if original.MaxTokens != 500 {
+		t.Errorf("Original MaxTokens was mutated: got %d, want %d", original.MaxTokens, 500)
+	}
+	if original.SystemPrompt != "Original prompt" {
+		t.Errorf("Original SystemPrompt was mutated: got %q, want %q", original.SystemPrompt, "Original prompt")
+	}
+}
+
+// TestCloneAIOptions_EmptyOptions verifies cloning works with zero-value options
+func TestCloneAIOptions_EmptyOptions(t *testing.T) {
+	original := &core.AIOptions{} // All zero values
+
+	clone := cloneAIOptions(original)
+
+	if clone == nil {
+		t.Fatal("Expected non-nil clone, got nil")
+	}
+	if clone == original {
+		t.Error("Clone should be a different pointer than original")
+	}
+
+	// Verify zero values are preserved
+	if clone.Model != "" {
+		t.Errorf("Expected empty Model, got %q", clone.Model)
+	}
+	if clone.Temperature != 0 {
+		t.Errorf("Expected zero Temperature, got %v", clone.Temperature)
+	}
+	if clone.MaxTokens != 0 {
+		t.Errorf("Expected zero MaxTokens, got %d", clone.MaxTokens)
+	}
+	if clone.SystemPrompt != "" {
+		t.Errorf("Expected empty SystemPrompt, got %q", clone.SystemPrompt)
 	}
 }
