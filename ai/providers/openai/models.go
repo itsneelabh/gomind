@@ -1,5 +1,10 @@
 package openai
 
+import (
+	"os"
+	"strings"
+)
+
 // OpenAIResponse represents the response from OpenAI API
 type OpenAIResponse struct {
 	ID      string   `json:"id"`
@@ -39,51 +44,85 @@ type ErrorResponse struct {
 	} `json:"error"`
 }
 
-// ModelAliases maps common model aliases to provider-specific model names (Phase 2)
+// ModelAliases maps common model aliases to provider-specific model names.
 // This enables portable model names across different OpenAI-compatible providers.
+// Updated December 2025 with latest model offerings from official documentation.
 //
 // Example usage:
-//   client, _ := ai.NewClient(
-//       ai.WithProviderAlias("openai.deepseek"),
-//       ai.WithModel("smart"),  // Resolves to "deepseek-reasoner"
-//   )
+//
+//	client, _ := ai.NewClient(
+//	    ai.WithProviderAlias("openai.deepseek"),
+//	    ai.WithModel("smart"),  // Resolves to "deepseek-reasoner"
+//	)
+//
+// Sources:
+//   - OpenAI: https://platform.openai.com/docs/models
+//   - DeepSeek: https://api-docs.deepseek.com/quick_start/pricing
+//   - Groq: https://console.groq.com/docs/models
+//   - Together: https://docs.together.ai/docs/chat-models
+//   - xAI: https://docs.x.ai/docs/models
+//   - Qwen: https://www.alibabacloud.com/help/en/model-studio/models
+//   - Ollama: https://ollama.com/library
 var ModelAliases = map[string]map[string]string{
+	// OpenAI - GPT-4.1 and O-series (December 2025)
+	// GPT-4.1 replaced GPT-4o in API with 1M context window
+	// O-series provides advanced reasoning capabilities
 	"openai": {
-		"fast":    "gpt-3.5-turbo",
-		"smart":   "gpt-4",
-		"vision":  "gpt-4-vision-preview",
-		"code":    "gpt-4",
-		"default": "gpt-3.5-turbo",
+		"fast":    "gpt-4.1-mini", // GPT-4.1 Mini: fast, affordable, 1M context
+		"smart":   "o3",           // O3: best reasoning model
+		"vision":  "gpt-4.1",      // GPT-4.1: vision + 1M context
+		"code":    "o3",           // O3: excellent at coding tasks
+		"default": "gpt-4.1-mini",
 	},
+	// DeepSeek - V3.2 family (December 2025)
+	// Two main models: chat (general) and reasoner (thinking mode)
 	"openai.deepseek": {
-		"fast":    "deepseek-chat",
-		"smart":   "deepseek-reasoner",
-		"code":    "deepseek-coder",
+		"fast":    "deepseek-chat",     // V3.2 default chat, 128K context
+		"smart":   "deepseek-reasoner", // V3.2 thinking mode, 128K context
+		"code":    "deepseek-chat",     // V3.2 has strong coding capabilities
 		"default": "deepseek-chat",
 	},
+	// Groq - Ultra-fast inference (December 2025)
+	// Known for extremely fast token generation speeds
 	"openai.groq": {
-		"fast":    "llama-3.3-70b-versatile",
-		"smart":   "mixtral-8x7b-32768",
-		"code":    "llama-3.3-70b-versatile",
+		"fast":    "llama-3.1-8b-instant",    // 560 T/sec, fastest
+		"smart":   "llama-3.3-70b-versatile", // 280 T/sec, best quality
+		"code":    "llama-3.3-70b-versatile", // Best for coding on Groq
 		"default": "llama-3.3-70b-versatile",
 	},
+	// Together AI - Open source models (December 2025)
+	// Hosts popular open models with Turbo optimizations
 	"openai.together": {
-		"fast":    "meta-llama/Llama-3-8b-chat-hf",
-		"smart":   "meta-llama/Llama-3-70b-chat-hf",
-		"code":    "deepseek-ai/deepseek-coder-33b-instruct",
-		"default": "meta-llama/Llama-3-70b-chat-hf",
+		"fast":    "meta-llama/Llama-3.1-8B-Instruct-Turbo",  // Fast inference
+		"smart":   "meta-llama/Llama-3.3-70B-Instruct-Turbo", // Best open model
+		"code":    "Qwen/Qwen2.5-Coder-32B-Instruct",         // Specialized coder
+		"default": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
 	},
+	// xAI Grok - Grok 3 and 4 family (December 2025)
+	// Note: Model IDs use simple names without x-ai/ prefix for direct API use
 	"openai.xai": {
-		"fast":    "grok-2",
-		"smart":   "grok-2",
-		"code":    "grok-2",
-		"default": "grok-2",
+		"fast":    "grok-2",           // Grok 2: fast, 131K context
+		"smart":   "grok-3-beta",      // Grok 3: best reasoning, 131K context
+		"code":    "grok-3-mini-beta", // Grok 3 Mini: fast reasoning for code
+		"vision":  "grok-2-vision-latest",
+		"default": "grok-3-beta",
 	},
+	// Qwen - Alibaba Cloud DashScope (December 2025)
+	// Access via OpenAI-compatible endpoint at dashscope-intl.aliyuncs.com
 	"openai.qwen": {
-		"fast":    "qwen-turbo",
-		"smart":   "qwen-plus",
-		"code":    "qwen-plus",
-		"default": "qwen-turbo",
+		"fast":    "qwen-turbo",       // Fast, cost-efficient, 1M context
+		"smart":   "qwen-max",         // Qwen2.5-Max, most capable
+		"code":    "qwen3-coder-plus", // Specialized for coding
+		"default": "qwen-plus",        // Good balance of speed and quality
+	},
+	// Ollama - Local models via OpenAI-compatible API (December 2025)
+	// Note: Model availability depends on what user has pulled locally
+	// Users can override defaults via GOMIND_OLLAMA_MODEL_DEFAULT environment variable
+	"openai.ollama": {
+		"fast":    "llama3.2:1b", // Smallest/fastest variant
+		"smart":   "llama3.2",    // Default 3B model, good balance
+		"code":    "codellama",   // Code-specialized model
+		"default": "llama3.2",    // Most commonly pulled model
 	},
 }
 
@@ -97,22 +136,34 @@ var ModelAliases = map[string]map[string]string{
 // Returns:
 //   - The actual model name to use with the provider
 //
-// Behavior:
-//   - If model matches an alias for the provider, returns the mapped model
-//   - If no alias match, returns model unchanged (pass-through)
-//   - If providerAlias is empty, defaults to "openai"
+// Priority:
+//  1. Environment variable override (highest) - GOMIND_{PROVIDER}_MODEL_{ALIAS}
+//  2. Hardcoded alias mapping
+//  3. Pass-through (lowest) - Use model name as-is
 //
 // Example:
-//   ResolveModel("openai.deepseek", "smart") → "deepseek-reasoner"
-//   ResolveModel("openai.groq", "fast") → "llama-3.3-70b-versatile"
-//   ResolveModel("openai", "gpt-4") → "gpt-4" (pass-through, not an alias)
+//
+//	ResolveModel("openai.deepseek", "smart") → "deepseek-reasoner"
+//	ResolveModel("openai.groq", "fast") → "llama-3.3-70b-versatile"
+//	ResolveModel("openai", "gpt-4") → "gpt-4" (pass-through, not an alias)
 func ResolveModel(providerAlias string, model string) string {
 	// If no alias is set, use vanilla OpenAI
 	if providerAlias == "" {
 		providerAlias = "openai"
 	}
 
-	// Check if model is an alias for this provider
+	// Check for environment variable override: GOMIND_{PROVIDER}_MODEL_{ALIAS}
+	// Normalize provider alias: "openai.deepseek" -> "DEEPSEEK", "openai" -> "OPENAI"
+	envProvider := providerAlias
+	if strings.HasPrefix(providerAlias, "openai.") {
+		envProvider = strings.TrimPrefix(providerAlias, "openai.")
+	}
+	envKey := "GOMIND_" + strings.ToUpper(envProvider) + "_MODEL_" + strings.ToUpper(model)
+	if override := os.Getenv(envKey); override != "" {
+		return override
+	}
+
+	// Check hardcoded aliases
 	if aliases, exists := ModelAliases[providerAlias]; exists {
 		if actualModel, exists := aliases[model]; exists {
 			return actualModel

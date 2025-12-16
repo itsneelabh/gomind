@@ -1,5 +1,10 @@
 package anthropic
 
+import (
+	"os"
+	"strings"
+)
+
 // AnthropicRequest represents the native Anthropic Messages API request
 type AnthropicRequest struct {
 	Model       string    `json:"model"`
@@ -49,4 +54,40 @@ type ErrorResponse struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// modelAliases maps portable names to Anthropic model IDs.
+// These aliases enable portable model names across providers when using Chain Client.
+// Updated December 2025 with Claude 4.5 family models.
+//
+// Source: https://platform.claude.com/docs/en/about-claude/models
+//
+// Available models:
+//   - claude-opus-4-5-20251101: Premium model, maximum intelligence (200K context)
+//   - claude-sonnet-4-5-20250929: Best balance for agents/coding (200K/1M context)
+//   - claude-haiku-4-5-20251001: Fastest with near-frontier intelligence (200K context)
+var modelAliases = map[string]string{
+	"default": "claude-sonnet-4-5-20250929", // Sonnet 4.5: best balance of intelligence and speed
+	"fast":    "claude-haiku-4-5-20251001",  // Haiku 4.5: fastest, near-frontier intelligence
+	"smart":   "claude-sonnet-4-5-20250929", // Sonnet 4.5: best for agents and coding
+	"premium": "claude-opus-4-5-20251101",   // Opus 4.5: maximum intelligence
+	"code":    "claude-sonnet-4-5-20250929", // Sonnet 4.5: exceptional coding performance
+	"vision":  "claude-sonnet-4-5-20250929", // Sonnet 4.5: supports vision
+}
+
+// resolveModel returns the actual model name for an alias.
+// Priority: 1) Env var override, 2) Hardcoded alias, 3) Pass-through
+func resolveModel(model string) string {
+	// Check for environment variable override: GOMIND_ANTHROPIC_MODEL_{ALIAS}
+	envKey := "GOMIND_ANTHROPIC_MODEL_" + strings.ToUpper(model)
+	if override := os.Getenv(envKey); override != "" {
+		return override
+	}
+
+	// Check hardcoded aliases
+	if actual, exists := modelAliases[model]; exists {
+		return actual
+	}
+
+	return model
 }

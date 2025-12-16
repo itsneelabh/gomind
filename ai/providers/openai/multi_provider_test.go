@@ -379,39 +379,42 @@ func TestPhase2_ModelAliasResolution(t *testing.T) {
 		expectedModel string
 		description   string
 	}{
-		// OpenAI aliases
-		{"openai", "fast", "gpt-3.5-turbo", "OpenAI fast model"},
-		{"openai", "smart", "gpt-4", "OpenAI smart model"},
-		{"openai", "code", "gpt-4", "OpenAI code model"},
-		{"openai", "vision", "gpt-4-vision-preview", "OpenAI vision model"},
+		// OpenAI aliases - GPT-4.1 and O-series (December 2025)
+		{"openai", "fast", "gpt-4.1-mini", "OpenAI fast model"},
+		{"openai", "smart", "o3", "OpenAI smart model"},
+		{"openai", "code", "o3", "OpenAI code model"},
+		{"openai", "vision", "gpt-4.1", "OpenAI vision model"},
 
-		// DeepSeek aliases
+		// DeepSeek aliases - V3.2 family
 		{"openai.deepseek", "fast", "deepseek-chat", "DeepSeek fast model"},
 		{"openai.deepseek", "smart", "deepseek-reasoner", "DeepSeek smart model"},
-		{"openai.deepseek", "code", "deepseek-coder", "DeepSeek code model"},
+		{"openai.deepseek", "code", "deepseek-chat", "DeepSeek code model"},
 
-		// Groq aliases
-		{"openai.groq", "fast", "llama-3.3-70b-versatile", "Groq fast model"},
-		{"openai.groq", "smart", "mixtral-8x7b-32768", "Groq smart model"},
+		// Groq aliases - Llama models
+		{"openai.groq", "fast", "llama-3.1-8b-instant", "Groq fast model"},
+		{"openai.groq", "smart", "llama-3.3-70b-versatile", "Groq smart model"},
 
-		// Together AI aliases
-		{"openai.together", "fast", "meta-llama/Llama-3-8b-chat-hf", "Together fast model"},
-		{"openai.together", "smart", "meta-llama/Llama-3-70b-chat-hf", "Together smart model"},
-		{"openai.together", "code", "deepseek-ai/deepseek-coder-33b-instruct", "Together code model"},
+		// Together AI aliases - Llama models
+		{"openai.together", "fast", "meta-llama/Llama-3.1-8B-Instruct-Turbo", "Together fast model"},
+		{"openai.together", "smart", "meta-llama/Llama-3.3-70B-Instruct-Turbo", "Together smart model"},
+		{"openai.together", "code", "Qwen/Qwen2.5-Coder-32B-Instruct", "Together code model"},
 
-		// xAI aliases
-		{"openai.xai", "smart", "grok-2", "xAI smart model"},
+		// xAI aliases - Grok 2/3 family
+		{"openai.xai", "fast", "grok-2", "xAI fast model"},
+		{"openai.xai", "smart", "grok-3-beta", "xAI smart model"},
+		{"openai.xai", "code", "grok-3-mini-beta", "xAI code model"},
 
 		// Qwen aliases
 		{"openai.qwen", "fast", "qwen-turbo", "Qwen fast model"},
-		{"openai.qwen", "smart", "qwen-plus", "Qwen smart model"},
+		{"openai.qwen", "smart", "qwen-max", "Qwen smart model"},
+		{"openai.qwen", "code", "qwen3-coder-plus", "Qwen code model"},
 
 		// Pass-through (not an alias)
-		{"openai", "gpt-4-turbo", "gpt-4-turbo", "Non-alias pass-through"},
+		{"openai", "gpt-4.1-nano", "gpt-4.1-nano", "Non-alias pass-through"},
 		{"openai.deepseek", "deepseek-chat", "deepseek-chat", "Explicit model pass-through"},
 
 		// Empty alias defaults to openai
-		{"", "smart", "gpt-4", "Empty alias defaults to openai"},
+		{"", "smart", "o3", "Empty alias defaults to openai"},
 	}
 
 	for _, tt := range tests {
@@ -480,7 +483,7 @@ func TestPhase2_MultiProviderCoexistence(t *testing.T) {
 	}
 }
 
-// TestPhase2_ModelResolutionIntegration verifies Create() uses ResolveModel
+// TestPhase2_ModelResolutionIntegration verifies client stores providerAlias for request-time resolution
 func TestPhase2_ModelResolutionIntegration(t *testing.T) {
 	originalVars := saveEnvironment()
 	defer restoreEnvironment(originalVars)
@@ -491,7 +494,7 @@ func TestPhase2_ModelResolutionIntegration(t *testing.T) {
 	factory := &Factory{}
 	config := &ai.AIConfig{
 		ProviderAlias: "openai.deepseek",
-		Model:         "smart", // Should resolve to "deepseek-reasoner"
+		Model:         "smart", // Will be resolved at request-time to "deepseek-reasoner"
 		Logger:        &core.NoOpLogger{},
 	}
 
@@ -501,9 +504,20 @@ func TestPhase2_ModelResolutionIntegration(t *testing.T) {
 		t.Fatal("Expected *Client type")
 	}
 
-	// Verify model was resolved
-	if openaiClient.DefaultModel != "deepseek-reasoner" {
-		t.Errorf("Expected model 'deepseek-reasoner', got %q", openaiClient.DefaultModel)
+	// Verify alias is stored as DefaultModel (request-time resolution)
+	if openaiClient.DefaultModel != "smart" {
+		t.Errorf("Expected DefaultModel to store alias 'smart', got %q", openaiClient.DefaultModel)
+	}
+
+	// Verify providerAlias is stored for request-time resolution
+	if openaiClient.providerAlias != "openai.deepseek" {
+		t.Errorf("Expected providerAlias 'openai.deepseek', got %q", openaiClient.providerAlias)
+	}
+
+	// Verify ResolveModel correctly resolves at request-time
+	resolved := ResolveModel(openaiClient.providerAlias, openaiClient.DefaultModel)
+	if resolved != "deepseek-reasoner" {
+		t.Errorf("Expected resolved model 'deepseek-reasoner', got %q", resolved)
 	}
 }
 

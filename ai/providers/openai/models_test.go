@@ -12,16 +12,16 @@ func TestResolveModel(t *testing.T) {
 		model         string
 		expected      string
 	}{
-		// Vanilla OpenAI - GPT-5.2 family (December 2025)
-		{"openai fast", "openai", "fast", "gpt-5.2-chat-latest"},
-		{"openai smart", "openai", "smart", "gpt-5.2"},
-		{"openai code", "openai", "code", "gpt-5.2"},
-		{"openai vision", "openai", "vision", "gpt-5.2"},
-		{"openai pass-through", "openai", "gpt-5.2-pro", "gpt-5.2-pro"},
+		// Vanilla OpenAI - GPT-4.1 and O-series (December 2025)
+		{"openai fast", "openai", "fast", "gpt-4.1-mini"},
+		{"openai smart", "openai", "smart", "o3"},
+		{"openai code", "openai", "code", "o3"},
+		{"openai vision", "openai", "vision", "gpt-4.1"},
+		{"openai pass-through", "openai", "gpt-4.1-nano", "gpt-4.1-nano"},
 
 		// Empty provider alias defaults to openai
-		{"empty alias fast", "", "fast", "gpt-5.2-chat-latest"},
-		{"empty alias smart", "", "smart", "gpt-5.2"},
+		{"empty alias fast", "", "fast", "gpt-4.1-mini"},
+		{"empty alias smart", "", "smart", "o3"},
 
 		// DeepSeek - V3.2 family
 		{"deepseek fast", "openai.deepseek", "fast", "deepseek-chat"},
@@ -32,18 +32,22 @@ func TestResolveModel(t *testing.T) {
 		// Groq - Llama models
 		{"groq fast", "openai.groq", "fast", "llama-3.1-8b-instant"},
 		{"groq smart", "openai.groq", "smart", "llama-3.3-70b-versatile"},
+		{"groq code", "openai.groq", "code", "llama-3.3-70b-versatile"},
 
 		// Together - Llama models
 		{"together fast", "openai.together", "fast", "meta-llama/Llama-3.1-8B-Instruct-Turbo"},
 		{"together smart", "openai.together", "smart", "meta-llama/Llama-3.3-70B-Instruct-Turbo"},
 
-		// xAI - Grok 4 family
-		{"xai fast", "openai.xai", "fast", "grok-4.1-fast"},
-		{"xai smart", "openai.xai", "smart", "grok-4"},
+		// xAI - Grok 2/3 family
+		{"xai fast", "openai.xai", "fast", "grok-2"},
+		{"xai smart", "openai.xai", "smart", "grok-3-beta"},
+		{"xai code", "openai.xai", "code", "grok-3-mini-beta"},
+		{"xai vision", "openai.xai", "vision", "grok-2-vision-latest"},
 
 		// Qwen - Alibaba models
 		{"qwen fast", "openai.qwen", "fast", "qwen-turbo"},
 		{"qwen smart", "openai.qwen", "smart", "qwen-max"},
+		{"qwen code", "openai.qwen", "code", "qwen3-coder-plus"},
 
 		// Ollama - Local models
 		{"ollama fast", "openai.ollama", "fast", "llama3.2:1b"},

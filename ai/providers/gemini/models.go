@@ -1,5 +1,10 @@
 package gemini
 
+import (
+	"os"
+	"strings"
+)
+
 // GeminiRequest represents the native Gemini GenerateContent API request
 type GeminiRequest struct {
 	Contents          []Content          `json:"contents"`
@@ -75,4 +80,42 @@ type ErrorResponse struct {
 		Message string `json:"message"`
 		Status  string `json:"status"`
 	} `json:"error"`
+}
+
+// modelAliases maps portable names to Gemini model IDs.
+// These aliases enable portable model names across providers when using Chain Client.
+// Updated December 2025 with Gemini 2.5 and 3 family models.
+//
+// Source: https://ai.google.dev/gemini-api/docs/models/gemini
+//
+// Available models:
+//   - gemini-3-pro-preview: Best multimodal understanding (1M input, 65K output)
+//   - gemini-2.5-pro: State-of-the-art thinking model for complex reasoning
+//   - gemini-2.5-flash: Best price-performance, optimized for scale
+//   - gemini-2.5-flash-lite: Fastest flash model, cost-efficient
+//   - gemini-2.0-flash: Previous generation workhorse (1M context)
+var modelAliases = map[string]string{
+	"default": "gemini-2.5-flash",      // Best price-performance for general use
+	"fast":    "gemini-2.5-flash-lite", // Fastest, most cost-efficient
+	"smart":   "gemini-2.5-pro",        // State-of-the-art reasoning
+	"premium": "gemini-3-pro-preview",  // Best multimodal understanding
+	"code":    "gemini-2.5-pro",        // Excellent for coding tasks
+	"vision":  "gemini-2.5-flash",      // Good vision + speed balance
+}
+
+// resolveModel returns the actual model name for an alias.
+// Priority: 1) Env var override, 2) Hardcoded alias, 3) Pass-through
+func resolveModel(model string) string {
+	// Check for environment variable override: GOMIND_GEMINI_MODEL_{ALIAS}
+	envKey := "GOMIND_GEMINI_MODEL_" + strings.ToUpper(model)
+	if override := os.Getenv(envKey); override != "" {
+		return override
+	}
+
+	// Check hardcoded aliases
+	if actual, exists := modelAliases[model]; exists {
+		return actual
+	}
+
+	return model
 }

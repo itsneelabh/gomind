@@ -10,12 +10,14 @@ func TestResolveModel(t *testing.T) {
 		input    string
 		expected string
 	}{
+		{"default", "gemini-2.5-flash"},
+		{"fast", "gemini-2.5-flash-lite"},
 		{"smart", "gemini-2.5-pro"},
-		{"fast", "gemini-2.0-flash"},
+		{"premium", "gemini-3-pro-preview"},
 		{"code", "gemini-2.5-pro"},
 		{"vision", "gemini-2.5-flash"},
-		{"gemini-3-pro", "gemini-3-pro"}, // Pass-through
-		{"unknown", "unknown"},           // Pass-through
+		{"gemini-3-pro", "gemini-3-pro"},   // Pass-through
+		{"unknown-model", "unknown-model"}, // Pass-through
 	}
 
 	for _, tt := range tests {
@@ -29,12 +31,12 @@ func TestResolveModel(t *testing.T) {
 }
 
 func TestResolveModelEnvOverride(t *testing.T) {
-	// Set env var override
+	// Set env var override - override fast to use different model
 	os.Setenv("GOMIND_GEMINI_MODEL_FAST", "gemini-2.0-flash")
 	defer os.Unsetenv("GOMIND_GEMINI_MODEL_FAST")
 
 	result := resolveModel("fast")
-	expected := "gemini-2.0-flash"
+	expected := "gemini-2.0-flash" // Env override takes precedence over gemini-2.5-flash-lite
 	if result != expected {
 		t.Errorf("resolveModel with env override: got %q, want %q", result, expected)
 	}
