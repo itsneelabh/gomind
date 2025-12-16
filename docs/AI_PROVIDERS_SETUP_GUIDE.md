@@ -59,7 +59,7 @@ In a production system, AI integration is rarely as simple as "call OpenAI and h
 - **Provider outages**: What happens when OpenAI is down?
 - **Cost management**: How do you use cheaper models in development?
 - **API key rotation**: How do you change keys without redeploying?
-- **Multi-region compliance**: How do you route traffic to the right provider?
+- **Regional routing**: How do you route traffic to regional endpoints (e.g., EU data residency)?
 
 Without a clear strategy, you end up with:
 - Hardcoded API keys (security nightmare)
@@ -255,9 +255,11 @@ client, _ := ai.NewClient(
 | `default` | General use, balanced cost/quality | `gpt-4.1-mini` | `claude-sonnet-4-5` | `gemini-2.5-flash` | `llama-3.3-70b-versatile` | `deepseek-chat` |
 | `fast` | Speed and cost optimized | `gpt-4.1-mini` | `claude-haiku-4-5` | `gemini-2.5-flash-lite` | `llama-3.1-8b-instant` | `deepseek-chat` |
 | `smart` | Best reasoning quality | `o3` | `claude-sonnet-4-5` | `gemini-2.5-pro` | `llama-3.3-70b-versatile` | `deepseek-reasoner` |
-| `premium` | Maximum intelligence | `o3` | `claude-opus-4-5` | `gemini-3-pro-preview` | `llama-3.3-70b-versatile` | `deepseek-reasoner` |
+| `premium` | Maximum intelligence | _(N/A)_ | `claude-opus-4-5` | `gemini-3-pro-preview` | _(N/A)_ | _(N/A)_ |
 | `code` | Code generation | `o3` | `claude-sonnet-4-5` | `gemini-2.5-pro` | `llama-3.3-70b-versatile` | `deepseek-chat` |
 | `vision` | Image understanding | `gpt-4.1` | `claude-sonnet-4-5` | `gemini-2.5-flash` | _(N/A)_ | _(N/A)_ |
+
+> **Note**: The `premium` alias is only available for Anthropic and Gemini. For other providers, use `smart` for best reasoning quality.
 
 ### Environment Variable Overrides
 
@@ -565,12 +567,13 @@ client, err := ai.NewChainClient(
 
 **Cost monitoring**:
 ```go
-// Log which provider handled each request
+// Log token usage per request for cost analysis
 response, err := client.GenerateResponse(ctx, prompt, nil)
 logger.Info("Request completed", map[string]interface{}{
-    "provider": response.Provider,  // Track for cost analysis
-    "tokens":   response.Usage.TotalTokens,
+    "model":  response.Model,           // Which model was used
+    "tokens": response.Usage.TotalTokens,
 })
+// Note: Provider tracking is available via telemetry spans (ai.chain.provider attribute)
 ```
 
 ### Scenario 6: Privacy-First Deployment
@@ -599,15 +602,13 @@ client, err := ai.NewChainClient(
 )
 ```
 
-**Privacy logging** (for compliance):
+**Privacy monitoring** (for compliance):
 ```go
-// Log when data goes to cloud (for audit)
-if response.Provider == "openai" {
-    logger.Warn("Request routed to cloud provider", map[string]interface{}{
-        "reason": "local_unavailable",
-        // Don't log the actual prompt for privacy!
-    })
-}
+// Track provider usage via telemetry for audit purposes
+// The ai.chain.provider span attribute shows which provider handled each request
+// You can query this in Jaeger/Prometheus:
+//   rate(ai_chain_attempt{provider="openai",status="success"}[5m]) > 0
+// This tells you when requests are being routed to cloud providers
 ```
 
 ### Scenario 7: Multi-Region Deployment
@@ -857,15 +858,27 @@ client, err := ai.NewClient(ai.WithProviderAlias("openai"))
 
 ### Enabling Debug Logging
 
-For detailed provider resolution logs:
+For detailed provider resolution logs, set the debug environment variable:
+
+```bash
+# Enable debug logging for all GoMind components
+export GOMIND_DEBUG=true
+
+# Or set log level directly
+export GOMIND_LOG_LEVEL=debug
+```
+
+Alternatively, use a custom logger with your chain client:
 
 ```go
 import "github.com/itsneelabh/gomind/core"
 
-// Create a debug logger
-logger := core.NewProductionLogger(core.LogConfig{
-    Level: "debug",
-})
+// Create a production logger with debug config
+logger := core.NewProductionLogger(
+    core.LoggingConfig{Level: "debug", Format: "json"},
+    core.DevelopmentConfig{DebugLogging: true},
+    "my-service",
+)
 
 // Pass to chain client
 client, err := ai.NewChainClient(

@@ -438,11 +438,11 @@ groq, _ := ai.NewClient(
 | **`default`** | General use, balanced | `gpt-4.1-mini` | `claude-sonnet-4-5` | `gemini-2.5-flash` | `deepseek-chat` | `llama-3.3-70b-versatile` | `grok-3-beta` | `qwen-plus` |
 | **`fast`** | Quick responses, lower cost | `gpt-4.1-mini` | `claude-haiku-4-5` | `gemini-2.5-flash-lite` | `deepseek-chat` | `llama-3.1-8b-instant` | `grok-2` | `qwen-turbo` |
 | **`smart`** | Best reasoning, higher quality | `o3` | `claude-sonnet-4-5` | `gemini-2.5-pro` | `deepseek-reasoner` | `llama-3.3-70b-versatile` | `grok-3-beta` | `qwen-max` |
-| **`premium`** | Maximum intelligence | `o3` | `claude-opus-4-5` | `gemini-3-pro-preview` | `deepseek-reasoner` | `llama-3.3-70b-versatile` | `grok-3-beta` | `qwen-max` |
+| **`premium`** | Maximum intelligence | _(N/A)_ | `claude-opus-4-5` | `gemini-3-pro-preview` | _(N/A)_ | _(N/A)_ | _(N/A)_ | _(N/A)_ |
 | **`code`** | Code generation & analysis | `o3` | `claude-sonnet-4-5` | `gemini-2.5-pro` | `deepseek-chat` | `llama-3.3-70b-versatile` | `grok-3-mini-beta` | `qwen3-coder-plus` |
-| **`vision`** | Image understanding | `gpt-4.1` | `claude-sonnet-4-5` | `gemini-2.5-flash` | _(not supported)_ | _(not supported)_ | `grok-2-vision-latest` | _(not supported)_ |
+| **`vision`** | Image understanding | `gpt-4.1` | `claude-sonnet-4-5` | `gemini-2.5-flash` | _(N/A)_ | _(N/A)_ | `grok-2-vision-latest` | _(N/A)_ |
 
-> **Note**: Model names shown are abbreviated for readability. Actual model IDs include version dates (e.g., `claude-sonnet-4-5-20250929`). See provider documentation for full model IDs.
+> **Note**: The `premium` alias is only available for Anthropic (claude-opus-4-5) and Gemini (gemini-3-pro-preview). For OpenAI and other providers, use `smart` for best reasoning quality. Model names shown are abbreviated; actual IDs include version dates (e.g., `claude-sonnet-4-5-20250929`).
 
 ### Environment Variable Overrides
 
