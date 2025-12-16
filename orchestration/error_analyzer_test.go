@@ -143,9 +143,14 @@ func TestAnalyzeError_429TooManyRequests(t *testing.T) {
 	}
 }
 
-// TestAnalyzeError_503ServiceUnavailable delegates to resilience
+// TestAnalyzeError_503ServiceUnavailable triggers LLM analysis (may contain semantic errors)
+// Note: 503 errors from tools often contain semantic information like "location not found"
+// that LLM can analyze to suggest corrections, unlike pure infrastructure failures.
 func TestAnalyzeError_503ServiceUnavailable(t *testing.T) {
-	analyzer := NewErrorAnalyzer(nil, &mockLogger{})
+	ai := &errorAnalyzerMockAI{
+		response: `{"should_retry": false, "reason": "Service timeout - infrastructure issue, not fixable with parameter changes"}`,
+	}
+	analyzer := NewErrorAnalyzer(ai, &mockLogger{})
 
 	result, err := analyzer.AnalyzeError(context.Background(), &ErrorAnalysisContext{
 		HTTPStatus:    503,
@@ -155,15 +160,50 @@ func TestAnalyzeError_503ServiceUnavailable(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	if result != nil {
-		t.Error("503 should return nil (delegate to resilience module)")
+	if result == nil {
+		t.Fatal("503 should trigger LLM analysis, not delegate to resilience")
+	}
+	// LLM correctly identifies this as not retryable
+	if result.ShouldRetry {
+		t.Error("Expected ShouldRetry=false for infrastructure timeout")
+	}
+}
+
+// TestAnalyzeError_503WithSemanticError shows LLM can suggest corrections for semantic 503 errors
+// This is why 503 is not delegated to resilience - tools may return 503 with fixable error messages.
+func TestAnalyzeError_503WithSemanticError(t *testing.T) {
+	ai := &errorAnalyzerMockAI{
+		response: `{"should_retry": true, "reason": "Location typo detected", "suggested_changes": {"location": "Seoul, South Korea"}}`,
+	}
+	analyzer := NewErrorAnalyzer(ai, &mockLogger{})
+
+	result, err := analyzer.AnalyzeError(context.Background(), &ErrorAnalysisContext{
+		HTTPStatus:      503,
+		ErrorResponse:   `{"error": "Location 'Soul' not found", "code": "LOCATION_NOT_FOUND"}`,
+		OriginalRequest: map[string]interface{}{"location": "Soul"},
+		UserQuery:       "Get weather in Seoul",
+	})
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("503 with semantic error should trigger LLM analysis")
+	}
+	if !result.ShouldRetry {
+		t.Error("Expected ShouldRetry=true for typo that can be fixed")
+	}
+	if result.SuggestedChanges["location"] != "Seoul, South Korea" {
+		t.Errorf("Expected suggested location='Seoul, South Korea', got %v", result.SuggestedChanges["location"])
 	}
 }
 
 // TestAnalyzeError_AllResilienceCodes verifies all codes delegated to resilience
+// Note: 503 is intentionally NOT in this list - it triggers LLM analysis instead
+// because tool 503 responses often contain semantic error information.
 func TestAnalyzeError_AllResilienceCodes(t *testing.T) {
 	analyzer := NewErrorAnalyzer(nil, &mockLogger{})
-	resilienceCodes := []int{408, 429, 500, 502, 503, 504}
+	resilienceCodes := []int{408, 429, 500, 502, 504} // 503 removed - now goes to LLM
 
 	for _, code := range resilienceCodes {
 		result, err := analyzer.AnalyzeError(context.Background(), &ErrorAnalysisContext{

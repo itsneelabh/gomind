@@ -1324,7 +1324,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		endpoint)
 
 	// Execute with retry logic including Layer 3 validation feedback
-	maxAttempts := 3
+	maxAttempts := 2
 	validationRetries := 0
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {

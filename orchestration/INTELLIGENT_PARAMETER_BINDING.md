@@ -71,7 +71,8 @@ The orchestrator uses a **three-layer resolution strategy** where **LLM handles 
 │  │   • LLM analyzes error message and context                 │ │
 │  │   • Decides if error is fixable with different parameters  │ │
 │  │   • No "Retryable" flag needed from tool developers        │ │
-│  │   • Resilience module handles 429/503 (same payload)       │ │
+│  │   • 503 errors: LLM analyzes to detect semantic errors     │ │
+│  │   • Resilience module handles 408/429/500/502/504          │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │       │                                                          │
 │       ▼                                                          │

@@ -275,13 +275,12 @@ func TestSmartExecutor_Retry(t *testing.T) {
 
 	executor := NewSmartExecutor(catalog)
 
-	// Create mock round tripper that fails twice then succeeds
+	// Create mock round tripper that fails once then succeeds (maxAttempts=2)
 	mockRT := NewMockRoundTripper()
 	mockRT.SetRetryResponses("http://localhost:8080/api/test", []struct {
 		StatusCode int
 		Body       string
 	}{
-		{StatusCode: http.StatusInternalServerError, Body: "error"},
 		{StatusCode: http.StatusInternalServerError, Body: "error"},
 		{StatusCode: http.StatusOK, Body: `{"result": "success"}`},
 	})
@@ -306,8 +305,8 @@ func TestSmartExecutor_Retry(t *testing.T) {
 		t.Errorf("Expected successful execution after retries, got: %s", result.Error)
 	}
 
-	if result.Attempts != 3 {
-		t.Errorf("Expected 3 attempts, got %d", result.Attempts)
+	if result.Attempts != 2 {
+		t.Errorf("Expected 2 attempts (maxAttempts=2), got %d", result.Attempts)
 	}
 }
 

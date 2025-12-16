@@ -163,10 +163,16 @@ func (e *ErrorAnalyzer) routeByHTTPStatus(status int) *ErrorAnalysisResult {
 
 // shouldDelegateToResilience returns true if the error should be handled by the resilience module
 // (same payload, exponential backoff).
+// Note: 503 errors with structured tool responses (retryable: true) are now analyzed by LLM
+// to potentially suggest parameter corrections. True service outages will still be identified
+// by LLM as non-fixable.
 func (e *ErrorAnalyzer) shouldDelegateToResilience(status int) bool {
 	switch status {
-	case 408, 429, 500, 502, 503, 504:
+	case 408, 429, 500, 502, 504:
 		return true
+	// Note: 503 is intentionally NOT included here
+	// Tool responses with 503 often contain semantic errors (e.g., "location not found")
+	// that LLM can help fix by suggesting corrected parameters
 	}
 	return false
 }
