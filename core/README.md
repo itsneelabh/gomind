@@ -62,6 +62,103 @@ Tools in GoMind:
 calculator := core.NewTool("calculator")
 ```
 
+#### Real-World Tool Examples
+
+To understand what makes a good Tool, consider these examples from simple to complex:
+
+**Level 1: Pure Computation (No External Dependencies)**
+
+Like Unix commands that process input and return output:
+
+| Unix Command | GoMind Tool Equivalent | What It Does |
+|--------------|------------------------|--------------|
+| `ls` | `directory-tool` | Lists files in a directory |
+| `grep` | `search-tool` | Searches text for patterns |
+| `sort` | `sort-tool` | Sorts input data |
+| `calc` | `calculator-tool` | Performs mathematical operations |
+
+```go
+// Calculator tool - pure computation, no external calls
+func (t *CalculatorTool) handleAdd(w http.ResponseWriter, r *http.Request) {
+    var input struct { A, B float64 }
+    json.NewDecoder(r.Body).Decode(&input)
+
+    result := input.A + input.B  // Pure computation
+
+    json.NewEncoder(w).Encode(map[string]float64{"result": result})
+}
+```
+
+**Level 2: External API Integration (Common Pattern)**
+
+Most real-world tools call external APIs to fulfill their capability:
+
+| Tool | External API | Capability |
+|------|--------------|------------|
+| `weather-tool` | OpenWeatherMap API | `current_weather` |
+| `stock-tool` | Alpha Vantage API | `stock_quote` |
+| `geocoding-tool` | Google Maps API | `geocode_location` |
+| `news-tool` | NewsAPI | `search_news` |
+
+```go
+// Weather tool - calls external API to fulfill its capability
+func (t *WeatherTool) handleWeather(w http.ResponseWriter, r *http.Request) {
+    var input struct { Location string }
+    json.NewDecoder(r.Body).Decode(&input)
+
+    // Tool calls external API - this is normal and expected!
+    resp, err := http.Get(fmt.Sprintf(
+        "https://api.openweathermap.org/data/2.5/weather?q=%s&appid=%s",
+        input.Location, t.apiKey,
+    ))
+    if err != nil {
+        http.Error(w, "Weather API unavailable", 502)
+        return
+    }
+
+    // Process and return
+    var weather WeatherResponse
+    json.NewDecoder(resp.Body).Decode(&weather)
+    json.NewEncoder(w).Encode(weather)
+}
+```
+
+**Level 3: AI-Enhanced Tools**
+
+Tools can use AI internally while remaining "passive" within GoMind:
+
+```go
+// Translation tool - uses AI provider but doesn't orchestrate other tools
+func (t *TranslatorTool) handleTranslate(w http.ResponseWriter, r *http.Request) {
+    var input struct { Text, From, To string }
+    json.NewDecoder(r.Body).Decode(&input)
+
+    // Tool uses AI client internally
+    response, err := t.aiClient.GenerateResponse(r.Context(),
+        fmt.Sprintf("Translate from %s to %s: %s", input.From, input.To, input.Text),
+        nil,
+    )
+
+    json.NewEncoder(w).Encode(map[string]string{"translated": response.Content})
+}
+```
+
+#### What "Passive" Really Means
+
+**Passive within GoMind** - Tools cannot:
+- ❌ Discover other tools or agents
+- ❌ Call other GoMind components
+- ❌ Orchestrate workflows
+
+**Active outside GoMind** - Tools can (and often do):
+- ✅ Call public APIs (OpenWeatherMap, Alpha Vantage, etc.)
+- ✅ Call internal services in your cluster (company-data-api, auth-service, etc.)
+- ✅ Use AI providers (OpenAI, Anthropic, etc.)
+- ✅ Connect to databases
+- ✅ Read/write files
+
+The key rule: **A tool does ONE thing, even if that one thing requires resources outside the GoMind ecosystem.**
+
 #### 🤖 Agents (Active Orchestrators)
 Think of **Agents** like the human workers who USE the tools:
 - A **chef** uses multiple kitchen tools to create a meal
@@ -69,6 +166,7 @@ Think of **Agents** like the human workers who USE the tools:
 - A **manager** coordinates multiple workers
 
 Agents in GoMind:
+- **Register themselves** (discoverable by other agents)
 - **Can discover both tools and other agents**
 - **Orchestrate complex workflows**
 - **Make intelligent decisions** (often using AI)

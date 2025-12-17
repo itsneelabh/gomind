@@ -57,6 +57,7 @@ Welcome to the GoMind AI providers guide! This document explains how to configur
 In a production system, AI integration is rarely as simple as "call OpenAI and hope for the best." You need to handle:
 
 - **Provider outages**: What happens when OpenAI is down?
+- **Budget exhaustion**: What happens when your API quota or spending limit is reached?
 - **Cost management**: How do you use cheaper models in development?
 - **API key rotation**: How do you change keys without redeploying?
 - **Regional routing**: How do you route traffic to regional endpoints (e.g., EU data residency)?

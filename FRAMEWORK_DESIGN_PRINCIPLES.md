@@ -63,7 +63,7 @@ GoMind enables **autonomous agent networks** in production environments through 
 **Dependency Rule**: Can import `core` and at most one other framework module (`telemetry`)
 
 **Valid Dependencies**:
-- `ai` → `core`
+- `ai` → `core` + `telemetry`
 - `resilience` → `core` + `telemetry`
 - `orchestration` → `core` + `telemetry`
 - `ui` → `core`

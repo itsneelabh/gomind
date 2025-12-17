@@ -10,8 +10,13 @@ This document describes handling JSON parse errors during LLM plan generation. *
 - JSON boundary detection → `cleanLLMResponse()` finds `{` and `}`
 
 **This Document Adds:**
-- Arithmetic expression prevention (prompt-level) - **IMPLEMENTED**
+- ~~Arithmetic expression prevention (prompt-level)~~ - **REMOVED** (see below)
 - Retry mechanism with error feedback - **IMPLEMENTED**
+
+> **2025-12-16 Update:** Arithmetic expression prevention was removed because it caused the LLM
+> to use workarounds like `{"expression": "100 * price"}` which is valid JSON but fails semantically.
+> The retry mechanism handles arithmetic expressions naturally - they cause parse errors which
+> trigger retry with error feedback, and the LLM self-corrects.
 
 LLM responses are probabilistic - the same query may produce valid JSON one time and invalid JSON the next.
 
@@ -21,10 +26,10 @@ LLM responses are probabilistic - the same query may produce valid JSON one time
 
 During plan generation, the LLM may produce invalid JSON due to:
 
-1. **Arithmetic expressions**: `"amount": 100 * "{{step-1.response.price}}"` — ❌ **Cannot be cleaned** (this doc addresses)
+1. **Arithmetic expressions**: `"amount": 100 * "{{step-1.response.price}}"` — ✅ **Handled by retry** (parse error → retry → LLM self-corrects)
 2. **Markdown formatting**: `"city": "**Paris**"` or `"tool": "*weather*"` — ✅ **Already handled** by `stripMarkdownFromJSON()`
 3. **Code block wrapping**: ` ```json { ... } ``` ` — ✅ **Already handled** by `cleanLLMResponse()`
-4. **Malformed templates**: Missing quotes, trailing commas, etc. — ❌ **Cannot be cleaned**
+4. **Malformed templates**: Missing quotes, trailing commas, etc. — ✅ **Handled by retry** (parse error → retry → LLM self-corrects)
 
 These errors result in parse failures:
 

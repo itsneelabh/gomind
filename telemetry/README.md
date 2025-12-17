@@ -1823,6 +1823,262 @@ When properly configured, the AI module emits these spans:
 
 See `examples/agent-with-orchestration/` for a working example with AI telemetry.
 
+## ⚠️ Push-Based Telemetry Limitations
+
+### The Silent Failure Problem
+
+GoMind's telemetry uses **push-based OpenTelemetry** where agents send metrics to an OTEL Collector. While this architecture is standard and scalable, it has a critical blind spot: **when an agent is broken, it cannot report that it's broken**.
+
+#### The Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  WHEN AGENT IS WORKING:                                         │
+│                                                                 │
+│  Agent → OTEL Collector → Prometheus                            │
+│  (pushes metrics)   (exposes)    (scrapes)                      │
+│                                                                 │
+│  ✅ Metrics flow: registration, health checks, heartbeats       │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  WHEN AGENT IS BROKEN (not registering, crashed, etc.):        │
+│                                                                 │
+│  Agent → ❌ (no push) → OTEL Collector → Prometheus             │
+│  (broken/misconfigured)                                         │
+│                                                                 │
+│  ❌ No metrics emitted = No data in Prometheus                  │
+│  ❌ No "stale" or "removed" events recorded                     │
+│  ❌ The failure is SILENT - no alerting possible                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Real-World Scenario
+
+During troubleshooting of `research-agent-telemetry`, we discovered:
+
+| Observation | Impact |
+|-------------|--------|
+| Agent was not registering in Redis | Not discoverable by other agents |
+| `gomind_discovery_deregistrations_total` = 0 | No record of the failure |
+| Historical registration data = `null` | No time series before restart |
+| Prometheus had no gap data | Cannot alert on "missing" services |
+
+**The root cause (stale pod configuration) was invisible to the monitoring system because the broken agent couldn't emit "I'm broken" metrics.**
+
+### What Prometheus Cannot Tell You
+
+With the current push-based architecture, Prometheus **cannot** answer these questions:
+
+1. **"Which agents are NOT registered?"** - Only registered agents emit metrics
+2. **"When did an agent's Redis entry become stale?"** - Stale entries don't emit anything
+3. **"How long was the registration gap?"** - No data = no timeline
+4. **"Why did the agent fail to register?"** - Errors aren't captured externally
+
+### Recommendations
+
+#### 1. External Redis Monitor (Recommended)
+
+Create a dedicated monitoring service that periodically checks Redis for service health:
+
+```go
+// redis_monitor.go - External service that runs independently
+package main
+
+import (
+    "context"
+    "time"
+    "github.com/itsneelabh/gomind/telemetry"
+)
+
+func monitorRedisRegistry(redisClient *redis.Client) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+
+    for range ticker.C {
+        ctx := context.Background()
+
+        // Get all registered services
+        keys, _ := redisClient.Keys(ctx, "gomind:services:*").Result()
+
+        // Emit gauge for total registered services
+        telemetry.Gauge("redis.services.registered_total", float64(len(keys)))
+
+        // Check each service's TTL and last_seen
+        for _, key := range keys {
+            serviceName := strings.TrimPrefix(key, "gomind:services:")
+
+            // Get TTL
+            ttl, _ := redisClient.TTL(ctx, key).Result()
+            telemetry.Gauge("redis.service.ttl_seconds",
+                ttl.Seconds(),
+                "service", serviceName)
+
+            // Get service data and check last_seen
+            data, _ := redisClient.Get(ctx, key).Result()
+            var info ServiceInfo
+            json.Unmarshal([]byte(data), &info)
+
+            staleness := time.Since(info.LastSeen).Seconds()
+            telemetry.Gauge("redis.service.staleness_seconds",
+                staleness,
+                "service", serviceName,
+                "type", string(info.Type))
+
+            // Alert on stale entries (> 60 seconds without update)
+            if staleness > 60 {
+                telemetry.Counter("redis.service.stale_detected",
+                    "service", serviceName)
+            }
+        }
+
+        // Check for expected services that are MISSING
+        expectedServices := []string{
+            "research-assistant",
+            "research-agent-telemetry",
+            "weather-service",
+            // ... add your expected services
+        }
+
+        for _, expected := range expectedServices {
+            key := "gomind:services:" + expected
+            exists, _ := redisClient.Exists(ctx, key).Result()
+
+            if exists == 0 {
+                telemetry.Counter("redis.service.missing",
+                    "service", expected)
+                telemetry.Gauge("redis.service.registered",
+                    0, // Not registered
+                    "service", expected)
+            } else {
+                telemetry.Gauge("redis.service.registered",
+                    1, // Registered
+                    "service", expected)
+            }
+        }
+    }
+}
+```
+
+**Prometheus Alerts with External Monitor:**
+
+```yaml
+# prometheus-alerts.yaml
+groups:
+  - name: gomind-service-health
+    rules:
+      # Alert when expected service is not registered
+      - alert: ServiceNotRegistered
+        expr: redis_service_registered == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.service }} is not registered in Redis"
+
+      # Alert when service entry is stale
+      - alert: ServiceStale
+        expr: redis_service_staleness_seconds > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Service {{ $labels.service }} hasn't updated in {{ $value }}s"
+
+      # Alert when total registered services drops
+      - alert: ServiceCountDrop
+        expr: delta(redis_services_registered_total[5m]) < -1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Number of registered services decreased"
+```
+
+#### 2. Kubernetes-Based Health Monitoring
+
+Leverage Kubernetes probes with Prometheus metrics:
+
+```yaml
+# k8-deployment.yaml
+spec:
+  containers:
+  - name: agent
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8092
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 8092
+      initialDelaySeconds: 5
+      periodSeconds: 10
+```
+
+Then use `kube-state-metrics` to monitor pod health:
+
+```promql
+# Pods not ready
+kube_pod_status_ready{namespace="gomind-examples", condition="false"} == 1
+
+# Container restarts (indicates crashes)
+increase(kube_pod_container_status_restarts_total{namespace="gomind-examples"}[1h]) > 3
+```
+
+#### 3. Hybrid Pull+Push Architecture (Advanced)
+
+Add a `/metrics` endpoint alongside push-based OTEL for redundancy:
+
+```go
+// Add to your agent's main.go
+import "github.com/prometheus/client_golang/prometheus/promhttp"
+
+func main() {
+    // Existing OTEL push-based telemetry
+    telemetry.Initialize(config)
+
+    // ALSO expose pull-based Prometheus endpoint
+    http.Handle("/metrics", promhttp.Handler())
+
+    // Now Prometheus can scrape directly as a backup
+}
+```
+
+**Prometheus config to scrape both:**
+
+```yaml
+# prometheus.yaml
+scrape_configs:
+  # Primary: OTEL Collector (push via OTEL, pull from collector)
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  # Backup: Direct agent scraping (pull-based)
+  - job_name: 'gomind-agents-direct'
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_gomind_framework_type]
+        action: keep
+        regex: agent
+```
+
+### Summary: Observability Gap Mitigation
+
+| Approach | Complexity | Coverage | Recommendation |
+|----------|------------|----------|----------------|
+| External Redis Monitor | Medium | Complete | **Recommended for production** |
+| Kubernetes Probes | Low | Partial | Good baseline |
+| Hybrid Pull+Push | High | Complete | For critical systems |
+
+**Key Takeaway:** Push-based telemetry is excellent for operational metrics, but you need external monitoring to detect **absence of data** - the most critical failure mode in distributed systems.
+
+---
+
 ## 🎉 Summary
 
 The telemetry module is your application's dashboard, giving you visibility into what's happening in production. It's designed to be:

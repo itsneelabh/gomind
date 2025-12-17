@@ -3,7 +3,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **Note:** This framework is currently under active development and is not ready for production use. Please wait for the 1.0.0 GA release.
+> **Note:** This framework is currently under active development and is not ready for production use. Please wait for the BETA release.
 
 A modular framework for building AI agents in Go with production-grade resilience, observability, and orchestration capabilities built-in from the start.
 
@@ -169,6 +169,163 @@ Unlike frameworks that evolved from notebooks and experiments, GoMind was archit
 | **Circuit Breakers** | Native support | External libraries needed |
 | **Service Discovery** | Redis-based, automatic | Manual configuration |
 
+### 🎬 See It In Action: Dynamic Tool Selection
+
+These are **real responses** from agents running in Kubernetes right now. Watch how the same agent automatically selects different tools based on your question:
+
+**Query 1: "weather in Paris"** → Agent selects `weather-service`
+```json
+{
+  "topic": "weather in Paris",
+  "tools_used": ["weather-service"],
+  "results": [{
+    "tool_name": "weather-service",
+    "capability": "current_weather",
+    "data": {
+      "location": "Paris",
+      "temperature": 9.73,
+      "condition": "broken clouds",
+      "humidity": 88
+    }
+  }],
+  "metadata": { "tools_discovered": 8, "tools_used": 1 }
+}
+```
+
+**Query 2: "stock price of Apple"** → Agent selects `stock-service`
+```json
+{
+  "topic": "stock price of Apple",
+  "tools_used": ["stock-service"],
+  "results": [{
+    "tool_name": "stock-service",
+    "capability": "stock_quote",
+    "data": {
+      "symbol": "AAPL",
+      "current_price": 274.61,
+      "change": 0.5,
+      "percent_change": 0.1824
+    }
+  }]
+}
+```
+
+**Query 3: "capital of Japan"** → Agent selects `country-info-tool`
+```json
+{
+  "topic": "what is the capital of Japan",
+  "tools_used": ["country-info-tool"],
+  "results": [{
+    "tool_name": "country-info-tool",
+    "capability": "get_country_info",
+    "data": {
+      "name": "Japan",
+      "capital": "Tokyo",
+      "population": 123210000,
+      "currency": { "code": "JPY", "symbol": "¥" }
+    }
+  }]
+}
+```
+
+**The agent discovered 8 tools and intelligently selected the right one for each query - no hardcoded routing!**
+
+→ Run these yourself: `curl -X POST localhost:8092/api/capabilities/research_topic -d '{"topic":"weather in Paris"}'`
+
+→ See [examples/agent-with-telemetry](examples/agent-with-telemetry/) for the full implementation
+
+---
+
+### 🔗 Multi-Tool Orchestration: Natural Language Coordination
+
+For complex queries, the orchestration agent coordinates **multiple tools automatically**:
+
+**Query: "What is the weather like in Tokyo?"**
+```json
+{
+  "request": "What is the weather like in Tokyo?",
+  "tools_used": ["weather-tool-v2", "geocoding-tool"],
+  "response": "The current weather in Tokyo, Japan, is characterized by a clear sky,
+               with a temperature of approximately 4.2°C. The humidity level is 80%...",
+  "confidence": 0.95
+}
+```
+
+**Query: "Tell me about France - population, currency, and recent news"**
+```json
+{
+  "request": "Tell me about France - population, currency, and any recent news",
+  "tools_used": ["news-tool", "country-info-tool"],
+  "response": "France has a population of approximately 66.4 million people.
+               The currency is the Euro (EUR). Recent news highlights include...",
+  "confidence": 0.95
+}
+```
+
+**Complex Query: Travel planning with stock sale, currency conversion, weather, and news**
+
+```bash
+curl -X POST localhost:8094/orchestrate/natural \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": "I am planning to sell 100 Tesla shares to fund my travel to Seoul for a week. I am travelling from New York. Will I be able to afford it? If so, how much local currency will I have and how much will I need for a moderate expenses? Is there any latest news about Seoul that I need to be aware of? Also, I do not want to travel in cold weather there, so what is the weather right now?",
+    "use_ai": true
+  }'
+```
+
+The AI automatically coordinates **6 tools** and synthesizes a comprehensive response:
+```json
+{
+  "request_id": "1765943192244541511-244541594",
+  "request": "I am planning to sell 100 Tesla shares to fund my travel to Seoul for a week...",
+  "tools_used": [
+    "stock-service", "country-info-tool", "geocoding-tool",
+    "weather-service", "currency-tool", "news-tool"
+  ],
+  "response": "You are planning to sell 100 Tesla shares to fund your travel to Seoul from New York.
+    Here's a breakdown of your potential expenses and relevant information for your trip:
+
+    ### Financial Overview:
+    1. **Current Tesla Stock Price**: As of now, Tesla's stock is priced at **$489.88**.
+       Selling 100 shares would yield: 100 shares × 489.88 USD/share = **48,988 USD**
+
+    2. **Currency Conversion**: The local currency in South Korea is the **South Korean won (₩)**.
+       At approximately 1 USD = 1,300 KRW:
+       48,988 USD × 1,300 KRW/USD ≈ **63,684,400 KRW**
+
+    ### Travel Expenses:
+    For a moderate travel experience in Seoul, expect to spend around **₩100,000 to ₩150,000**
+    per day on accommodation, meals, transportation, and activities.
+    For a week (7 days): approximately **700,000 KRW to 1,050,000 KRW**
+
+    ### Weather in Seoul:
+    Currently, the weather in Seoul is **5.76°C** with haze and humidity of **65%**.
+    If you prefer to avoid cold weather, you might find this temperature on the cooler side.
+
+    ### Latest News in Seoul:
+    1. **Public Transport Update**: South Korea is enhancing its public transport system
+       to allow tourists to use their Visa or Mastercard for easier access across cities
+       like Seoul and Busan.
+    2. **Social Media Regulations**: There are discussions regarding potential restrictions
+       on teenagers' use of social media, which may affect the local digital landscape.
+
+    ### Conclusion:
+    Yes, you will be able to afford your trip to Seoul after selling your Tesla shares.
+    You should have a substantial amount of local currency for your expenses.
+    Be prepared for the cooler weather. Safe travels!",
+  "confidence": 0.95,
+  "execution_time": "21.7s"
+}
+```
+
+**The AI understood this complex multi-part question and automatically selected 6 tools - no hardcoded routing!**
+
+→ Try it: `curl -X POST localhost:8094/orchestrate/natural -d '{"request":"your question here","use_ai":true}'`
+
+→ See [examples/agent-with-orchestration](examples/agent-with-orchestration/) for the full implementation
+
+---
+
 ### Real-World Example: The Power of Autonomous Discovery
 
 Consider building a data analysis system. Here's how it differs:
@@ -241,7 +398,172 @@ Both orchestration modes leverage the same underlying agent discovery infrastruc
 
 ## How GoMind Works
 
-### Architecture - Modular Design for Production
+### System Architecture - Runtime Behavior in Kubernetes
+
+GoMind is designed for distributed agent systems. Here's how Tools, Agents, and the Registry interact at runtime:
+
+```mermaid
+flowchart TB
+    subgraph K8s["Kubernetes Cluster"]
+        subgraph Services["GoMind Services"]
+            subgraph Tools["Tools (Passive - Register Only)"]
+                WT["☁️ weather-service<br/>Capability: current_weather"]
+                ST["📈 stock-service<br/>Capability: stock_quote"]
+                CT["💱 currency-service<br/>Capability: convert_currency"]
+                NT["📰 news-service<br/>Capability: search_news"]
+            end
+
+            subgraph Agents["Agents (Active - Discover & Orchestrate)"]
+                RA["🤖 research-agent<br/>Discovers tools, coordinates requests"]
+                OA["🧠 orchestration-agent<br/>AI-powered multi-tool coordination"]
+            end
+        end
+
+        Redis[("🔴 Redis Registry<br/>━━━━━━━━━━━━━━━━<br/>• Service registration<br/>• TTL-based health<br/>• Capability catalog")]
+
+        OTEL["📊 OTEL Collector<br/>━━━━━━━━━━━━━━━━<br/>• Metrics (OTLP)<br/>• Traces (OTLP)<br/>• → Prometheus/Jaeger"]
+
+        %% Tools can ONLY register (one-way arrow)
+        WT -->|"Register<br/>(TTL: 30s)"| Redis
+        ST -->|"Register<br/>(TTL: 30s)"| Redis
+        CT -->|"Register<br/>(TTL: 30s)"| Redis
+        NT -->|"Register<br/>(TTL: 30s)"| Redis
+
+        %% Agents can discover AND register (two-way)
+        RA <-->|"Register +<br/>Discover"| Redis
+        OA <-->|"Register +<br/>Discover"| Redis
+
+        %% Agent-to-Tool communication (always HTTP)
+        RA -.->|"HTTP call"| WT
+        RA -.->|"HTTP call"| ST
+        OA -.->|"HTTP call"| CT
+        OA -.->|"HTTP call"| NT
+
+        %% Agent-to-Agent communication
+        OA -.->|"HTTP call"| RA
+
+        %% Telemetry from all services to OTEL Collector
+        WT -.->|"OTLP"| OTEL
+        ST -.->|"OTLP"| OTEL
+        CT -.->|"OTLP"| OTEL
+        NT -.->|"OTLP"| OTEL
+        RA -.->|"OTLP"| OTEL
+        OA -.->|"OTLP"| OTEL
+    end
+
+    User["👤 User Request<br/>'Weather in Tokyo and stock price of Apple'"]
+    AI["🧠 AI/LLM<br/>Analyzes request,<br/>selects tools"]
+
+    User -->|"Natural language query"| OA
+    RA <-->|"Select tools by capability"| AI
+    OA <-->|"Generate execution plan"| AI
+
+    style Redis fill:#dc3545,stroke:#c82333,color:#fff
+    style OTEL fill:#9b59b6,stroke:#8e44ad,color:#fff
+    style WT fill:#17a2b8,stroke:#138496,color:#fff
+    style ST fill:#17a2b8,stroke:#138496,color:#fff
+    style CT fill:#17a2b8,stroke:#138496,color:#fff
+    style NT fill:#17a2b8,stroke:#138496,color:#fff
+    style RA fill:#28a745,stroke:#1e7e34,color:#fff
+    style OA fill:#28a745,stroke:#1e7e34,color:#fff
+    style User fill:#6c757d,stroke:#545b62,color:#fff
+    style AI fill:#fd7e14,stroke:#e96b0c,color:#fff
+```
+
+**Key Architectural Rules**:
+
+| Component | Can Register | Can Discover | Role |
+|-----------|-------------|--------------|------|
+| **Tools** | ✅ Yes | ❌ No | Passive - do ONE thing well, respond to requests |
+| **Agents** | ✅ Yes | ✅ Yes | Active - discover tools, orchestrate workflows, use AI |
+
+**Understanding Tools and Agents**:
+
+- **Tools** are like Unix commands (`ls`, `grep`, `sort`) or kitchen appliances - each does ONE thing well. A weather-tool fetches weather, a stock-tool fetches stock prices. Tools are "passive" within GoMind (can't discover other components), but actively call APIs outside the GoMind ecosystem to fulfill their capability - whether that's a public internet API (OpenWeatherMap), an internal service in your cluster (company-data-api), or a database.
+
+- **Agents** are like chefs who use multiple kitchen tools to create a meal. They discover available tools, select the right ones for the task, and orchestrate complex workflows - often using AI to make intelligent decisions. Agents also register their own capabilities and can be discovered by other agents, enabling hierarchical orchestration (e.g., a master-agent delegating to specialized sub-agents).
+
+> 📖 For detailed examples and patterns, see the [Core Module README](core/README.md#real-world-tool-examples).
+
+**How It Works**:
+
+1. **Tools Register** → Each tool announces itself to Redis with capabilities and a 30-second TTL
+2. **Heartbeat** → Tools refresh their TTL every 15 seconds (automatic via Framework)
+3. **Agents Discover** → Agents query Redis to find tools by capability (e.g., "find all tools with `current_weather`")
+4. **AI Selects** → When processing natural language, AI analyzes available capabilities and generates an execution plan
+5. **Coordinate** → Agent calls selected tools via HTTP, collects responses, synthesizes results
+
+**This separation is enforced at compile-time** - Tools literally cannot access discovery methods, preventing architectural violations.
+
+**Why Kubernetes Makes This Powerful**:
+
+GoMind is designed to leverage Kubernetes capabilities for production-grade deployments:
+
+| Kubernetes Feature | How GoMind Uses It |
+|-------------------|-------------------|
+| **Service DNS** | Tools register with K8s Service DNS (`weather-service.namespace.svc.cluster.local`), not pod IPs |
+| **Load Balancing** | K8s Services automatically distribute traffic across all healthy pods |
+| **Autoscaling** | HPA can scale pods 1→N without changing Redis registration - same service DNS |
+| **Pod Lifecycle** | Pod restarts, crashes, rolling updates don't affect discovery - K8s handles routing |
+| **Health Checks** | Unhealthy pods removed from Service endpoints automatically via readinessProbe |
+
+```yaml
+# Example: weather-tool-v2 deployment (2 replicas, single service)
+env:
+  - name: GOMIND_K8S_SERVICE_NAME
+    value: "weather-tool-v2-service"    # ← Registered in Redis
+  - name: GOMIND_K8S_SERVICE_PORT
+    value: "80"                          # ← Service port, not container port
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: weather-tool-v2-service          # ← This DNS is what agents discover
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8096                     # ← Maps to container port
+  selector:
+    app: weather-tool-v2                 # ← Routes to ALL matching pods
+```
+
+**The Result**: Scale from 1 to 100 pods with zero code changes - agents always call the same service DNS, and Kubernetes handles load distribution.
+
+**Ops Engineers & System Architects: It Just Works With Your Stack**
+
+GoMind uses **standard HTTP/REST** for all communication - no proprietary protocols, no magic:
+
+| Your Existing Tool | GoMind Compatibility |
+|-------------------|---------------------|
+| **API Gateway** (Kong, Ambassador, Nginx) | Route external traffic to agents - they're just HTTP services |
+| **Service Mesh** (Istio, Linkerd) | mTLS, traffic shaping, canary deployments work automatically - no sidecar conflicts |
+| **Ingress Controllers** | Standard K8s Ingress rules apply - expose agents like any other service |
+| **Network Policies** | Restrict agent↔tool communication with standard K8s NetworkPolicy |
+
+**Why this matters**:
+- **No custom CRDs** - Uses standard Deployments, Services, ConfigMaps
+- **No sidecar injection issues** - Plain HTTP, works with or without service mesh
+- **Standard health endpoints** - `/health`, `/api/capabilities` work with any monitoring system
+
+**Native OpenTelemetry Observability**:
+
+GoMind emits metrics and traces using the **OTLP protocol** - the industry-standard OpenTelemetry wire format. This means your observability data flows directly into your existing stack without adapters or format conversions:
+
+| Category | Supported Tools |
+|----------|----------------|
+| **Open Source** | Prometheus, Jaeger, Grafana, Zipkin, Tempo |
+| **Commercial** | Datadog, New Relic, Splunk, Dynatrace, Grafana Cloud, Honeycomb |
+
+What you get out of the box:
+- **Distributed traces** across agent→tool calls with W3C trace context propagation
+- **Metrics** for request latency, discovery operations, AI token usage, circuit breaker state
+- **Auto-instrumentation** - Framework handles span creation, metric recording automatically
+- **Zero-config export** - Set `OTEL_EXPORTER_OTLP_ENDPOINT` and telemetry flows to your backend
+
+---
+
+### Module Architecture - Code-Level Design
 
 GoMind's architecture enforces a clear separation between Tools (passive components) and Agents (active orchestrators), built on independent, composable modules. Start with just the core module and add only what you need - no forced dependencies, no bloat.
 
@@ -302,15 +624,15 @@ graph TD
   - Configuration management and service discovery
 
 - **Module Dependencies**:
-  - **AI, UI** → Core only
-  - **Resilience, Orchestration** → Core + Telemetry (for metrics)
+  - **UI** → Core only
+  - **AI, Resilience, Orchestration** → Core + Telemetry (for metrics and tracing)
   - **Telemetry** → Core (implements the `core.Telemetry` interface)
   - No circular dependencies - proper DAG structure
 
 - **Telemetry as Cross-Cutting Concern**:
   - Core defines the `Telemetry` interface
   - Components receive telemetry via dependency injection
-  - Special case: Resilience/Orchestration import telemetry for metric schema declaration only
+  - AI/Resilience/Orchestration import telemetry for metrics and distributed tracing
   - Follows Dependency Inversion Principle - depend on abstractions, not implementations
 
 - **Clean Separation**: Each module has a single responsibility
@@ -440,44 +762,16 @@ The Framework automatically handles:
 
 **The Problem**: You have multiple AI agents. How do they discover and talk to each other without hardcoding addresses?
 
-**The Solution**: Agents announce themselves and find each other by what they can do. This example is from [agent-example](https://github.com/itsneelabh/gomind/tree/main/examples/agent-example):
+**The Solution**: Agents announce themselves and find each other by what they can do:
 
 ```go
-// In your agent's handler - Discovery is injected by Framework
-func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Request) {
-    ctx := req.Context()
+// Discovery is injected by Framework - find tools by type or capability
+tools, err := r.Discovery.Discover(ctx, core.DiscoveryFilter{
+    Type: core.ComponentTypeTool,
+})
 
-    // Step 1: Discover available tools by type
-    tools, err := r.Discovery.Discover(ctx, core.DiscoveryFilter{
-        Type: core.ComponentTypeTool, // Only look for tools
-    })
-    if err != nil {
-        r.Logger.Error("Failed to discover tools", map[string]interface{}{
-            "error": err.Error(),
-        })
-        return
-    }
-
-    // Step 2: Filter tools by capability
-    var weatherTools []*core.ServiceInfo
-    for _, tool := range tools {
-        for _, cap := range tool.Capabilities {
-            if cap.Name == "current_weather" {
-                weatherTools = append(weatherTools, tool)
-            }
-        }
-    }
-
-    // Step 3: Call the discovered tool
-    for _, tool := range weatherTools {
-        resp, err := http.Post(
-            fmt.Sprintf("%s/api/capabilities/current_weather", tool.Address),
-            "application/json",
-            bytes.NewBuffer(requestPayload),
-        )
-        // Process response...
-    }
-}
+// Or find by specific capability
+tools, err := r.Discovery.FindByCapability(ctx, "current_weather")
 ```
 
 **What Happens Behind the Scenes**:
@@ -486,49 +780,21 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 - Agents query Redis to find available tools by type or capability
 - No hardcoded IPs, no service mesh needed - just Redis
 
+→ See [agent-example](examples/agent-example/) for complete implementation with AI-powered tool selection
+
 ### 2. Talk to Your Agents in Plain English
 
 **The Problem**: You have specialized agents (data fetcher, analyzer, reporter). How do you coordinate them without writing complex orchestration code?
 
-**The Solution**: Just describe what you want. The framework figures out which agents to call and in what order. This example is from [agent-with-orchestration](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-orchestration):
+**The Solution**: Just describe what you want. The framework figures out which agents to call and in what order:
 
 ```go
-// Initialize orchestrator after Framework has injected Discovery
-func (t *TravelResearchAgent) InitializeOrchestrator(discovery core.Discovery) error {
-    // Create orchestrator configuration
-    config := orchestration.DefaultConfig()
-    config.RoutingMode = orchestration.ModeAutonomous
-    config.SynthesisStrategy = orchestration.StrategyLLM
-    config.MetricsEnabled = true
+// Create orchestrator with discovery and AI
+orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient)
 
-    // Create the orchestrator with discovery and AI client
-    t.orchestrator = orchestration.NewAIOrchestrator(config, discovery, t.AI)
-
-    // Start background processes
-    ctx := context.Background()
-    if err := t.orchestrator.Start(ctx); err != nil {
-        return fmt.Errorf("failed to start orchestrator: %w", err)
-    }
-    return nil
-}
-
-// Handle natural language requests
-func (t *TravelResearchAgent) handleOrchestrate(w http.ResponseWriter, r *http.Request) {
-    ctx := r.Context()
-
-    var req OrchestrationRequest
-    json.NewDecoder(r.Body).Decode(&req)
-
-    // Process through AI orchestrator - it discovers tools and coordinates them
-    result, err := t.orchestrator.ProcessRequest(ctx, req.Request, req.Metadata)
-    if err != nil {
-        writeError(w, http.StatusInternalServerError, "Orchestration failed", err)
-        return
-    }
-
-    // Result contains synthesized response from multiple tools
-    json.NewEncoder(w).Encode(result)
-}
+// Process natural language requests - AI discovers tools and coordinates them
+result, err := orchestrator.ProcessRequest(ctx, "Get weather in Tokyo and convert to Celsius", nil)
+// Result contains synthesized response from multiple tools
 ```
 
 **What Happens Behind the Scenes**:
@@ -537,68 +803,35 @@ func (t *TravelResearchAgent) handleOrchestrate(w http.ResponseWriter, r *http.R
 - Runs tools in parallel when possible
 - Synthesizes results using AI
 
+→ See [agent-with-orchestration](examples/agent-with-orchestration/) for travel research agent with workflow orchestration
+
 ### 3. Define Repeatable Agent Workflows
 
 **The Problem**: Some agent tasks always follow the same pattern. How do you avoid re-orchestrating the same sequence every time?
 
-**The Solution**: Write the recipe once in YAML, run it forever.
+**The Solution**: Write the recipe once, run it forever:
 
 ```yaml
-# workflow.yaml - Your agent recipe
+# workflow.yaml - Steps with automatic parallel execution
 name: daily-report
 steps:
   - name: get-sales
     agent: sales-agent
     action: fetch_daily_total
-    
-  - name: get-costs  
-    agent: finance-agent  
+  - name: get-costs          # Runs in parallel with get-sales!
+    agent: finance-agent
     action: fetch_daily_costs
-    # This runs in parallel with get-sales!
-    
   - name: calculate-profit
     agent: calculator-agent
-    action: subtract
+    depends_on: [get-sales, get-costs]  # Wait for both
     inputs:
       revenue: ${steps.get-sales.output}
       costs: ${steps.get-costs.output}
-    depends_on: [get-sales, get-costs]  # Wait for both
 ```
 
 ```go
-import (
-    "context"
-    "log"
-    "os"
-    "github.com/itsneelabh/gomind/orchestration"
-)
-
-// Run your workflow anytime
-ctx := context.Background()
-stateStore := orchestration.NewRedisStateStore(discovery)
-engine := orchestration.NewWorkflowEngine(discovery, stateStore, logger)
-
-// Read and parse the workflow YAML
-yamlData, err := os.ReadFile("workflow.yaml")
-if err != nil {
-    log.Fatalf("Failed to read workflow file: %v", err)
-}
-
-workflow, err := engine.ParseWorkflowYAML(yamlData)
-if err != nil {
-    log.Fatalf("Failed to parse workflow: %v", err)
-}
-
-// Execute with different inputs each time
-monday, err := engine.ExecuteWorkflow(ctx, workflow, map[string]any{"date": "2024-01-01"})
-if err != nil {
-    log.Printf("Monday workflow failed: %v", err)
-}
-
-tuesday, err := engine.ExecuteWorkflow(ctx, workflow, map[string]any{"date": "2024-01-02"})
-if err != nil {
-    log.Printf("Tuesday workflow failed: %v", err)
-}
+// Execute workflows with the orchestrator
+result, err := orchestrator.ExecutePlan(ctx, plan)
 ```
 
 **What Happens Behind the Scenes**:
@@ -607,217 +840,85 @@ if err != nil {
 - Passes data between agents using ${} variable substitution
 - If an agent fails, the workflow stops and reports which step failed
 
+→ See [orchestration/README.md](orchestration/README.md) for workflow engine documentation
+
 ### 4. Agents That Don't Crash Your System
 
 **The Problem**: When external APIs are down or slow, your agents keep trying and failing, creating a cascade of failures.
 
-**The Solution**: Circuit breakers that "fail fast" when something is broken, and smart retries for temporary hiccups. This example is from [agent-with-resilience](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-resilience):
+**The Solution**: Circuit breakers that "fail fast" when something is broken, and smart retries for temporary hiccups:
 
 ```go
-// Per-tool circuit breakers managed by the agent
-type ResearchAgent struct {
-    *core.BaseAgent
-    circuitBreakers map[string]*resilience.CircuitBreaker
-    retryConfig     *resilience.RetryConfig
+// Create circuit breaker with DI (auto-detects telemetry, injects logger)
+cb, _ := resilience.CreateCircuitBreaker(toolName, resilience.ResilienceDependencies{
+    Logger: r.Logger,
+})
+
+// Fail-fast pattern - check before calling
+if !cb.CanExecute() {
+    return errors.New("circuit open - service temporarily unavailable")
 }
 
-// Create circuit breakers using the framework factory
-func (r *ResearchAgent) getOrCreateCircuitBreaker(toolName string) *resilience.CircuitBreaker {
-    r.cbMutex.Lock()
-    defer r.cbMutex.Unlock()
-
-    if cb, exists := r.circuitBreakers[toolName]; exists {
-        return cb
-    }
-
-    // Framework factory auto-detects telemetry and injects logger
-    cb, err := resilience.CreateCircuitBreaker(toolName, resilience.ResilienceDependencies{
-        Logger: r.Logger,
-    })
-    if err != nil {
-        return nil
-    }
-
-    // Listen to state changes for alerting
-    cb.AddStateChangeListener(func(name string, from, to resilience.CircuitState) {
-        r.Logger.Warn("Circuit breaker state changed", map[string]interface{}{
-            "circuit": name, "from": from.String(), "to": to.String(),
-        })
-    })
-
-    r.circuitBreakers[toolName] = cb
-    return cb
-}
-
-// Use circuit breaker with fail-fast protection
-func (r *ResearchAgent) callToolWithResilience(ctx context.Context, tool *core.ServiceInfo, ...) *ToolResult {
-    cb := r.getOrCreateCircuitBreaker(tool.Name)
-
-    // Fail fast if circuit is open
-    if !cb.CanExecute() {
-        return &ToolResult{
-            Success: false,
-            Error:   fmt.Sprintf("Circuit breaker open for %s - service unavailable", tool.Name),
-        }
-    }
-
-    // Execute with retry and circuit breaker protection
-    result, err := r.callToolWithIntelligentRetry(ctx, tool, capability, payload, IntelligentRetryConfig{
-        MaxRetries: r.retryConfig.MaxAttempts,
-    })
-
-    // Record success/failure for circuit breaker
-    if err != nil {
-        cb.RecordFailure()
-    } else {
-        cb.RecordSuccess()
-    }
-
-    return result
-}
+// Or use timeout wrapper for automatic tracking
+err := cb.ExecuteWithTimeout(ctx, 5*time.Second, func() error {
+    return callExternalService()
+})
 ```
 
-**Real-World Example**: Like a smart electrical breaker - if there's a short circuit, it cuts power immediately instead of letting your house burn down. Once the problem is fixed, it can be reset.
+**Circuit Breaker States**:
+- **CLOSED**: Normal operation, all requests pass through
+- **OPEN**: Too many failures, requests fail fast (no waiting)
+- **HALF-OPEN**: Testing recovery with limited requests
+
+→ See [agent-with-resilience](examples/agent-with-resilience/) for per-tool circuit breakers with AI-powered error correction
 
 ### 5. Know What Your Agents Are Doing (Without the Hassle)
 
 **The Problem**: You need metrics and tracing to debug issues, but setting up Prometheus/Grafana/OpenTelemetry is complex.
 
-**The Solution**: Initialize once, then emit metrics with one line from anywhere, with built-in safety features. This example is from [agent-with-telemetry](https://github.com/itsneelabh/gomind/tree/main/examples/agent-with-telemetry):
+**The Solution**: Initialize once, then emit metrics with one line from anywhere:
 
 ```go
-// Initialize telemetry in main() with environment-based profiles
-func initTelemetry(serviceName string) {
-    env := os.Getenv("APP_ENV")
-    if env == "" {
-        env = "development"
-    }
+// Initialize with environment-based profile (development/staging/production)
+config := telemetry.UseProfile(telemetry.ProfileProduction)
+config.ServiceName = serviceName
+telemetry.Initialize(config)
+telemetry.EnableFrameworkIntegration(nil)  // Auto-metrics for discovery, health checks
 
-    // Select profile based on environment
-    var profile telemetry.Profile
-    switch env {
-    case "production", "prod":
-        profile = telemetry.ProfileProduction
-    case "staging", "stage":
-        profile = telemetry.ProfileStaging
-    default:
-        profile = telemetry.ProfileDevelopment
-    }
-
-    config := telemetry.UseProfile(profile)
-    config.ServiceName = serviceName
-
-    // Allow OTEL endpoint override
-    if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
-        config.Endpoint = endpoint
-    }
-
-    // Initialize - non-fatal if it fails
-    if err := telemetry.Initialize(config); err != nil {
-        log.Printf("Telemetry init failed (non-fatal): %v", err)
-        return
-    }
-
-    // Enable framework integration for automatic metrics
-    telemetry.EnableFrameworkIntegration(nil)
-}
-
-// Emit metrics from anywhere
+// Emit metrics from anywhere - one line each
 telemetry.Counter("agent.tasks.completed", "agent", "research-assistant")
-telemetry.Histogram("agent.startup.duration_ms", 150.5, "agent", serviceName)
-telemetry.Gauge("agent.capabilities.count", float64(len(agent.Capabilities)), "agent", serviceName)
+telemetry.Histogram("agent.request.duration_ms", 150.5, "endpoint", "/research")
+telemetry.Gauge("agent.tools.discovered", float64(len(tools)))
 
-// Add distributed tracing middleware
-framework, _ := core.NewFramework(agent,
-    core.WithMiddleware(telemetry.TracingMiddleware(serviceName)),
-)
+// Add distributed tracing
+core.WithMiddleware(telemetry.TracingMiddleware(serviceName))
 ```
 
 **Built-in Safety Features**:
 - **Won't crash your agents**: If metrics backend is down, agents keep running
-- **Won't explode your bill**: Automatic cardinality limiting (no infinite label combinations)
-- **Won't spam your backend**: Circuit breaker stops metric flood during outages
+- **Won't explode your bill**: Automatic cardinality limiting
 - **Development vs Production**: Different settings for local testing vs production
 
-**Real-World Example**: Like a flight recorder - constantly recording what's happening, but doesn't interfere with the plane flying.
+→ See [agent-with-telemetry](examples/agent-with-telemetry/) for Prometheus, Jaeger, and Grafana integration
 
 ## Putting It All Together: A Real Example
 
-Let's build a customer support system with tools and an orchestrating agent:
+Here's how all the modules work together in a customer support system:
 
 ```go
-import (
-    "context"
-    "fmt"
-    "log"
-    "github.com/itsneelabh/gomind/core"
-    "github.com/itsneelabh/gomind/ai"
-    "github.com/itsneelabh/gomind/resilience"
-    "github.com/itsneelabh/gomind/telemetry"
-    "github.com/itsneelabh/gomind/orchestration"
-)
+// 1. Tools are passive - they expose capabilities
+tool := core.NewTool("ticket-classifier")
+tool.RegisterCapability(core.Capability{
+    Name: "classify_ticket",
+    Handler: func(w http.ResponseWriter, r *http.Request) {
+        // Use AI to classify, emit metrics, return result
+    },
+})
 
-// 1. Ticket Classifier Tool - a passive AI-powered tool
-type ClassifierTool struct {
-    *core.BaseTool  // Tools are passive
-    aiClient core.AIClient
-}
-
-func NewClassifierTool(aiClient core.AIClient) *ClassifierTool {
-    return &ClassifierTool{
-        BaseTool: core.NewTool("classifier"),
-        aiClient: aiClient,
-    }
-}
-
-func (c *ClassifierTool) ClassifyTicket(ctx context.Context, ticket string) (string, error) {
-    // Use AI to understand the ticket
-    response, err := c.aiClient.GenerateResponse(ctx, 
-        fmt.Sprintf("Classify this support ticket: %s", ticket),
-        &core.AIOptions{Model: "gpt-3.5-turbo"})
-    if err != nil {
-        return "", fmt.Errorf("classification failed: %w", err)
-    }
-    
-    telemetry.Counter("tickets.classified", "category", response.Content)
-    return response.Content, nil
-}
-
-// 2. Knowledge Tool - searches documentation
-type KnowledgeTool struct {
-    *core.BaseTool  // Another passive tool
-}
-
-func (k *KnowledgeTool) SearchDocs(ctx context.Context, query string) (string, error) {
-    // Resilient external API call
-    var result string
-    err := resilience.Retry(ctx, resilience.DefaultRetryConfig(), func() error {
-        var err error
-        result, err = k.searchKnowledgeBase(query)
-        return err
-    })
-    
-    if err == nil {
-        telemetry.Counter("knowledge.searches", "status", "success")
-    } else {
-        telemetry.Counter("knowledge.searches", "status", "failure")
-    }
-    return result, err
-}
-
-// 3. Support Agent - orchestrates the tools
-func HandleSupportTicket(ctx context.Context, orchestrator *orchestration.AIOrchestrator, ticket string) (string, error) {
-    // The agent discovers and coordinates tools
-    response, err := orchestrator.ProcessRequest(ctx,
-        fmt.Sprintf("Handle this support ticket: %s", ticket),
-        nil,
-    )
-    if err != nil {
-        return "", fmt.Errorf("orchestration failed: %w", err)
-    }
-    
-    return response.Response, nil
-}
+// 2. Agents are active - they discover and orchestrate
+agent := core.NewBaseAgent("support-orchestrator")
+response, _ := orchestrator.ProcessRequest(ctx,
+    "Handle this support ticket: login not working", nil)
 ```
 
 **What's Happening**:
@@ -827,81 +928,33 @@ func HandleSupportTicket(ctx context.Context, orchestrator *orchestration.AIOrch
 4. **Observability**: Every step is tracked across tools and agents
 5. **Production Ready**: Health checks, graceful shutdown, all built-in
 
+→ See [examples/](examples/) for complete working implementations of tools and agents
+
 ## Complete Production Setup
 
-Here's how all the pieces come together in production. This pattern is used in all the [examples](https://github.com/itsneelabh/gomind/tree/main/examples):
+The production pattern used across all examples:
 
 ```go
-import (
-    "context"
-    "log"
-    "os"
-    "os/signal"
-    "syscall"
-    "github.com/itsneelabh/gomind/core"
-    "github.com/itsneelabh/gomind/ai"
-    "github.com/itsneelabh/gomind/telemetry"
+// 1. Create component and register capabilities
+agent := core.NewBaseAgent("research-assistant")
+agent.AI, _ = ai.NewClient()  // Auto-detects OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
+agent.RegisterCapability(core.Capability{Name: "research_topic", Handler: handleResearch})
 
-    // Import AI providers for auto-detection
-    _ "github.com/itsneelabh/gomind/ai/providers/openai"
-    _ "github.com/itsneelabh/gomind/ai/providers/anthropic"
+// 2. Initialize telemetry
+telemetry.Initialize(telemetry.UseProfile(telemetry.ProfileProduction))
+defer telemetry.Shutdown(context.Background())
+
+// 3. Create Framework - handles Redis, discovery, HTTP, graceful shutdown
+framework, _ := core.NewFramework(agent,
+    core.WithName("research-assistant"),
+    core.WithPort(8090),
+    core.WithRedisURL(os.Getenv("REDIS_URL")),
+    core.WithDiscovery(true, "redis"),
+    core.WithMiddleware(telemetry.TracingMiddleware("research-assistant")),
 )
 
-func main() {
-    // 1. Create your component FIRST (sets component type for telemetry)
-    agent := core.NewBaseAgent("research-assistant")
-
-    // Auto-configure AI client - detects provider from environment
-    aiClient, err := ai.NewClient()  // Auto-detects OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
-    if err != nil {
-        log.Printf("AI client creation failed: %v", err)
-    } else {
-        agent.AI = aiClient
-    }
-
-    // Register capabilities
-    agent.RegisterCapability(core.Capability{
-        Name:        "research_topic",
-        Description: "Researches a topic using discovered tools",
-        Handler:     handleResearchTopic,
-    })
-
-    // 2. Initialize telemetry AFTER component creation
-    initTelemetry("research-assistant")
-    defer telemetry.Shutdown(context.Background())
-
-    // 3. Create Framework - handles Redis, discovery, HTTP server
-    framework, err := core.NewFramework(agent,
-        core.WithName("research-assistant"),
-        core.WithPort(8090),
-        core.WithNamespace(os.Getenv("NAMESPACE")),
-        core.WithRedisURL(os.Getenv("REDIS_URL")),
-        core.WithDiscovery(true, "redis"),
-        core.WithCORS([]string{"*"}, true),
-        core.WithDevelopmentMode(os.Getenv("DEV_MODE") == "true"),
-        core.WithMiddleware(telemetry.TracingMiddleware("research-assistant")),
-    )
-    if err != nil {
-        log.Fatalf("Failed to create framework: %v", err)
-    }
-
-    // 4. Graceful shutdown
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-    go func() {
-        <-sigChan
-        log.Println("Shutting down gracefully...")
-        cancel()
-    }()
-
-    // 5. Run (blocks until shutdown)
-    if err := framework.Run(ctx); err != nil {
-        log.Fatalf("Framework error: %v", err)
-    }
-}
+// 4. Run (blocks until SIGTERM)
+framework.Run(ctx)
 ```
 
 Your agents are now:
@@ -910,6 +963,8 @@ Your agents are now:
 - ✅ Emitting metrics to Prometheus/OTEL
 - ✅ Traceable with distributed tracing
 - ✅ Gracefully shutting down on SIGTERM
+
+→ See any example in [examples/](examples/) for the complete production pattern with error handling
 
 ## Quick Framework Comparison
 

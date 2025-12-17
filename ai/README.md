@@ -376,6 +376,8 @@ client, _ := ai.NewChainClient(
 // Effective chain: OpenAI → Groq
 ```
 
+> **💡 Gotcha**: Explicit providers in a chain don't auto-detect alternatives. If you specify `"openai"` but `OPENAI_API_KEY` is not set, it skips cleanly with `api_key_missing` - it won't secretly use Groq even if `GROQ_API_KEY` is available. This prevents credential-model mismatches.
+
 ### Use Cases for Chain Client
 
 | Use Case | Primary | Backup | Emergency | Why? |
@@ -474,6 +476,8 @@ export GOMIND_OLLAMA_MODEL_DEFAULT=mistral:7b
 1. **Environment variable** (highest) - `GOMIND_OPENAI_MODEL_SMART`
 2. **Hardcoded alias** - Built-in mapping in `modelAliases`
 3. **Pass-through** (lowest) - Use model name as-is
+
+> **💡 Gotcha**: The `_DEFAULT` env var is special - it overrides ALL AI calls that don't specify an explicit model, not just calls with `Model: "default"`. Use `GOMIND_OPENAI_MODEL_DEFAULT=gpt-4.1-mini` to control costs across your entire application.
 
 This enables:
 - **Per-environment configuration**: Use cheaper models in dev, premium models in prod
