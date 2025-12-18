@@ -9,8 +9,8 @@ replace github.com/itsneelabh/gomind/telemetry => ../telemetry
 require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.6.0
-	github.com/itsneelabh/gomind/core v0.8.1
-	github.com/itsneelabh/gomind/telemetry v0.8.1
+	github.com/itsneelabh/gomind/core v0.8.2
+	github.com/itsneelabh/gomind/telemetry v0.8.2
 	go.opentelemetry.io/otel v1.38.0
 	gopkg.in/yaml.v3 v3.0.1
 )

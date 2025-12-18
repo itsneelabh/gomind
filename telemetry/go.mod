@@ -5,7 +5,7 @@ go 1.25
 replace github.com/itsneelabh/gomind/core => ../core
 
 require (
-	github.com/itsneelabh/gomind/core v0.8.1
+	github.com/itsneelabh/gomind/core v0.8.2
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.58.0
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.38.0
