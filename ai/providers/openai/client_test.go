@@ -90,7 +90,7 @@ func TestNewClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := NewClient(tt.apiKey, tt.baseURL, logger)
+			client := NewClient(tt.apiKey, tt.baseURL, "", logger)
 
 			if client.apiKey != tt.want.apiKey {
 				t.Errorf("apiKey = %q, want %q", client.apiKey, tt.want.apiKey)
@@ -98,8 +98,10 @@ func TestNewClient(t *testing.T) {
 			if client.baseURL != tt.want.baseURL {
 				t.Errorf("baseURL = %q, want %q", client.baseURL, tt.want.baseURL)
 			}
-			if client.DefaultModel != "gpt-4.1-mini-2025-04-14" {
-				t.Errorf("DefaultModel = %q, want gpt-4.1-mini-2025-04-14", client.DefaultModel)
+			// DefaultModel is now "default" alias which gets resolved at request-time
+			// This enables runtime model override via GOMIND_OPENAI_MODEL_DEFAULT env var
+			if client.DefaultModel != "default" {
+				t.Errorf("DefaultModel = %q, want \"default\" (alias)", client.DefaultModel)
 			}
 		})
 	}
@@ -295,7 +297,7 @@ func TestClient_GenerateResponse(t *testing.T) {
 
 			// Create client
 			logger := &mockLogger{}
-			client := NewClient(tt.apiKey, server.URL, logger)
+			client := NewClient(tt.apiKey, server.URL, "", logger)
 
 			// Make request
 			ctx := context.Background()
@@ -344,7 +346,7 @@ func TestClient_GenerateResponseWithDefaults(t *testing.T) {
 	defer server.Close()
 
 	logger := &mockLogger{}
-	client := NewClient("test-key", server.URL, logger)
+	client := NewClient("test-key", server.URL, "", logger)
 
 	// Set defaults
 	client.DefaultModel = "gpt-3.5-turbo"
@@ -368,7 +370,7 @@ func TestClient_GenerateResponseContextCancellation(t *testing.T) {
 	defer server.Close()
 
 	logger := &mockLogger{}
-	client := NewClient("test-key", server.URL, logger)
+	client := NewClient("test-key", server.URL, "", logger)
 
 	// Create context with immediate cancellation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -447,7 +449,7 @@ func TestClient_ResponseParsing(t *testing.T) {
 			defer server.Close()
 
 			logger := &mockLogger{}
-			client := NewClient("test-key", server.URL, logger)
+			client := NewClient("test-key", server.URL, "", logger)
 
 			resp, err := client.GenerateResponse(
 				context.Background(),

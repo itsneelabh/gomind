@@ -267,8 +267,10 @@ func TestFactory_Create(t *testing.T) {
 			name:   "default configuration",
 			config: &ai.AIConfig{},
 			verify: func(t *testing.T, c *Client) {
-				if c.DefaultModel != "gpt-4.1-mini-2025-04-14" {
-					t.Errorf("expected default model 'gpt-4.1-mini-2025-04-14', got %q", c.DefaultModel)
+				// DefaultModel is now "default" alias which gets resolved at request-time
+				// This enables runtime model override via GOMIND_OPENAI_MODEL_DEFAULT env var
+				if c.DefaultModel != "default" {
+					t.Errorf("expected default model 'default' (alias), got %q", c.DefaultModel)
 				}
 				if c.DefaultMaxTokens != 1000 {
 					t.Errorf("expected default max tokens 1000, got %d", c.DefaultMaxTokens)
