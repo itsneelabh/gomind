@@ -387,6 +387,48 @@ client, _ := ai.NewChainClient(
 | **Privacy-First** | Ollama (local) | Company LLM (private) | OpenAI (public) | Keep data local when possible |
 | **Global App** | Regional OpenAI | US OpenAI | Anthropic | Use nearest region, fallback to others |
 
+### Inspecting the Chain: GetProviderInfo()
+
+For observability and debugging, you can inspect the chain configuration:
+
+```go
+client, _ := ai.NewChainClient(
+    ai.WithProviderChain("openai", "openai.deepseek", "anthropic"),
+)
+
+// Get information about the configured chain
+info := client.GetProviderInfo()
+
+fmt.Printf("Provider count: %d\n", info.ProviderCount)
+fmt.Printf("Primary provider: %s\n", info.PrimaryProvider)
+fmt.Printf("Failover providers: %v\n", info.FailoverProviders)
+fmt.Printf("Failover enabled: %v\n", info.FailoverEnabled)
+```
+
+**Output:**
+```
+Provider count: 3
+Primary provider: openai
+Failover providers: [openai.deepseek anthropic]
+Failover enabled: true
+```
+
+The `ChainProviderInfo` struct contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `AvailableProviders` | `[]string` | All providers in the chain (in order) |
+| `ProviderCount` | `int` | Number of providers configured |
+| `FailoverEnabled` | `bool` | `true` if more than one provider |
+| `PrimaryProvider` | `string` | First provider in the chain |
+| `FailoverProviders` | `[]string` | All backup providers (primary excluded) |
+
+This is useful for:
+- **Logging** chain configuration at startup
+- **Metrics dashboards** showing which providers are configured
+- **Health endpoints** exposing available AI providers
+- **Debugging** failover behavior in production
+
 ## 🎨 Model Aliases - Portable Model Names
 
 ### Real-World Analogy: T-Shirt Sizes
@@ -1531,7 +1573,6 @@ See `examples/agent-with-orchestration/` for a production-ready example with ful
 |----------|-------------|
 | **[AI Providers Setup Guide](../docs/AI_PROVIDERS_SETUP_GUIDE.md)** | Comprehensive guide for configuring providers, operational scenarios, Kubernetes deployment, and troubleshooting |
 | **[ARCHITECTURE.md](./ARCHITECTURE.md)** | Technical architecture and design decisions |
-| **[MODEL_ALIAS_CROSS_PROVIDER_PROPOSAL.md](./MODEL_ALIAS_CROSS_PROVIDER_PROPOSAL.md)** | Implementation details for model aliases and chain client fixes |
 
 ## 🎉 Summary
 
