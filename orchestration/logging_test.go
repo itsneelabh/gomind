@@ -192,11 +192,11 @@ func TestAIOrchestrator_LoggerPropagation(t *testing.T) {
 	mockDiscovery := &LoggingMockDiscovery{
 		services: []*core.ServiceInfo{
 			{
-				ID:       "test-agent-1",
-				Name:     "test-agent",
-				Address:  "localhost",
-				Port:     8080,
-				Health:   core.HealthHealthy,
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+				Health:  core.HealthHealthy,
 				Capabilities: []core.Capability{
 					{Name: "analyze", Description: "Test capability"},
 				},
@@ -234,11 +234,11 @@ func TestAIOrchestrator_ProcessRequest_SuccessLogging(t *testing.T) {
 	mockDiscovery := &LoggingMockDiscovery{
 		services: []*core.ServiceInfo{
 			{
-				ID:       "test-agent-1",
-				Name:     "test-agent",
-				Address:  "localhost",
-				Port:     8080,
-				Health:   core.HealthHealthy,
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+				Health:  core.HealthHealthy,
 				Capabilities: []core.Capability{
 					{Name: "analyze", Description: "Test capability"},
 				},
@@ -435,11 +435,11 @@ func TestSmartExecutor_StepExecutionLogging(t *testing.T) {
 	mockDiscovery := &LoggingMockDiscovery{
 		services: []*core.ServiceInfo{
 			{
-				ID:       "test-agent-1",
-				Name:     "test-agent",
-				Address:  "localhost",
-				Port:     8080,
-				Health:   core.HealthHealthy,
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+				Health:  core.HealthHealthy,
 				Capabilities: []core.Capability{
 					{Name: "analyze", Description: "Test capability"},
 				},
@@ -517,11 +517,11 @@ func TestAgentCatalog_RefreshLogging_Success(t *testing.T) {
 	mockDiscovery := &LoggingMockDiscovery{
 		services: []*core.ServiceInfo{
 			{
-				ID:       "test-agent-1",
-				Name:     "test-agent",
-				Address:  "localhost",
-				Port:     8080,
-				Health:   core.HealthHealthy,
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+				Health:  core.HealthHealthy,
 				Capabilities: []core.Capability{
 					{Name: "analyze", Description: "Test capability"},
 				},
@@ -630,11 +630,11 @@ func TestLogging_PerformanceImpact(t *testing.T) {
 	mockDiscovery := &LoggingMockDiscovery{
 		services: []*core.ServiceInfo{
 			{
-				ID:       "test-agent-1",
-				Name:     "test-agent",
-				Address:  "localhost",
-				Port:     8080,
-				Health:   core.HealthHealthy,
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+				Health:  core.HealthHealthy,
 				Capabilities: []core.Capability{
 					{Name: "analyze", Description: "Test capability"},
 				},
@@ -677,11 +677,11 @@ func TestLogging_BackwardCompatibility(t *testing.T) {
 	mockDiscovery := &LoggingMockDiscovery{
 		services: []*core.ServiceInfo{
 			{
-				ID:       "test-agent-1",
-				Name:     "test-agent",
-				Address:  "localhost",
-				Port:     8080,
-				Health:   core.HealthHealthy,
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+				Health:  core.HealthHealthy,
 				Capabilities: []core.Capability{
 					{Name: "analyze", Description: "Test capability"},
 				},
@@ -736,11 +736,11 @@ func TestLogging_LevelFiltering(t *testing.T) {
 	mockDiscovery := &LoggingMockDiscovery{
 		services: []*core.ServiceInfo{
 			{
-				ID:       "test-agent-1",
-				Name:     "test-agent",
-				Address:  "localhost",
-				Port:     8080,
-				Health:   core.HealthHealthy,
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+				Health:  core.HealthHealthy,
 				Capabilities: []core.Capability{
 					{Name: "analyze", Description: "Test capability"},
 				},
@@ -801,11 +801,11 @@ func TestLogging_OperationCoverage(t *testing.T) {
 	mockDiscovery := &LoggingMockDiscovery{
 		services: []*core.ServiceInfo{
 			{
-				ID:       "test-agent-1",
-				Name:     "test-agent",
-				Address:  "localhost",
-				Port:     8080,
-				Health:   core.HealthHealthy,
+				ID:      "test-agent-1",
+				Name:    "test-agent",
+				Address: "localhost",
+				Port:    8080,
+				Health:  core.HealthHealthy,
 				Capabilities: []core.Capability{
 					{Name: "analyze", Description: "Test capability"},
 				},

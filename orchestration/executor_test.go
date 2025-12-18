@@ -757,11 +757,11 @@ func TestCoerceParameterTypes(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		params          map[string]interface{}
-		schema          []Parameter
-		expectedParams  map[string]interface{}
-		expectedLogLen  int
+		name           string
+		params         map[string]interface{}
+		schema         []Parameter
+		expectedParams map[string]interface{}
+		expectedLogLen int
 	}{
 		{
 			name: "coerce string numbers to float64",

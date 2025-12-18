@@ -432,18 +432,18 @@ func TestExtractJSON(t *testing.T) {
 			expected: `{"lat": 35.6897}`,
 		},
 		{
-			name: "JSON wrapped in markdown json code block",
-			input: "```json\n{\"lat\": 35.6897}\n```",
+			name:     "JSON wrapped in markdown json code block",
+			input:    "```json\n{\"lat\": 35.6897}\n```",
 			expected: `{"lat": 35.6897}`,
 		},
 		{
-			name: "JSON wrapped in plain markdown code block",
-			input: "```\n{\"lat\": 35.6897}\n```",
+			name:     "JSON wrapped in plain markdown code block",
+			input:    "```\n{\"lat\": 35.6897}\n```",
 			expected: `{"lat": 35.6897}`,
 		},
 		{
-			name: "JSON with markdown and extra whitespace",
-			input: "```json\n  {\"lat\": 35.6897, \"lon\": 139.6917}  \n```",
+			name:     "JSON with markdown and extra whitespace",
+			input:    "```json\n  {\"lat\": 35.6897, \"lon\": 139.6917}  \n```",
 			expected: `{"lat": 35.6897, "lon": 139.6917}`,
 		},
 		{
@@ -457,8 +457,8 @@ func TestExtractJSON(t *testing.T) {
 			expected: "",
 		},
 		{
-			name: "multiline JSON in code block",
-			input: "```json\n{\n  \"lat\": 35.6897,\n  \"lon\": 139.6917\n}\n```",
+			name:     "multiline JSON in code block",
+			input:    "```json\n{\n  \"lat\": 35.6897,\n  \"lon\": 139.6917\n}\n```",
 			expected: "{\n  \"lat\": 35.6897,\n  \"lon\": 139.6917\n}",
 		},
 	}

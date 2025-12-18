@@ -22,12 +22,12 @@ import (
 // TestServiceCapabilityProvider_EnvironmentConfiguration tests environment variable configuration
 func TestServiceCapabilityProvider_EnvironmentConfiguration(t *testing.T) {
 	tests := []struct {
-		name          string
-		envVars       map[string]string
-		config        *ServiceCapabilityConfig
-		expectedTopK  int
+		name              string
+		envVars           map[string]string
+		config            *ServiceCapabilityConfig
+		expectedTopK      int
 		expectedThreshold float64
-		expectedEndpoint string
+		expectedEndpoint  string
 	}{
 		{
 			name: "GOMIND_ prefixed variables",
@@ -36,9 +36,9 @@ func TestServiceCapabilityProvider_EnvironmentConfiguration(t *testing.T) {
 				"GOMIND_CAPABILITY_TOP_K":       "30",
 				"GOMIND_CAPABILITY_THRESHOLD":   "0.85",
 			},
-			config: &ServiceCapabilityConfig{},
-			expectedEndpoint: "http://env-service:8080",
-			expectedTopK:     30,
+			config:            &ServiceCapabilityConfig{},
+			expectedEndpoint:  "http://env-service:8080",
+			expectedTopK:      30,
 			expectedThreshold: 0.85,
 		},
 		{
@@ -46,9 +46,9 @@ func TestServiceCapabilityProvider_EnvironmentConfiguration(t *testing.T) {
 			envVars: map[string]string{
 				"CAPABILITY_SERVICE_URL": "http://standard-service:9090",
 			},
-			config: &ServiceCapabilityConfig{},
-			expectedEndpoint: "http://standard-service:9090",
-			expectedTopK:     20, // default
+			config:            &ServiceCapabilityConfig{},
+			expectedEndpoint:  "http://standard-service:9090",
+			expectedTopK:      20,  // default
 			expectedThreshold: 0.7, // default
 		},
 		{
@@ -59,7 +59,7 @@ func TestServiceCapabilityProvider_EnvironmentConfiguration(t *testing.T) {
 			config: &ServiceCapabilityConfig{
 				TopK: 50, // explicit config wins
 			},
-			expectedTopK:     50,
+			expectedTopK:      50,
 			expectedThreshold: 0.7, // default
 		},
 		{
@@ -68,8 +68,8 @@ func TestServiceCapabilityProvider_EnvironmentConfiguration(t *testing.T) {
 				"GOMIND_CAPABILITY_TOP_K":     "invalid",
 				"GOMIND_CAPABILITY_THRESHOLD": "invalid",
 			},
-			config: &ServiceCapabilityConfig{},
-			expectedTopK:     20,  // default
+			config:            &ServiceCapabilityConfig{},
+			expectedTopK:      20,  // default
 			expectedThreshold: 0.7, // default
 		},
 	}
@@ -117,8 +117,8 @@ func TestServiceCapabilityProvider_RetryLogic(t *testing.T) {
 	defer server.Close()
 
 	config := &ServiceCapabilityConfig{
-		Endpoint:  server.URL,
-		Timeout:   5 * time.Second,
+		Endpoint: server.URL,
+		Timeout:  5 * time.Second,
 	}
 	provider := NewServiceCapabilityProvider(config)
 
@@ -150,7 +150,7 @@ func TestServiceCapabilityProvider_CircuitBreaker(t *testing.T) {
 	provider := NewServiceCapabilityProvider(config)
 	// Disable retries for this test to ensure each request = one failure
 	provider.retryAttempts = 0
-	
+
 	// Force circuit to open by making multiple failed requests
 	var lastErr error
 	for i := 0; i < 6; i++ { // Need 5 failures to open circuit
@@ -300,7 +300,7 @@ func TestServiceCapabilityProvider_InjectedDependencies(t *testing.T) {
 	config := &ServiceCapabilityConfig{
 		Endpoint:         server.URL,
 		CircuitBreaker:   mockCB,
-		Logger:          mockLogger,
+		Logger:           mockLogger,
 		FallbackProvider: fallback,
 	}
 	provider := NewServiceCapabilityProvider(config)
@@ -458,9 +458,9 @@ func TestServiceCapabilityProvider_RequestPayload(t *testing.T) {
 		if r.Header.Get("Content-Type") != "application/json" {
 			t.Errorf("Expected Content-Type: application/json, got %s", r.Header.Get("Content-Type"))
 		}
-		
+
 		json.NewDecoder(r.Body).Decode(&capturedRequest)
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(CapabilityResponse{
 			Capabilities: "test",
@@ -479,7 +479,7 @@ func TestServiceCapabilityProvider_RequestPayload(t *testing.T) {
 		"user_id": "123",
 		"session": "abc",
 	}
-	
+
 	provider.GetCapabilities(context.Background(), "find weather tools", metadata)
 
 	// Verify request payload
@@ -502,9 +502,9 @@ func TestDefaultCapabilityProvider_EmptyCatalog(t *testing.T) {
 	discovery := NewMockDiscovery()
 	catalog := NewAgentCatalog(discovery)
 	catalog.Refresh(context.Background())
-	
+
 	provider := NewDefaultCapabilityProvider(catalog)
-	
+
 	capabilities, err := provider.GetCapabilities(context.Background(), "test", nil)
 	if err != nil {
 		t.Errorf("Expected no error with empty catalog, got %v", err)
@@ -517,7 +517,7 @@ func TestDefaultCapabilityProvider_EmptyCatalog(t *testing.T) {
 // TestDefaultCapabilityProvider_LargeCatalog tests with many agents/tools
 func TestDefaultCapabilityProvider_LargeCatalog(t *testing.T) {
 	discovery := NewMockDiscovery()
-	
+
 	// Register 100 agents
 	for i := 0; i < 100; i++ {
 		registration := &core.ServiceRegistration{
@@ -537,17 +537,17 @@ func TestDefaultCapabilityProvider_LargeCatalog(t *testing.T) {
 		}
 		discovery.Register(context.Background(), registration)
 	}
-	
+
 	catalog := NewAgentCatalog(discovery)
 	catalog.Refresh(context.Background())
-	
+
 	provider := NewDefaultCapabilityProvider(catalog)
-	
+
 	capabilities, err := provider.GetCapabilities(context.Background(), "test", nil)
 	if err != nil {
 		t.Errorf("Expected no error with large catalog, got %v", err)
 	}
-	
+
 	// Should contain all agents
 	for i := 0; i < 100; i++ {
 		expectedAgent := fmt.Sprintf("agent-%d", i)

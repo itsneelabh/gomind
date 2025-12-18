@@ -47,10 +47,10 @@ func TestCreateSimpleOrchestrator(t *testing.T) {
 func TestCreateOrchestrator(t *testing.T) {
 	tests := []struct {
 		name                 string
-		config              *OrchestratorConfig
-		deps                OrchestratorDependencies
-		envVars             map[string]string
-		expectError         bool
+		config               *OrchestratorConfig
+		deps                 OrchestratorDependencies
+		envVars              map[string]string
+		expectError          bool
 		expectedProviderType string
 	}{
 		{
@@ -79,7 +79,7 @@ func TestCreateOrchestrator(t *testing.T) {
 			expectedProviderType: "service",
 		},
 		{
-			name:   "service provider without endpoint fails",
+			name: "service provider without endpoint fails",
 			config: &OrchestratorConfig{
 				CapabilityProviderType: "service",
 				// No endpoint specified
@@ -104,7 +104,7 @@ func TestCreateOrchestrator(t *testing.T) {
 			expectedProviderType: "service",
 		},
 		{
-			name: "with optional dependencies",
+			name:   "with optional dependencies",
 			config: DefaultConfig(),
 			deps: OrchestratorDependencies{
 				Discovery:      NewMockDiscovery(),
@@ -258,7 +258,7 @@ func TestOrchestratorOptions(t *testing.T) {
 
 	t.Run("WithTelemetry", func(t *testing.T) {
 		config := DefaultConfig()
-		
+
 		// Test enabling
 		WithTelemetry(true)(config)
 		if !config.EnableTelemetry {
@@ -274,7 +274,7 @@ func TestOrchestratorOptions(t *testing.T) {
 
 	t.Run("WithFallback", func(t *testing.T) {
 		config := DefaultConfig()
-		
+
 		// Test enabling
 		WithFallback(true)(config)
 		if !config.EnableFallback {

@@ -45,9 +45,9 @@ func TestAIOrchestrator_WithDefaultCapabilityProvider(t *testing.T) {
 	// Create orchestrator with default provider
 	config := DefaultConfig()
 	config.CapabilityProviderType = "default"
-	
+
 	orchestrator := NewAIOrchestrator(config, discovery, aiClient)
-	
+
 	// Start orchestrator
 	ctx := context.Background()
 	orchestrator.Start(ctx)
@@ -55,7 +55,7 @@ func TestAIOrchestrator_WithDefaultCapabilityProvider(t *testing.T) {
 
 	// Process a request
 	response, err := orchestrator.ProcessRequest(ctx, "Use agent-2 to do something", nil)
-	
+
 	// Should work (even if mock AI doesn't return perfect response)
 	if err != nil && response == nil {
 		t.Logf("ProcessRequest returned: %v", err)
@@ -79,11 +79,11 @@ func TestAIOrchestrator_WithServiceCapabilityProvider(t *testing.T) {
 	var requestCount int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
-		
+
 		// Parse request
 		var req CapabilityRequest
 		json.NewDecoder(r.Body).Decode(&req)
-		
+
 		// Return only relevant capabilities based on query
 		capabilities := "Relevant agents for: " + req.Query
 		if stringContains(req.Query, "weather") {
@@ -91,7 +91,7 @@ func TestAIOrchestrator_WithServiceCapabilityProvider(t *testing.T) {
 		} else if stringContains(req.Query, "stock") {
 			capabilities = "stock-agent: Can fetch stock prices\nanalysis-agent: Can analyze stocks"
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(CapabilityResponse{
 			Capabilities:   capabilities,
@@ -115,9 +115,9 @@ func TestAIOrchestrator_WithServiceCapabilityProvider(t *testing.T) {
 		Threshold: 0.7,
 		Timeout:   1 * time.Second,
 	}
-	
+
 	orchestrator := NewAIOrchestrator(config, discovery, aiClient)
-	
+
 	ctx := context.Background()
 	orchestrator.Start(ctx)
 	defer orchestrator.Stop()
@@ -190,7 +190,7 @@ func TestAIOrchestrator_CapabilityProviderFailover(t *testing.T) {
 
 	// Process request - should use fallback
 	_, err = orchestrator.ProcessRequest(ctx, "Do something", nil)
-	
+
 	// Should not completely fail (fallback should work)
 	if err != nil {
 		t.Logf("Got error (expected with mock): %v", err)
@@ -225,7 +225,7 @@ func TestAIOrchestrator_SetCapabilityProvider(t *testing.T) {
 
 	ctx := context.Background()
 	capabilities, err := orchestrator.capabilityProvider.GetCapabilities(ctx, "test", nil)
-	
+
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestAIOrchestrator_ConcurrentProcessing(t *testing.T) {
 	}
 
 	orchestrator := CreateSimpleOrchestrator(discovery, aiClient)
-	
+
 	ctx := context.Background()
 	orchestrator.Start(ctx)
 	defer orchestrator.Stop()
@@ -447,7 +447,7 @@ func TestAIOrchestrator_MetricsWithCapabilityProvider(t *testing.T) {
 	}
 
 	// Success/failure counts depend on mock behavior
-	t.Logf("Metrics: Total=%d, Success=%d, Failed=%d", 
+	t.Logf("Metrics: Total=%d, Success=%d, Failed=%d",
 		metrics.TotalRequests, metrics.SuccessfulRequests, metrics.FailedRequests)
 
 	// Should have recorded some latency

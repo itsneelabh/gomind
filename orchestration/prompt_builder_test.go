@@ -411,7 +411,7 @@ func TestDefaultPromptBuilder_IncludesAntiPatternWarnings(t *testing.T) {
 	// Verify anti-pattern warnings are present
 	antiPatterns := []string{
 		"WRONG (will fail)",
-		"{step-1.response.data.id}",  // Single braces shown as wrong
+		"{step-1.response.data.id}", // Single braces shown as wrong
 		"Single braces - NOT supported",
 	}
 

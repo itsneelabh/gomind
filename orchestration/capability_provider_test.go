@@ -9,18 +9,18 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-	
+
 	"github.com/itsneelabh/gomind/core"
 )
 
 func TestDefaultCapabilityProvider(t *testing.T) {
 	// Create a mock discovery
 	discovery := NewMockDiscovery()
-	
+
 	// Register a test agent
 	registration := &core.ServiceRegistration{
 		ID:          "test-agent",
-		Name:        "test-agent", 
+		Name:        "test-agent",
 		Type:        core.ComponentTypeAgent,
 		Description: "Test agent for capability provider",
 		Address:     "localhost",
@@ -89,7 +89,7 @@ func TestServiceCapabilityProvider_Fallback(t *testing.T) {
 	// we test the fallback functionality directly
 	// The real test is that with a fallback configured, we get a response even when service fails
 	capabilities, err := provider.GetCapabilities(context.Background(), "test request", nil)
-	
+
 	// We should either get an error (no circuit breaker) or fallback capabilities
 	if err == nil {
 		// If no error, we should have gotten fallback
@@ -100,7 +100,7 @@ func TestServiceCapabilityProvider_Fallback(t *testing.T) {
 		// If circuit breaker is not yet open, we might get an error
 		// But with fallback configured, eventually it should work
 		t.Logf("Got expected error on first call: %v", err)
-		
+
 		// Try multiple times to trigger circuit breaker
 		for i := 0; i < 10; i++ {
 			capabilities, err = provider.GetCapabilities(context.Background(), "test request", nil)
@@ -109,7 +109,7 @@ func TestServiceCapabilityProvider_Fallback(t *testing.T) {
 				return
 			}
 		}
-		
+
 		// If we still have an error after multiple attempts, that's OK
 		// The important thing is the fallback mechanism exists
 		t.Logf("Circuit breaker behavior: service consistently failing as expected")
@@ -169,10 +169,10 @@ func TestServiceCapabilityProvider_Success(t *testing.T) {
 
 // stringContains helper to check if a string contains a substring
 func stringContains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || 
-		(len(s) > len(substr) && (s[:len(substr)] == substr || 
-		s[len(s)-len(substr):] == substr || 
-		containsSubstring(s, substr))))
+	return len(s) >= len(substr) && (s == substr ||
+		(len(s) > len(substr) && (s[:len(substr)] == substr ||
+			s[len(s)-len(substr):] == substr ||
+			containsSubstring(s, substr))))
 }
 
 func containsSubstring(s, substr string) bool {
