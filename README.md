@@ -1127,26 +1127,25 @@ See the [Examples README](https://github.com/itsneelabh/gomind/tree/main/example
 
 ### Common Patterns
 
-**Need LLM-powered agents?**
+**Need LLM-powered agents with automatic failover?**
 ```go
 import "github.com/itsneelabh/gomind/ai"
 
 // Simple: auto-detect provider from environment
 client, _ := ai.NewClient()
 
-// Advanced: use alternative providers with automatic failover
+// Provider aliases: Use any OpenAI-compatible service
 client, _ := ai.NewClient(
-    ai.WithProviderAlias("openai.groq"),  // Use Groq for fast inference
-    ai.WithModel("fast"),                  // Model alias for portability
+    ai.WithProviderAlias("openai.groq"),  // Groq, DeepSeek, xAI, Together AI...
+    ai.WithModel("fast"),                  // Model aliases for portability
 )
 
-// Production: chain multiple providers for high availability
+// Chain Client: Automatic failover across multiple providers
 chain, _ := ai.NewChainClient(
-    ai.WithProviderChain([]ai.ChainProvider{
-        {ProviderAlias: "openai.groq", Model: "fast", Priority: 1},
-        {Provider: "openai", Model: "gpt-4", Priority: 2},
-    }),
+    ai.WithProviderChain("openai", "openai.deepseek", "openai.groq"),
 )
+// OpenAI down? Automatically tries DeepSeek → Groq (stops at first success)
+// Auth errors, rate limits, timeouts all trigger failover
 ```
 
 **Need resilient external calls?**
