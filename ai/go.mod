@@ -11,8 +11,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.31.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.10
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.39.0
-	github.com/itsneelabh/gomind/core v0.8.0
-	github.com/itsneelabh/gomind/telemetry v0.8.0
+	github.com/itsneelabh/gomind/core v0.8.1
+	github.com/itsneelabh/gomind/telemetry v0.8.1
 )
 
 require (

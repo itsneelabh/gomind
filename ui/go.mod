@@ -6,7 +6,7 @@ require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/itsneelabh/gomind/core v0.8.0
+	github.com/itsneelabh/gomind/core v0.8.1
 	github.com/redis/go-redis/v9 v9.3.0
 )
 

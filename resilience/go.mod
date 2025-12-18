@@ -3,8 +3,8 @@ module github.com/itsneelabh/gomind/resilience
 go 1.25
 
 require (
-	github.com/itsneelabh/gomind/core v0.8.0
-	github.com/itsneelabh/gomind/telemetry v0.8.0
+	github.com/itsneelabh/gomind/core v0.8.1
+	github.com/itsneelabh/gomind/telemetry v0.8.1
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/metric v1.38.0
 )
