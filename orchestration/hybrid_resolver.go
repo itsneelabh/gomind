@@ -108,10 +108,10 @@ func (h *HybridResolver) ResolveParameters(
 	params, unmapped := h.autoWirer.AutoWireParameters(sourceData, targetCapability.Parameters)
 
 	h.logDebug("Auto-wiring result", map[string]interface{}{
-		"capability":   targetCapability.Name,
-		"wired_count":  len(params),
-		"unmapped":     unmapped,
-		"source_keys":  getMapKeys(sourceData),
+		"capability":  targetCapability.Name,
+		"wired_count": len(params),
+		"unmapped":    unmapped,
+		"source_keys": getMapKeys(sourceData),
 	})
 
 	// Phase 2: If all required parameters resolved, we're done!
@@ -136,8 +136,8 @@ func (h *HybridResolver) ResolveParameters(
 
 	if allUnmappedOptional {
 		h.logInfo("All required parameters auto-wired, optional params unmapped", map[string]interface{}{
-			"capability":       targetCapability.Name,
-			"params":           params,
+			"capability":        targetCapability.Name,
+			"params":            params,
 			"optional_unmapped": unmapped,
 		})
 		return params, nil
@@ -178,10 +178,10 @@ func (h *HybridResolver) ResolveParameters(
 	}
 
 	h.logInfo("Hybrid resolution completed", map[string]interface{}{
-		"capability":      targetCapability.Name,
-		"final_params":    params,
-		"auto_wired":      len(params) - len(resolved),
-		"micro_resolved":  len(resolved),
+		"capability":     targetCapability.Name,
+		"final_params":   params,
+		"auto_wired":     len(params) - len(resolved),
+		"micro_resolved": len(resolved),
 	})
 
 	return params, nil
@@ -273,9 +273,9 @@ func (h *HybridResolver) ResolveSemanticValue(
 	}
 
 	h.logInfo("Semantic value resolution starting", map[string]interface{}{
-		"param_name":   paramName,
-		"param_hint":   paramHint,
-		"source_keys":  getMapKeys(sourceData),
+		"param_name":  paramName,
+		"param_hint":  paramHint,
+		"source_keys": getMapKeys(sourceData),
 	})
 
 	resolved, err := h.microResolver.ResolveParameters(ctx, sourceData, targetCap, paramHint)

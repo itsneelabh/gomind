@@ -56,10 +56,10 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 	deps.Logger = factoryLogger
 
 	factoryLogger.Info("Creating orchestrator instance", map[string]interface{}{
-		"operation":               "orchestrator_creation",
-		"routing_mode":            string(config.RoutingMode),
+		"operation":                "orchestrator_creation",
+		"routing_mode":             string(config.RoutingMode),
 		"capability_provider_type": config.CapabilityProviderType,
-		"telemetry_enabled":       config.EnableTelemetry,
+		"telemetry_enabled":        config.EnableTelemetry,
 	})
 
 	// Pass optional dependencies to service capability provider if configured
@@ -167,9 +167,9 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 	}
 
 	factoryLogger.Info("Orchestrator created successfully", map[string]interface{}{
-		"operation":            "orchestrator_creation_complete",
-		"success":              true,
-		"error_analyzer":       deps.EnableErrorAnalyzer,
+		"operation":      "orchestrator_creation_complete",
+		"success":        true,
+		"error_analyzer": deps.EnableErrorAnalyzer,
 	})
 
 	return orchestrator, nil
@@ -223,12 +223,12 @@ func WithPlanParseRetry(enabled bool, maxRetries int) OrchestratorOption {
 // CreateOrchestratorWithOptions creates an orchestrator with option functions
 func CreateOrchestratorWithOptions(deps OrchestratorDependencies, opts ...OrchestratorOption) (*AIOrchestrator, error) {
 	config := DefaultConfig()
-	
+
 	// Apply all options
 	for _, opt := range opts {
 		opt(config)
 	}
-	
+
 	return CreateOrchestrator(config, deps)
 }
 

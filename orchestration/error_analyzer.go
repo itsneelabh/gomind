@@ -126,8 +126,8 @@ func (e *ErrorAnalyzer) AnalyzeError(ctx context.Context, errCtx *ErrorAnalysisC
 	// Layer 2: LLM analyzes the error
 	if !e.enabled || e.aiClient == nil {
 		e.logDebug("LLM error analysis disabled or unavailable", map[string]interface{}{
-			"enabled":   e.enabled,
-			"aiClient":  e.aiClient != nil,
+			"enabled":  e.enabled,
+			"aiClient": e.aiClient != nil,
 		})
 		return &ErrorAnalysisResult{
 			ShouldRetry: false,
@@ -170,9 +170,9 @@ func (e *ErrorAnalyzer) shouldDelegateToResilience(status int) bool {
 	switch status {
 	case 408, 429, 500, 502, 504:
 		return true
-	// Note: 503 is intentionally NOT included here
-	// Tool responses with 503 often contain semantic errors (e.g., "location not found")
-	// that LLM can help fix by suggesting corrected parameters
+		// Note: 503 is intentionally NOT included here
+		// Tool responses with 503 often contain semantic errors (e.g., "location not found")
+		// that LLM can help fix by suggesting corrected parameters
 	}
 	return false
 }

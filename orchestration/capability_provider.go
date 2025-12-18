@@ -42,18 +42,18 @@ func (d *DefaultCapabilityProvider) GetCapabilities(ctx context.Context, request
 
 // ServiceCapabilityProvider queries an external service for relevant capabilities
 type ServiceCapabilityProvider struct {
-	endpoint        string
-	client          *http.Client
-	timeout         time.Duration
-	topK            int
-	threshold       float64
-	
+	endpoint  string
+	client    *http.Client
+	timeout   time.Duration
+	topK      int
+	threshold float64
+
 	// Optional dependencies (injected by application)
-	circuitBreaker  core.CircuitBreaker  // Optional: sophisticated resilience
-	logger          core.Logger          // Optional: observability
-	telemetry       core.Telemetry       // Optional: metrics
-	fallback        CapabilityProvider   // Optional: graceful degradation
-	
+	circuitBreaker core.CircuitBreaker // Optional: sophisticated resilience
+	logger         core.Logger         // Optional: observability
+	telemetry      core.Telemetry      // Optional: metrics
+	fallback       CapabilityProvider  // Optional: graceful degradation
+
 	// Built-in simple resilience (when no circuit breaker provided)
 	retryAttempts   int
 	retryDelay      time.Duration
@@ -61,7 +61,6 @@ type ServiceCapabilityProvider struct {
 	lastFailureTime time.Time
 	mu              sync.RWMutex
 }
-
 
 // NewServiceCapabilityProvider creates a provider with intelligent configuration
 func NewServiceCapabilityProvider(config *ServiceCapabilityConfig) *ServiceCapabilityProvider {
@@ -124,12 +123,12 @@ func NewServiceCapabilityProvider(config *ServiceCapabilityConfig) *ServiceCapab
 		timeout:        config.Timeout,
 		topK:           config.TopK,
 		threshold:      config.Threshold,
-		circuitBreaker: config.CircuitBreaker,  // May be nil (optional)
-		logger:         config.Logger,          // May be nil (optional)
-		telemetry:      config.Telemetry,       // May be nil (optional)
-		fallback:       config.FallbackProvider,// May be nil (optional)
-		retryAttempts:  3,                      // Default retry attempts
-		retryDelay:     2 * time.Second,        // Base retry delay
+		circuitBreaker: config.CircuitBreaker,   // May be nil (optional)
+		logger:         config.Logger,           // May be nil (optional)
+		telemetry:      config.Telemetry,        // May be nil (optional)
+		fallback:       config.FallbackProvider, // May be nil (optional)
+		retryAttempts:  3,                       // Default retry attempts
+		retryDelay:     2 * time.Second,         // Base retry delay
 	}
 }
 
@@ -143,7 +142,7 @@ func (s *ServiceCapabilityProvider) GetCapabilities(ctx context.Context, request
 			result, err = s.queryExternalService(ctx, request, metadata)
 			return err
 		})
-		
+
 		if err != nil {
 			// Layer 3: Try fallback for graceful degradation
 			if s.fallback != nil {
@@ -154,7 +153,7 @@ func (s *ServiceCapabilityProvider) GetCapabilities(ctx context.Context, request
 		}
 		return result, nil
 	}
-	
+
 	// Layer 1: Use simple built-in resilience (when no circuit breaker provided)
 	return s.getCapabilitiesWithSimpleResilience(ctx, request, metadata)
 }
@@ -169,7 +168,7 @@ func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx cont
 		}
 		return "", fmt.Errorf("capability service circuit open, too many recent failures")
 	}
-	
+
 	// Try with exponential backoff retry
 	var lastErr error
 	for attempt := 0; attempt <= s.retryAttempts; attempt++ {
@@ -183,7 +182,7 @@ func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx cont
 			case <-time.After(delay):
 			}
 		}
-		
+
 		result, err := s.queryExternalService(ctx, request, metadata)
 		if err == nil {
 			s.recordSuccess()
@@ -192,16 +191,16 @@ func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx cont
 		lastErr = err
 		s.logError(fmt.Sprintf("Attempt %d failed: %v", attempt+1, err))
 	}
-	
+
 	// All retries failed
 	s.recordFailure()
-	
+
 	// Layer 3: Try fallback for graceful degradation
 	if s.fallback != nil {
 		s.logDebug("All retries failed, using fallback provider")
 		return s.fallback.GetCapabilities(ctx, request, metadata)
 	}
-	
+
 	return "", fmt.Errorf("capability service unavailable after %d retries: %w", s.retryAttempts, lastErr)
 }
 
@@ -209,17 +208,17 @@ func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx cont
 func (s *ServiceCapabilityProvider) isCircuitOpen() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	// If no failures yet, circuit is closed
 	if s.failureCount == 0 {
 		return false
 	}
-	
+
 	// Reset failure count after cooldown period
 	if !s.lastFailureTime.IsZero() && time.Since(s.lastFailureTime) > 30*time.Second {
 		return false
 	}
-	
+
 	// Open circuit after 5 consecutive failures
 	return s.failureCount >= 5
 }
@@ -345,9 +344,9 @@ type CapabilityRequest struct {
 
 // CapabilityResponse defines the response from external capability service
 type CapabilityResponse struct {
-	Capabilities   string `json:"capabilities"`     // Formatted capabilities for LLM
-	AgentsFound    int    `json:"agents_found"`     // Number of agents found
-	ToolsFound     int    `json:"tools_found"`      // Number of tools found
-	SearchMethod   string `json:"search_method"`    // Method used (e.g., "vector_similarity")
-	ProcessingTime string `json:"processing_time"`  // Time taken to process (e.g., "100ms")
+	Capabilities   string `json:"capabilities"`    // Formatted capabilities for LLM
+	AgentsFound    int    `json:"agents_found"`    // Number of agents found
+	ToolsFound     int    `json:"tools_found"`     // Number of tools found
+	SearchMethod   string `json:"search_method"`   // Method used (e.g., "vector_similarity")
+	ProcessingTime string `json:"processing_time"` // Time taken to process (e.g., "100ms")
 }

@@ -70,10 +70,10 @@ func (w *AutoWirer) AutoWireParameters(
 			result[param.Name] = value
 			if w.logger != nil {
 				w.logger.Debug("Auto-wired parameter", map[string]interface{}{
-					"param_name":   param.Name,
-					"param_type":   param.Type,
-					"value":        value,
-					"source_keys":  getMapKeys(sourceData),
+					"param_name":  param.Name,
+					"param_type":  param.Type,
+					"value":       value,
+					"source_keys": getMapKeys(sourceData),
 				})
 			}
 		} else {

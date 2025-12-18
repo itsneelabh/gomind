@@ -215,13 +215,13 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 
 	if c.logger != nil {
 		c.logger.Info("Catalog refresh completed", map[string]interface{}{
-			"operation":           "catalog_refresh_complete",
-			"success":             true,
-			"total_duration_ms":   time.Since(refreshStart).Milliseconds(),
-			"successful_fetches":  successfulFetches,
-			"failed_fetches":      failedFetches,
-			"final_agent_count":   len(newAgents),
-			"agent_count_change":  len(newAgents) - currentAgentCount,
+			"operation":          "catalog_refresh_complete",
+			"success":            true,
+			"total_duration_ms":  time.Since(refreshStart).Milliseconds(),
+			"successful_fetches": successfulFetches,
+			"failed_fetches":     failedFetches,
+			"final_agent_count":  len(newAgents),
+			"agent_count_change": len(newAgents) - currentAgentCount,
 		})
 	}
 
