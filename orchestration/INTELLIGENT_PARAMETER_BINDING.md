@@ -778,12 +778,84 @@ The stripping is designed to be safe for JSON:
 
 ---
 
+## Layer 4: Semantic Retry (Complementary Design)
+
+This document describes the first three layers of parameter resolution that operate **before** step execution. There is a complementary fourth layer documented in **[SEMANTIC_RETRY_DESIGN.md](./SEMANTIC_RETRY_DESIGN.md)** that operates **after** execution fails.
+
+### The Four-Layer Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                Complete Parameter Resolution Flow                    │
+│                                                                      │
+│  ┌─────────────────── PRE-EXECUTION (this document) ───────────────┐│
+│  │                                                                  ││
+│  │  Layer 1: Auto-Wiring (instant, free)                           ││
+│  │    • Exact name match, case-insensitive, type coercion          ││
+│  │                                                                  ││
+│  │  Layer 2: Micro-Resolution (LLM call)                           ││
+│  │    • Semantic parameter extraction from source data             ││
+│  │    • Has: source data | Missing: error context                  ││
+│  │                                                                  ││
+│  │  Layer 3: Error Analyzer (LLM call - on failure)                ││
+│  │    • Diagnoses if error is fixable with different params        ││
+│  │    • Has: error context | Missing: source data                  ││
+│  │                                                                  ││
+│  └──────────────────────────────────────────────────────────────────┘│
+│                              │                                       │
+│                     Step Executes                                    │
+│                              │                                       │
+│                              ▼                                       │
+│  ┌─────────────────── POST-EXECUTION (SEMANTIC_RETRY_DESIGN.md) ───┐│
+│  │                                                                  ││
+│  │  Layer 4: Contextual Re-Resolution (LLM call)                   ││
+│  │    • Triggered when Layer 3 says "cannot fix"                   ││
+│  │    • Has: BOTH error context AND source data                    ││
+│  │    • Can compute derived values (e.g., 100 × 468.285 = 46828.5) ││
+│  │                                                                  ││
+│  └──────────────────────────────────────────────────────────────────┘│
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Layer 4 is Needed
+
+The gap between Layer 2 and Layer 3:
+
+| Layer | Source Data | Error Context | Can Compute Derived Values? |
+|-------|-------------|---------------|----------------------------|
+| Layer 2 (Micro-Resolution) | ✅ Yes | ❌ No | ⚠️ Sometimes (before knowing what's needed) |
+| Layer 3 (Error Analyzer) | ❌ No | ✅ Yes | ❌ No (can diagnose but not fix) |
+| **Layer 4 (Contextual Re-Resolution)** | ✅ Yes | ✅ Yes | ✅ Yes |
+
+**Example scenario:**
+1. User: "Convert 100 USD to Japanese Yen"
+2. Layer 2 extracts `amount: 100` (the literal from user query)
+3. Currency tool returns exchange rate `468.285` (rate per 1 USD)
+4. Next step needs computed `amount: 46828.5` (100 × 468.285)
+5. Layer 2 ran before we had the rate → extracted `100` (wrong)
+6. Step fails with `amount: 0` or `amount: 100`
+7. Layer 3 diagnoses: "amount is wrong" but has no source data to compute fix
+8. **Layer 4 has both error AND source data → computes `46828.5`**
+
+### Document Relationship
+
+| Document | Scope | Layers Covered |
+|----------|-------|----------------|
+| **This document** (INTELLIGENT_PARAMETER_BINDING.md) | Pre-execution resolution | Layers 1, 2, 3 |
+| **[SEMANTIC_RETRY_DESIGN.md](./SEMANTIC_RETRY_DESIGN.md)** | Post-execution recovery | Layer 4 |
+
+Together, these documents describe the complete intelligent parameter binding system in gomind.
+
+---
+
 ## Related Documentation
 
+- [SEMANTIC_RETRY_DESIGN.md](./SEMANTIC_RETRY_DESIGN.md) - Layer 4: Post-execution semantic retry
 - [INTELLIGENT_ERROR_HANDLING.md](../docs/INTELLIGENT_ERROR_HANDLING.md) - Retry and correction patterns
 - [ENVIRONMENT_VARIABLES_GUIDE.md](../docs/ENVIRONMENT_VARIABLES_GUIDE.md) - All configuration options
 - [examples/agent-with-orchestration/](../examples/agent-with-orchestration/) - Working example
 
 ---
 
-*Document version: 1.0 — Intelligent Parameter Binding Reference*
+*Document version: 1.1 — Intelligent Parameter Binding Reference (Updated with Layer 4 cross-reference)*

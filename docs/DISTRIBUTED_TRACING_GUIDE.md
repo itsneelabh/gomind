@@ -1434,6 +1434,10 @@ The orchestration module emits span events for every LLM interaction:
 | `error_analyzer.llm_error_analysis_start` | Error analysis begins | `error_type`, `original_error`, `capability`, `tool_name` |
 | `error_analyzer.llm_error_analysis_result` | Error analysis result | `reason`, `recoverable`, `suggested_changes`, `has_suggestions` |
 | `error_analyzer.llm_error_analysis_retry` | Automatic retry with suggested fixes | `capability`, `original_params`, `suggested_changes`, `retry_count` |
+| `contextual_re_resolution.start` | Layer 4 semantic retry begins | `step_id`, `capability`, `retry_count`, `http_status`, `source_data_keys` |
+| `contextual_re_resolution.complete` | Layer 4 semantic retry finished | `should_retry`, `analysis`, `corrected_params_count`, `duration_ms` |
+| `contextual_re_resolution.error` | Layer 4 LLM call failed | `error`, `duration_ms` |
+| `semantic_retry_applied` | Executor applies corrected parameters | `step_id`, `capability`, `analysis`, `corrected_params` |
 
 ### What Developers See in Jaeger
 
@@ -1476,6 +1480,33 @@ For error recovery scenarios, you'll see the full diagnostic chain:
   retry_count: 1
 ```
 
+For **semantic retry scenarios** (Layer 4), where computation is needed to fix parameters:
+
+```
+▼ error_analyzer.analysis_complete
+  should_retry: false
+  reason: "Cannot be fixed by modifying request parameters..."
+  suggested_changes_count: 0
+
+▼ contextual_re_resolution.start
+  step_id: "step-5-convert_currency"
+  capability: "convert_currency"
+  retry_count: 0
+  http_status: 400
+  source_data_keys: 5
+
+▼ contextual_re_resolution.complete
+  should_retry: true
+  analysis: "The amount should be 100 × 468.285 = 46828.5 USD"
+  corrected_params_count: 3
+  duration_ms: 1247
+
+▼ semantic_retry_applied
+  step_id: "step-5-convert_currency"
+  capability: "convert_currency"
+  corrected_params: {"from":"USD","to":"KRW","amount":46828.5}
+```
+
 ### Zero Developer Configuration Required
 
 This telemetry is **built into the orchestration framework** at:
@@ -1483,6 +1514,7 @@ This telemetry is **built into the orchestration framework** at:
 - [orchestration/micro_resolver.go](../orchestration/micro_resolver.go) - Parameter resolution
 - [orchestration/synthesizer.go](../orchestration/synthesizer.go) - Result synthesis
 - [orchestration/error_analyzer.go](../orchestration/error_analyzer.go) - Error analysis and recovery
+- [orchestration/contextual_re_resolver.go](../orchestration/contextual_re_resolver.go) - Semantic retry (Layer 4)
 
 **Developers don't need to add any code** to get LLM visibility. Simply:
 1. Use the orchestration module as documented
@@ -1498,6 +1530,7 @@ This telemetry is **built into the orchestration framework** at:
 | Poor routing decisions | Read the `prompt` and `response` to understand AI reasoning |
 | Failed parameter binding | Check `llm.micro_resolution.*` events |
 | Error recovery debugging | Follow `error_analyzer.*` events for the full recovery chain |
+| Semantic retry debugging | Follow `contextual_re_resolution.*` and `semantic_retry_applied` events |
 | Prompt engineering | Export prompts from traces to analyze and improve |
 
 ### Example: Debugging LLM Error Recovery
