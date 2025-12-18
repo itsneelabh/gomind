@@ -110,6 +110,9 @@ A modular framework for building AI agents in Go with production-grade resilienc
 🔴 **Common Challenge**: "To coordinate components, write complex orchestration code."
 ✅ **GoMind**: Agents discover tools automatically. Describe workflows in English or YAML.
 
+🔴 **Common Challenge**: "When API calls fail, I need to manually handle retries and error correction."
+✅ **GoMind**: **Semantic Retry** automatically computes corrected parameters using LLM analysis. When `amount: 0` fails, it computes `amount: 46828.5` from source data.
+
 🔴 **Common Challenge**: "Add Prometheus, OpenTelemetry, Grafana, configure them all..."
 ✅ **GoMind**: Initialize once, then `telemetry.Counter("task.done")`. Observability built-in.
 
@@ -168,6 +171,7 @@ Unlike frameworks that evolved from notebooks and experiments, GoMind was archit
 | **Health Checks** | Built-in from start | Added via extensions |
 | **Circuit Breakers** | Native support | External libraries needed |
 | **Service Discovery** | Redis-based, automatic | Manual configuration |
+| **Semantic Retry** | LLM computes corrected params | Manual error handling |
 
 ### 🎬 See It In Action: Dynamic Tool Selection
 

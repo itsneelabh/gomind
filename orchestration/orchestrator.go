@@ -72,7 +72,7 @@ func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiC
 		// Default to no-op telemetry
 		telemetry: &core.NoOpTelemetry{},
 	}
-	
+
 	// Initialize capability provider based on configuration
 	switch config.CapabilityProviderType {
 	case "service":
@@ -104,6 +104,15 @@ func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiC
 		fmt.Printf("[ORCHESTRATOR] Hybrid resolution enabled: hybridResolver=%v, useHybridResolution=true\n", hybridResolver != nil)
 	} else {
 		fmt.Printf("[ORCHESTRATOR] Hybrid resolution DISABLED in config (EnableHybridResolution=%v)\n", config.EnableHybridResolution)
+	}
+
+	// Layer 4: Wire up Semantic Retry (Contextual Re-Resolution) if enabled
+	// This enables the executor to compute derived values when ErrorAnalyzer says "cannot fix"
+	// but source data from dependencies is available. See SEMANTIC_RETRY_DESIGN.md for details.
+	if config.SemanticRetry.Enabled {
+		reResolver := NewContextualReResolver(aiClient, nil) // Logger will be set later via SetLogger
+		o.executor.SetContextualReResolver(reResolver)
+		o.executor.SetMaxSemanticRetries(config.SemanticRetry.MaxAttempts)
 	}
 
 	return o
@@ -351,7 +360,7 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		// Create a no-op span
 		span = &core.NoOpSpan{}
 	}
-	
+
 	startTime := time.Now()
 	requestID := generateRequestID()
 
@@ -368,7 +377,7 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		span.SetAttribute("request_id", requestID)
 		span.SetAttribute("request_length", len(request))
 	}
-	
+
 	// Record metric for request count if telemetry is available
 	if o.telemetry != nil {
 		o.telemetry.RecordMetric("orchestrator.requests.total", 1, map[string]string{
@@ -495,7 +504,7 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	// Update metrics and history
 	o.updateMetrics(response.ExecutionTime, true)
 	o.addToHistory(response)
-	
+
 	if o.logger != nil {
 		o.logger.InfoWithContext(ctx, "Request processing completed successfully", map[string]interface{}{
 			"operation":         "process_request_complete",
@@ -1026,12 +1035,12 @@ func (o *AIOrchestrator) regeneratePlan(ctx context.Context, request string, req
 	if o.aiClient == nil {
 		return nil, fmt.Errorf("AI client not configured for plan regeneration")
 	}
-	
+
 	basePrompt, err := o.buildPlanningPrompt(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	prompt := fmt.Sprintf(`%s
 
 The previous plan failed validation with error: %s
@@ -1212,9 +1221,8 @@ var markdownCodeBlockRegex = regexp.MustCompile("(?s)```(?:json)?\\s*([\\s\\S]*?
 // markdownBoldRegex matches **bold** patterns inside JSON string values
 var markdownBoldRegex = regexp.MustCompile(`\*\*([^*]+)\*\*`)
 
-// markdownItalicRegex matches *italic* patterns inside JSON string values
-// Uses negative lookbehind/lookahead to avoid matching ** (bold)
-var markdownItalicRegex = regexp.MustCompile(`(?:^|[^*])\*([^*]+)\*(?:[^*]|$)`)
+// Note: Italic handling uses manual parsing in stripMarkdownFromJSON() rather than regex
+// because single asterisks are harder to match reliably without false positives.
 
 // cleanLLMResponse aggressively cleans LLM responses to extract valid JSON.
 // It handles:
@@ -1418,4 +1426,3 @@ func formatPlanSteps(plan *RoutingPlan) []map[string]interface{} {
 
 	return steps
 }
-

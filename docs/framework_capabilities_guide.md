@@ -344,6 +344,42 @@ response := synthesizer.Synthesize(ctx, request, executionResults)
 - `pkg/orchestration/interfaces.go:75-81` - Synthesizer interface
 - `pkg/orchestration/interfaces.go:84-98` - Synthesis strategies
 
+### Intelligent Error Recovery
+
+The orchestration module includes a **four-layer parameter resolution system** that handles errors intelligently:
+
+| Layer | Strategy | Cost |
+|-------|----------|------|
+| **Layer 1: Auto-Wiring** | Exact/case-insensitive name matching, type coercion | Free |
+| **Layer 2: Micro-Resolution** | LLM extracts parameters via function calling | 1 LLM call |
+| **Layer 3: Error Analysis** | LLM analyzes tool errors and suggests corrections | 1 LLM call |
+| **Layer 4: Semantic Retry** | LLM computes parameters from full execution context | 1 LLM call |
+
+**Semantic Retry (Layer 4)** is particularly powerful—when standard error analysis says "cannot fix", it uses the user's original query plus all source data from previous steps to compute the correct values. This enables automatic recovery from errors that would otherwise require human intervention.
+
+**Example:**
+```
+User: "Sell 100 Tesla shares and convert proceeds to EUR"
+Step 1: Returns {price: 468.285}
+Step 2: Fails with "amount: 0" (MicroResolver couldn't compute this)
+
+→ Semantic Retry computes: 100 × 468.285 = 46828.5
+→ Retries with corrected parameters → SUCCESS
+```
+
+**Configuration:**
+```bash
+# Enable/disable semantic retry (default: true)
+export GOMIND_SEMANTIC_RETRY_ENABLED=true
+
+# Maximum retry attempts (default: 2)
+export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
+```
+
+**Key Files:**
+- `orchestration/contextual_re_resolver.go` - Semantic retry implementation
+- `orchestration/executor.go` - Integration with execution loop
+
 ## Configuration Examples
 
 ### Basic Agent Setup

@@ -178,15 +178,15 @@ type ExecutionOptions struct {
 type ServiceCapabilityConfig struct {
 	// Required configuration
 	Endpoint  string        `json:"endpoint"`
-	TopK      int           `json:"top_k"`      // Default: 20
-	Threshold float64       `json:"threshold"`  // Default: 0.7
-	Timeout   time.Duration `json:"timeout"`    // Default: 30s
-	
+	TopK      int           `json:"top_k"`     // Default: 20
+	Threshold float64       `json:"threshold"` // Default: 0.7
+	Timeout   time.Duration `json:"timeout"`   // Default: 30s
+
 	// Optional dependencies (not serializable, injected by application)
-	CircuitBreaker   core.CircuitBreaker   `json:"-"` // Optional: sophisticated resilience
-	Logger           core.Logger           `json:"-"` // Optional: observability
-	Telemetry        core.Telemetry        `json:"-"` // Optional: metrics
-	FallbackProvider CapabilityProvider    `json:"-"` // Optional: graceful degradation
+	CircuitBreaker   core.CircuitBreaker `json:"-"` // Optional: sophisticated resilience
+	Logger           core.Logger         `json:"-"` // Optional: observability
+	Telemetry        core.Telemetry      `json:"-"` // Optional: metrics
+	FallbackProvider CapabilityProvider  `json:"-"` // Optional: graceful degradation
 }
 
 // OrchestratorConfig configures the orchestrator
@@ -223,6 +223,23 @@ type OrchestratorConfig struct {
 	// malformed syntax) that cannot be fixed by the cleanup functions.
 	PlanParseRetryEnabled bool `json:"plan_parse_retry_enabled"`
 	PlanParseMaxRetries   int  `json:"plan_parse_max_retries"` // Default: 2
+
+	// Layer 4: Semantic Retry Configuration
+	// When enabled, uses ContextualReResolver to fix errors that require computation
+	SemanticRetry SemanticRetryConfig `json:"semantic_retry,omitempty"`
+}
+
+// SemanticRetryConfig configures Layer 4 contextual re-resolution
+type SemanticRetryConfig struct {
+	// Enable contextual re-resolution on validation errors (default: true)
+	Enabled bool `json:"enabled"`
+
+	// Maximum semantic retry attempts per step (default: 2)
+	MaxAttempts int `json:"max_attempts"`
+
+	// HTTP status codes that trigger semantic retry in addition to ErrorAnalyzer
+	// Default: [400, 422] - validation errors that might be fixable with different params
+	TriggerStatusCodes []int `json:"trigger_status_codes,omitempty"`
 }
 
 // DefaultConfig returns default orchestrator configuration with intelligent defaults
@@ -274,6 +291,23 @@ func DefaultConfig() *OrchestratorConfig {
 	if maxRetries := os.Getenv("GOMIND_PLAN_RETRY_MAX"); maxRetries != "" {
 		if val, err := strconv.Atoi(maxRetries); err == nil && val >= 0 {
 			config.PlanParseMaxRetries = val
+		}
+	}
+
+	// Layer 4: Semantic Retry defaults
+	config.SemanticRetry = SemanticRetryConfig{
+		Enabled:            true,
+		MaxAttempts:        2,
+		TriggerStatusCodes: []int{400, 422},
+	}
+
+	// Semantic Retry configuration from environment
+	if enabled := os.Getenv("GOMIND_SEMANTIC_RETRY_ENABLED"); enabled != "" {
+		config.SemanticRetry.Enabled = strings.ToLower(enabled) == "true"
+	}
+	if maxAttempts := os.Getenv("GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS"); maxAttempts != "" {
+		if val, err := strconv.Atoi(maxAttempts); err == nil && val >= 0 {
+			config.SemanticRetry.MaxAttempts = val
 		}
 	}
 

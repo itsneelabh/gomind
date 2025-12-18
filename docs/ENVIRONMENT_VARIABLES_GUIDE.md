@@ -585,6 +585,46 @@ export GOMIND_PLAN_RETRY_MAX=0
 
 See [PLAN_GENERATION_RETRY.md](../orchestration/notes/PLAN_GENERATION_RETRY.md) for implementation details.
 
+### Semantic Retry Configuration (Layer 4)
+
+Semantic Retry is an advanced error recovery feature that uses LLM analysis to compute corrected parameters when standard error analysis cannot fix the issue. When a tool call fails (e.g., `amount: 0` instead of `amount: 46828.5`), the contextual re-resolver uses full execution context—including the user's original query and source data from dependent steps—to compute the correct value.
+
+| Variable | Default | Status | Description | Source |
+|----------|---------|--------|-------------|--------|
+| `GOMIND_SEMANTIC_RETRY_ENABLED` | `true` | **Implemented** | Enable Layer 4 semantic retry with LLM-based parameter re-computation | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS` | `2` | **Implemented** | Maximum semantic retry attempts per step (0 = disabled) | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+
+**How Semantic Retry Works:**
+
+1. **Error Detected**: Tool returns 4xx error (400, 404, 409, 422)
+2. **Layer 3 Analysis**: ErrorAnalyzer determines it cannot fix the issue
+3. **Layer 4 Activation**: ContextualReResolver receives full execution context:
+   - User's original query (intent)
+   - Source data from dependent steps (what to compute from)
+   - Failed parameters and error message
+4. **LLM Computation**: The LLM analyzes the context and computes corrected parameters
+5. **Retry**: The step is retried with computed parameters
+
+**Example scenario:**
+```
+User: "Sell 100 Tesla shares and convert proceeds to EUR"
+Step 1 (stock-tool): Returns {price: 468.285}
+Step 2 (currency-tool): Fails with "amount must be > 0" (amount: 0)
+
+→ Layer 4 computes: amount = 100 × 468.285 = 46828.5
+→ Retries currency conversion with corrected amount
+```
+
+**Disabling Semantic Retry:**
+
+```bash
+# Disable semantic retry entirely
+export GOMIND_SEMANTIC_RETRY_ENABLED=false
+
+# Or limit retry attempts
+export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=1
+```
+
 ### Example
 
 ```bash
@@ -599,6 +639,10 @@ export GOMIND_CAPABILITY_THRESHOLD=0.75
 # For plan parse retry configuration
 export GOMIND_PLAN_RETRY_ENABLED=true
 export GOMIND_PLAN_RETRY_MAX=2
+
+# For semantic retry configuration (Layer 4)
+export GOMIND_SEMANTIC_RETRY_ENABLED=true
+export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
 ```
 
 ---

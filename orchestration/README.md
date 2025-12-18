@@ -1062,13 +1062,14 @@ steps:
 
 ### LLM-First Hybrid Parameter Resolution
 
-In multi-step workflows, parameters must flow between tools automatically. The orchestration module uses a **three-layer resolution system** where LLM handles all semantic understanding:
+In multi-step workflows, parameters must flow between tools automatically. The orchestration module uses a **four-layer resolution system** where LLM handles all semantic understanding:
 
 | Layer | Strategy | When Used | Cost |
 |-------|----------|-----------|------|
 | **Layer 1: Auto-Wiring** | Exact name match, case-insensitive match, type coercion | Always (first) | Free |
 | **Layer 2: Micro-Resolution** | LLM extracts parameters via function calling | When Layer 1 leaves required params unmapped | 1 LLM call |
 | **Layer 3: Error Analysis** | LLM analyzes tool errors and suggests corrections | When tool returns 400/404/409/422 | 1 LLM call |
+| **Layer 4: Semantic Retry** | LLM computes parameters from full execution context | When Layer 3 says "cannot fix" but source data exists | 1 LLM call |
 
 **How it works:**
 
@@ -1122,7 +1123,7 @@ analyzer.Enable(true)   // Re-enable
 
 | Status | Handler | Action |
 |--------|---------|--------|
-| 400, 404, 409, 422 | LLM Error Analyzer | Analyze → correct → retry |
+| 400, 404, 409, 422 | LLM Error Analyzer → Semantic Retry | Analyze → correct → retry |
 | 408, 429, 5xx | Resilience Module | Same payload + backoff |
 | 401, 403, 405 | Neither | Fail immediately |
 
@@ -1131,6 +1132,97 @@ analyzer.Enable(true)   // Re-enable
 - All LLM calls are traced in Jaeger with prompts, responses, and token usage
 
 For detailed implementation information, see [INTELLIGENT_PARAMETER_BINDING.md](./INTELLIGENT_PARAMETER_BINDING.md).
+
+### Layer 4: Semantic Retry (Contextual Re-Resolution)
+
+**The Problem Solved:** When Layer 3 (Error Analysis) determines "this error cannot be fixed with different parameters" but the source data to compute the correct value actually exists, standard retry gives up. Semantic Retry uses the full execution trajectory to compute the correct parameters.
+
+**Real-World Example:**
+```
+User: "Sell 100 Tesla shares and convert proceeds to EUR"
+
+Step 1 (stock-tool): Returns {symbol: "TSLA", price: 468.285}
+Step 2 (currency-tool): Called with {amount: 0} ← Layer 1/2 couldn't compute this!
+        ↓
+Tool returns 400: "amount must be greater than 0"
+        ↓
+Layer 3 (Error Analysis): "Cannot fix - don't know what amount should be"
+        ↓
+🆕 Layer 4 (Semantic Retry): Has access to:
+   • User query: "Sell 100 Tesla shares..."
+   • Source data: {price: 468.285}
+   • Failed params: {amount: 0}
+
+   LLM computes: 100 × 468.285 = 46828.5
+        ↓
+Retries with: {amount: 46828.5} ✅ SUCCESS!
+```
+
+**How It Works:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 4: Semantic Retry (enabled by default)                 │
+│                                                              │
+│   Triggers when:                                             │
+│   • Tool returns 4xx error (400, 404, 409, 422)             │
+│   • Layer 3 says "cannot fix"                                │
+│   • Source data exists from dependent steps                  │
+│                                                              │
+│   The LLM receives:                                          │
+│   • User's original query (intent)                           │
+│   • All source data from previous steps                      │
+│   • Failed parameters and error message                      │
+│   • Target capability schema                                 │
+│                                                              │
+│   Returns:                                                   │
+│   • should_retry: true/false                                 │
+│   • corrected_parameters: computed values                    │
+│   • analysis: explanation of the fix                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Configuration:**
+```go
+config := orchestration.DefaultConfig()
+
+// Semantic retry is enabled by default
+config.SemanticRetry.Enabled = true        // Default: true
+config.SemanticRetry.MaxAttempts = 2       // Default: 2
+
+// Disable for cost-sensitive deployments
+config.SemanticRetry.Enabled = false
+```
+
+**Environment Variables:**
+```bash
+# Enable/disable semantic retry (default: true)
+export GOMIND_SEMANTIC_RETRY_ENABLED=true
+
+# Maximum retry attempts (default: 2)
+export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
+```
+
+**When Semantic Retry Activates:**
+
+| Condition | Layer 4 Activates? |
+|-----------|-------------------|
+| Tool returns 400 + Layer 3 says "cannot fix" | ✅ Yes |
+| Tool returns 500 (server error) | ❌ No (handled by resilience) |
+| Tool returns 401 (auth error) | ❌ No (not retryable) |
+| Layer 3 successfully corrects | ❌ No (already fixed) |
+| No source data from dependencies | ❌ No (nothing to compute from) |
+
+**Observability:**
+- Span events: `contextual_re_resolution.start`, `contextual_re_resolution.complete`
+- Metrics: `orchestration.semantic_retry.success`, `orchestration.semantic_retry.cannot_fix`
+- Full visibility in Jaeger traces
+
+**Key Insight:** Semantic Retry succeeds where static rules fail because it has access to:
+1. **User intent** - understands what computation is needed
+2. **Source data** - has the values to compute from
+3. **Error context** - knows exactly what went wrong
+
+This is the **same reasoning a human developer would apply** when debugging a failed API call, now automated by the framework.
 
 ### Comprehensive Logging System
 The orchestration module now includes production-grade logging for all operations:

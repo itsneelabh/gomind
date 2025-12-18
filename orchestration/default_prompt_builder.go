@@ -181,7 +181,9 @@ func (d *DefaultPromptBuilder) BuildPlanningPrompt(ctx context.Context, input Pr
 	// Following FRAMEWORK_DESIGN_PRINCIPLES.md: always check for nil
 	var span core.Span
 	if d.telemetry != nil {
-		ctx, span = d.telemetry.StartSpan(ctx, SpanPromptBuilderBuild)
+		// Note: We discard the returned context since this function doesn't make
+		// downstream calls that need trace propagation. The span is purely for timing.
+		_, span = d.telemetry.StartSpan(ctx, SpanPromptBuilderBuild)
 		defer span.End()
 
 		// Add span attributes for debugging
@@ -270,8 +272,6 @@ CRITICAL FORMAT RULES (applies to all LLM providers):
 - Do NOT wrap JSON in code fences (no triple backticks)
 - Do NOT include any explanatory text before or after the JSON
 - String values must be plain text without any markdown formatting
-- Do NOT use arithmetic expressions in JSON values (e.g., "amount": 100 * price is INVALID)
-- If calculations are needed, create separate steps or use literal values only
 - Start your response with { and end with } - nothing else
 
 Response (raw JSON only, no formatting):`,

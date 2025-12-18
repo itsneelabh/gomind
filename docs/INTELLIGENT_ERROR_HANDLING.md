@@ -994,11 +994,111 @@ sum(rate(orchestration_validation_feedback_attempts_total[5m]))
 |-------|---------------|----------|
 | **Tool** | Report structured errors with `ToolError` | Tool handlers |
 | **Agent** | Retry with AI-corrected payloads | Agent retry logic |
-| **Orchestrator** | Type coercion + validation feedback | Orchestration executor |
+| **Orchestrator** | Type coercion + validation feedback + semantic retry | Orchestration executor |
 
 The orchestration layer adds automatic type safety *before* requests reach tools, reducing the burden on both tools and agents. When combined with proper tool error reporting and agent retry logic, this creates a robust error handling system that achieves ~99% success rates in production.
 
 For detailed implementation information, see the [orchestration module documentation](../orchestration/README.md#multi-layer-type-safety).
+
+---
+
+## Orchestration Module: Layer 4 Semantic Retry
+
+When the multi-layer type safety system exhausts its options—when Layer 3 (Validation Feedback) determines "this error cannot be fixed with different parameters"—there's one more layer of defense: **Semantic Retry**.
+
+### The Problem Semantic Retry Solves
+
+Consider this multi-step workflow:
+```
+User: "Sell 100 Tesla shares and convert the proceeds to EUR"
+
+Step 1 (stock-tool): Returns {symbol: "TSLA", price: 468.285}
+Step 2 (currency-tool): Called with {amount: 0} ← MicroResolver couldn't compute this!
+```
+
+The currency tool returns `400: "amount must be greater than 0"`. At this point:
+- **Layer 1 (Prompt Guidance)**: Already failed
+- **Layer 2 (Schema Coercion)**: Can't help—`0` is already a valid number
+- **Layer 3 (Validation Feedback)**: Says "cannot fix—don't know what amount should be"
+
+But wait—**the data to compute the correct amount exists!** The user said "100 shares" and step 1 returned `price: 468.285`. A human developer would instantly compute: `100 × 468.285 = 46828.5`.
+
+### How Semantic Retry Works
+
+Semantic Retry (Layer 4) uses the **full execution trajectory** to compute corrected parameters:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 4: Contextual Re-Resolution                            │
+│                                                              │
+│   Input: Full execution context                              │
+│   • User's original query (the intent)                       │
+│   • Source data from dependent steps (what to compute from)  │
+│   • Failed parameters (what went wrong)                      │
+│   • Error response (the clue)                                │
+│                                                              │
+│   Output: Corrected parameters                               │
+│   • should_retry: true                                       │
+│   • corrected_parameters: {amount: 46828.5}                  │
+│   • analysis: "Computed 100 × 468.285 = 46828.5"            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### When Semantic Retry Activates
+
+| Condition | Semantic Retry? |
+|-----------|-----------------|
+| Tool returns 400/404/409/422 + Layer 3 says "cannot fix" | ✅ Yes |
+| Tool returns 500 (server error) | ❌ No (handled by resilience module) |
+| Tool returns 401/403 (auth error) | ❌ No (not retryable) |
+| Layer 3 successfully corrects parameters | ❌ No (already fixed) |
+| No source data from dependent steps | ❌ No (nothing to compute from) |
+
+### Configuration
+
+```go
+// Semantic retry is enabled by default
+config := orchestration.DefaultConfig()
+config.SemanticRetry.Enabled = true    // Default: true
+config.SemanticRetry.MaxAttempts = 2   // Default: 2
+
+// Or via environment variables:
+// GOMIND_SEMANTIC_RETRY_ENABLED=true
+// GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
+```
+
+### Observability
+
+Semantic retry generates detailed telemetry:
+
+**Distributed Tracing (Jaeger/Tempo):**
+- `contextual_re_resolution.start` - When semantic retry begins
+- `contextual_re_resolution.complete` - Result with should_retry, analysis, parameter count
+
+**Prometheus Metrics:**
+```promql
+# Semantic retry success rate
+sum(rate(orchestration_semantic_retry_success_total[5m])) /
+sum(rate(orchestration_semantic_retry_attempts_total[5m]))
+
+# LLM latency for semantic retry
+histogram_quantile(0.95, orchestration_semantic_retry_llm_latency_ms)
+```
+
+### The Complete Error Handling Stack
+
+With Semantic Retry, the orchestration module provides a **four-layer defense**:
+
+| Layer | Strategy | When Used | Cost |
+|-------|----------|-----------|------|
+| **Layer 1** | Prompt Guidance | Always | Free |
+| **Layer 2** | Schema Coercion | Always | Free |
+| **Layer 3** | Validation Feedback | When tool returns correctable error | 1 LLM call |
+| **Layer 4** | Semantic Retry | When Layer 3 says "cannot fix" | 1 LLM call |
+
+This creates a robust system that handles the full spectrum of parameter errors—from simple type mismatches to complex computations that require understanding user intent.
+
+For implementation details, see [INTELLIGENT_PARAMETER_BINDING.md](../orchestration/INTELLIGENT_PARAMETER_BINDING.md).
 
 ---
 

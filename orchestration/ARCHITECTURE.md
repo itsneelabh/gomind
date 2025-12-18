@@ -1021,6 +1021,61 @@ func (o *AIOrchestrator) ProcessRequestWithDegradation(ctx context.Context, requ
 }
 ```
 
+#### Layer 4: Semantic Retry (Contextual Re-Resolution)
+
+Beyond the three-layer resilience architecture for capability services, the execution layer has its own advanced error recovery: **Semantic Retry**.
+
+**When Layer 3 Error Analysis says "cannot fix"**, Semantic Retry provides one more chance by using the full execution trajectory:
+
+```go
+// ExecutionContext captures everything needed for semantic retry
+type ExecutionContext struct {
+    UserQuery       string                 // Original user intent
+    SourceData      map[string]interface{} // Data from dependent steps
+    StepID          string                 // Current step being executed
+    Capability      *EnhancedCapability    // Target capability schema
+    AttemptedParams map[string]interface{} // What we tried
+    ErrorResponse   string                 // What went wrong
+    HTTPStatus      int                    // Error status code
+}
+
+// ContextualReResolver computes corrected parameters
+type ContextualReResolver struct {
+    aiClient core.AIClient
+    logger   core.Logger
+}
+
+func (r *ContextualReResolver) ReResolve(ctx context.Context, execCtx *ExecutionContext) (*ReResolutionResult, error) {
+    // LLM analyzes full context and computes corrected parameters
+    // Returns: {ShouldRetry: true, CorrectedParameters: {...}, Analysis: "..."}
+}
+```
+
+**Example scenario:**
+```
+User: "Sell 100 Tesla shares and convert proceeds to EUR"
+Step 1: Returns {price: 468.285}
+Step 2: Fails with "amount must be > 0" (amount: 0)
+
+Layer 4 computes: 100 × 468.285 = 46828.5
+Retries with corrected parameters → SUCCESS
+```
+
+**Configuration:**
+```go
+config := DefaultConfig()
+config.SemanticRetry.Enabled = true    // Default: true
+config.SemanticRetry.MaxAttempts = 2   // Default: 2
+```
+
+**Environment Variables:**
+```bash
+GOMIND_SEMANTIC_RETRY_ENABLED=true
+GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
+```
+
+For detailed design, see [SEMANTIC_RETRY_DESIGN.md](./notes/SEMANTIC_RETRY_DESIGN.md).
+
 ### Implementation Checklist
 
 When implementing resilience patterns:

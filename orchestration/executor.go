@@ -66,13 +66,19 @@ type SmartExecutor struct {
 
 	// Hybrid Parameter Resolution (Phase 4: Auto-wiring + Micro-resolution)
 	// When enabled, uses intelligent parameter binding instead of brittle template substitution
-	hybridResolver       *HybridResolver // Hybrid resolver for parameter binding
-	useHybridResolution  bool            // Enable hybrid resolution (default: true when resolver is set)
+	hybridResolver      *HybridResolver // Hybrid resolver for parameter binding
+	useHybridResolution bool            // Enable hybrid resolution (default: true when resolver is set)
 
 	// Layer 3: LLM-based Error Analysis
 	// When enabled, uses LLM to analyze errors and determine if they can be fixed
 	// with different parameters (replaces the need for tools to set Retryable flags)
 	errorAnalyzer *ErrorAnalyzer // LLM-based error analyzer
+
+	// Layer 4: Contextual Re-Resolution for Semantic Retry
+	// When ErrorAnalyzer says "cannot fix" but source data exists,
+	// this component can compute derived values using full context.
+	contextualReResolver *ContextualReResolver
+	maxSemanticRetries   int // Default: 2
 }
 
 // NewSmartExecutor creates a new smart executor
@@ -177,6 +183,66 @@ func (e *SmartExecutor) SetLogger(logger core.Logger) {
 	if e.errorAnalyzer != nil {
 		e.errorAnalyzer.SetLogger(logger)
 	}
+	// Propagate logger to contextual re-resolver if configured
+	if e.contextualReResolver != nil {
+		e.contextualReResolver.SetLogger(logger)
+	}
+}
+
+// SetContextualReResolver configures Layer 4 semantic retry.
+// When set, the executor can re-resolve parameters after failures using full context.
+// This complements ErrorAnalyzer by providing source data for computation.
+func (e *SmartExecutor) SetContextualReResolver(resolver *ContextualReResolver) {
+	e.contextualReResolver = resolver
+	if e.logger != nil && resolver != nil {
+		e.logger.Info("Contextual re-resolver enabled for semantic retries", map[string]interface{}{
+			"operation": "contextual_re_resolver_configured",
+		})
+	}
+}
+
+// SetMaxSemanticRetries sets the maximum number of semantic retry attempts.
+// Default is 2. These retries are separate from regular retry attempts.
+func (e *SmartExecutor) SetMaxSemanticRetries(max int) {
+	if max < 0 {
+		max = 0
+	}
+	e.maxSemanticRetries = max
+}
+
+// collectSourceDataFromDependencies converts step results to a flat source data map.
+// This is the same logic used by HybridResolver.collectSourceData.
+// Returns map[string]interface{} suitable for LLM context.
+func (e *SmartExecutor) collectSourceDataFromDependencies(ctx context.Context, dependsOn []string) map[string]interface{} {
+	sourceData := make(map[string]interface{})
+
+	// Get step results from context (stored by buildStepContext)
+	stepResults := e.collectDependencyResults(ctx, dependsOn)
+
+	// Convert each step result to flat key-value pairs
+	for _, result := range stepResults {
+		if result == nil || result.Response == "" || !result.Success {
+			continue
+		}
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(result.Response), &parsed); err != nil {
+			if e.logger != nil {
+				e.logger.Warn("Failed to parse step response for source data", map[string]interface{}{
+					"step_id": result.StepID,
+					"error":   err.Error(),
+				})
+			}
+			continue
+		}
+
+		// Merge into sourceData (later steps may override earlier for same keys)
+		for k, v := range parsed {
+			sourceData[k] = v
+		}
+	}
+
+	return sourceData
 }
 
 // Execute runs a routing plan and collects agent responses.
@@ -670,13 +736,13 @@ func (e *SmartExecutor) substituteTemplates(
 			// Step not found in dependencies - this is likely a configuration error
 			if e.logger != nil {
 				e.logger.Warn("TEMPLATE RESOLUTION FAILED: Step not found", map[string]interface{}{
-					"operation":             "template_step_not_found",
-					"template":              template,
-					"requested_step_id":     stepID,
-					"available_steps":       getDepResultKeys(depResults),
-					"resolution_status":     "failed",
-					"failure_reason":        "step_not_in_dependencies",
-					"hint":                  "Check if the step is in depends_on array and has completed successfully",
+					"operation":         "template_step_not_found",
+					"template":          template,
+					"requested_step_id": stepID,
+					"available_steps":   getDepResultKeys(depResults),
+					"resolution_status": "failed",
+					"failure_reason":    "step_not_in_dependencies",
+					"hint":              "Check if the step is in depends_on array and has completed successfully",
 				})
 			}
 			return template
@@ -710,15 +776,15 @@ func (e *SmartExecutor) substituteTemplates(
 				// Get a sample of the step data structure for debugging
 				stepDataSample := describeStepDataStructure(stepData)
 				e.logger.Warn("TEMPLATE RESOLUTION FAILED: Field not found", map[string]interface{}{
-					"operation":          "template_field_not_found",
-					"template":           template,
-					"step_id":            actualStepID,
-					"requested_path":     normalizedPath,
-					"available_fields":   getFieldKeys(stepData),
+					"operation":           "template_field_not_found",
+					"template":            template,
+					"step_id":             actualStepID,
+					"requested_path":      normalizedPath,
+					"available_fields":    getFieldKeys(stepData),
 					"step_data_structure": stepDataSample,
-					"resolution_status":  "failed",
-					"failure_reason":     "field_path_not_found",
-					"hint":               "Check if the field path matches the actual response structure",
+					"resolution_status":   "failed",
+					"failure_reason":      "field_path_not_found",
+					"hint":                "Check if the field path matches the actual response structure",
 				})
 			}
 			return template
@@ -841,13 +907,13 @@ func (e *SmartExecutor) substituteTemplates(
 	// INFO: Log final substitution summary
 	if e.logger != nil {
 		e.logger.Info("Template substitution completed", map[string]interface{}{
-			"operation":      "template_substitution_complete",
-			"original_value": template,
-			"final_value":    result,
+			"operation":       "template_substitution_complete",
+			"original_value":  template,
+			"final_value":     result,
 			"total_templates": len(matches),
-			"resolved_count": resolvedCount,
-			"failed_count":   failedCount,
-			"all_resolved":   failedCount == 0,
+			"resolved_count":  resolvedCount,
+			"failed_count":    failedCount,
+			"all_resolved":    failedCount == 0,
 		})
 	}
 
@@ -1141,12 +1207,17 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		capabilityForResolution := e.findCapabilitySchema(agentInfo, capability)
 		if e.logger != nil {
 			e.logger.Info("findCapabilitySchema result", map[string]interface{}{
-				"step_id":         step.StepID,
-				"capability":      capability,
-				"schema_found":    capabilityForResolution != nil,
-				"agent_name":      step.AgentName,
-				"agent_info_nil":  agentInfo == nil,
-				"agent_cap_count": func() int { if agentInfo != nil { return len(agentInfo.Capabilities) }; return 0 }(),
+				"step_id":        step.StepID,
+				"capability":     capability,
+				"schema_found":   capabilityForResolution != nil,
+				"agent_name":     step.AgentName,
+				"agent_info_nil": agentInfo == nil,
+				"agent_cap_count": func() int {
+					if agentInfo != nil {
+						return len(agentInfo.Capabilities)
+					}
+					return 0
+				}(),
 			})
 		}
 		if capabilityForResolution != nil {
@@ -1163,7 +1234,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 					})
 				}
 				// Fall through to template interpolation below
-			} else if resolved != nil && len(resolved) > 0 {
+			} else if len(resolved) > 0 {
 				// Merge resolved parameters with original parameters
 				// Replace template strings with resolved values, preserve hardcoded values
 				if parameters == nil {
@@ -1183,12 +1254,12 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 				if e.logger != nil {
 					e.logger.Info("HYBRID RESOLUTION APPLIED", map[string]interface{}{
-						"operation":         "hybrid_parameter_resolution",
-						"step_id":           step.StepID,
-						"capability":        capability,
-						"resolved_params":   resolved,
-						"final_params":      parameters,
-						"trace_id":          tc.TraceID,
+						"operation":       "hybrid_parameter_resolution",
+						"step_id":         step.StepID,
+						"capability":      capability,
+						"resolved_params": resolved,
+						"final_params":    parameters,
+						"trace_id":        tc.TraceID,
 					})
 				}
 
@@ -1243,13 +1314,13 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			schemaParams = len(capabilitySchema.Parameters)
 		}
 		e.logger.Info("TYPE COERCION CHECK", map[string]interface{}{
-			"operation":              "type_coercion_entry",
-			"step_id":                step.StepID,
-			"capability":             capability,
-			"parameters":             parameters,
-			"schema_found":           capabilitySchema != nil,
-			"schema_param_count":     schemaParams,
-			"will_attempt_coercion":  capabilitySchema != nil && schemaParams > 0,
+			"operation":             "type_coercion_entry",
+			"step_id":               step.StepID,
+			"capability":            capability,
+			"parameters":            parameters,
+			"schema_found":          capabilitySchema != nil,
+			"schema_param_count":    schemaParams,
+			"will_attempt_coercion": capabilitySchema != nil && schemaParams > 0,
 		})
 	}
 
@@ -1275,13 +1346,13 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			// This includes both type coercions (string->number) and object field extractions (map->string)
 			if e.logger != nil {
 				e.logger.Info("TYPE COERCION APPLIED", map[string]interface{}{
-					"operation":        "type_coercion",
-					"step_id":          step.StepID,
-					"capability":       capability,
-					"coercions":        coercionLog,
-					"coercion_count":   len(coercionLog),
-					"trace_id":         tc.TraceID,
-					"span_id":          tc.SpanID,
+					"operation":      "type_coercion",
+					"step_id":        step.StepID,
+					"capability":     capability,
+					"coercions":      coercionLog,
+					"coercion_count": len(coercionLog),
+					"trace_id":       tc.TraceID,
+					"span_id":        tc.SpanID,
 				})
 			}
 		}
@@ -1326,6 +1397,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	// Execute with retry logic including Layer 3 validation feedback
 	maxAttempts := 2
 	validationRetries := 0
+	previousErrors := []string{} // Layer 4: tracks error history for semantic retry
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
@@ -1482,7 +1554,77 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 					"module", telemetry.ModuleOrchestration,
 				)
 
-				// Break out of retry loop - LLM says don't retry
+				// ============================================================
+				// LAYER 4: Contextual Re-Resolution (Semantic Retry)
+				// ErrorAnalyzer said "cannot fix" but it lacks source data.
+				// Try ContextualReResolver which has BOTH error AND source data.
+				// ============================================================
+				if e.contextualReResolver != nil && validationRetries < e.maxSemanticRetries {
+					// Collect source data from dependencies (same data MicroResolver had)
+					sourceData := e.collectSourceDataFromDependencies(ctx, step.DependsOn)
+
+					if len(sourceData) > 0 {
+						// Build execution context with full trajectory
+						execCtx := &ExecutionContext{
+							UserQuery:       step.Instruction,
+							SourceData:      sourceData,
+							StepID:          step.StepID,
+							Capability:      capabilitySchema,
+							AttemptedParams: parameters,
+							ErrorResponse:   responseBody,
+							HTTPStatus:      httpStatus,
+							RetryCount:      validationRetries,
+							PreviousErrors:  previousErrors,
+						}
+
+						reResult, reErr := e.contextualReResolver.ReResolve(ctx, execCtx)
+						if reErr == nil && reResult.ShouldRetry && len(reResult.CorrectedParameters) > 0 {
+							validationRetries++
+							previousErrors = append(previousErrors, responseBody)
+
+							// Telemetry: Record semantic retry
+							correctedJSON, _ := json.Marshal(reResult.CorrectedParameters)
+							telemetry.AddSpanEvent(ctx, "semantic_retry_applied",
+								attribute.String("step_id", step.StepID),
+								attribute.String("capability", capability),
+								attribute.String("analysis", reResult.Analysis),
+								attribute.String("corrected_params", string(correctedJSON)),
+							)
+							telemetry.Counter("orchestration.semantic_retry.applied",
+								"capability", capability,
+								"module", telemetry.ModuleOrchestration,
+							)
+
+							if e.logger != nil {
+								e.logger.Info("SEMANTIC RETRY: Applying corrected parameters", map[string]interface{}{
+									"operation":            "semantic_retry_applied",
+									"step_id":              step.StepID,
+									"capability":           capability,
+									"analysis":             reResult.Analysis,
+									"corrected_parameters": reResult.CorrectedParameters,
+									"semantic_retry_count": validationRetries,
+								})
+							}
+
+							// Replace parameters and retry
+							parameters = reResult.CorrectedParameters
+							attempt-- // Don't count as regular retry
+							continue  // Go back to HTTP call with new params
+						}
+
+						// Re-resolution failed or said don't retry
+						if reErr != nil && e.logger != nil {
+							e.logger.Warn("Semantic retry failed", map[string]interface{}{
+								"operation": "semantic_retry_failed",
+								"step_id":   step.StepID,
+								"error":     reErr.Error(),
+							})
+						}
+					}
+				}
+				// END LAYER 4
+
+				// Break out of retry loop - neither ErrorAnalyzer nor ContextualReResolver could fix
 				break
 			}
 		}
@@ -1517,14 +1659,14 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 			if e.logger != nil {
 				e.logger.Info("Type error detected, requesting LLM correction", map[string]interface{}{
-					"operation":         "validation_feedback",
-					"step_id":           step.StepID,
-					"capability":        capability,
-					"validation_retry":  validationRetries,
-					"max_retries":       e.maxValidationRetries,
-					"error":             err.Error(),
-					"trace_id":          tc.TraceID,
-					"span_id":           tc.SpanID,
+					"operation":        "validation_feedback",
+					"step_id":          step.StepID,
+					"capability":       capability,
+					"validation_retry": validationRetries,
+					"max_retries":      e.maxValidationRetries,
+					"error":            err.Error(),
+					"trace_id":         tc.TraceID,
+					"span_id":          tc.SpanID,
 				})
 			}
 
@@ -1546,12 +1688,12 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 				if e.logger != nil {
 					e.logger.Debug("Parameters corrected by LLM", map[string]interface{}{
-						"operation":   "validation_feedback_success",
-						"step_id":     step.StepID,
-						"capability":  capability,
-						"new_params":  correctedParams,
-						"trace_id":    tc.TraceID,
-						"span_id":     tc.SpanID,
+						"operation":  "validation_feedback_success",
+						"step_id":    step.StepID,
+						"capability": capability,
+						"new_params": correctedParams,
+						"trace_id":   tc.TraceID,
+						"span_id":    tc.SpanID,
 					})
 				}
 
@@ -1853,7 +1995,7 @@ func coerceStringValue(strVal string, expectedType string) (interface{}, bool) {
 // Returns the extracted value, the field name used, and whether extraction succeeded.
 // Only extracts string values to avoid type confusion.
 func extractPrimaryField(m map[string]interface{}) (string, string, bool) {
-	if m == nil || len(m) == 0 {
+	if len(m) == 0 {
 		return "", "", false
 	}
 
