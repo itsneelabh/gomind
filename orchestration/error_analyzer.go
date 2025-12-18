@@ -57,6 +57,11 @@ type ErrorAnalysisResult struct {
 	// SuggestedChanges contains parameter modifications that might fix the error
 	// Keys are parameter names, values are the suggested new values
 	SuggestedChanges map[string]interface{} `json:"suggested_changes,omitempty"`
+
+	// IsTransientError indicates this is a temporary infrastructure issue (timeout, service unavailable)
+	// that should be retried with the SAME parameters using exponential backoff.
+	// When true and ShouldRetry is false, the executor should continue with resilience retry.
+	IsTransientError bool `json:"is_transient_error,omitempty"`
 }
 
 // ErrorContext provides context for error analysis
@@ -290,6 +295,7 @@ USER'S ORIGINAL QUERY:
 ANALYSIS TASK:
 1. Determine if this error can be fixed by changing the request parameters
 2. If fixable, suggest the specific parameter changes
+3. Identify if this is a TRANSIENT error (temporary infrastructure issue)
 
 IMPORTANT GUIDELINES:
 - Consider if the error message suggests a typo (e.g., "Tokio" instead of "Tokyo")
@@ -298,11 +304,17 @@ IMPORTANT GUIDELINES:
 - Do NOT suggest retry if the error is about missing permissions, authentication, or server issues
 - Do NOT suggest retry if the resource genuinely doesn't exist (not a typo)
 
+TRANSIENT ERROR DETECTION:
+- Set is_transient_error=true for: timeouts, service unavailable, connection refused, rate limiting
+- These are temporary issues where retrying with the SAME parameters might succeed
+- Examples: "request canceled", "timeout", "service unavailable", "connection refused", "503"
+
 RESPONSE FORMAT (JSON only, no explanation):
 {
   "should_retry": true/false,
   "reason": "Brief explanation of why or why not",
-  "suggested_changes": {"param_name": "new_value", ...} or {} if not retrying
+  "suggested_changes": {"param_name": "new_value", ...} or {} if not retrying,
+  "is_transient_error": true/false
 }`,
 		errCtx.CapabilityName,
 		errCtx.CapabilityDescription,

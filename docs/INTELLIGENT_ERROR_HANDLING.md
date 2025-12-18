@@ -1054,6 +1054,30 @@ Semantic Retry (Layer 4) uses the **full execution trajectory** to compute corre
 | Layer 3 successfully corrects parameters | ❌ No (already fixed) |
 | No source data from dependent steps | ❌ No (nothing to compute from) |
 
+### Transient Error Handling (503 Timeouts)
+
+A special case arises with **503 errors** containing structured tool responses. Unlike pure infrastructure errors (500, 502, 504), tools sometimes return 503 with semantic error information (e.g., "location not found" wrapped in a timeout error).
+
+**How the Orchestrator Handles This:**
+
+1. **LLM analyzes the error** - The ErrorAnalyzer examines the response body, not just the HTTP status
+2. **LLM may return `should_retry=true`** - With or without parameter changes:
+   - With changes: "Change 'Tokio' to 'Tokyo'" → Retry with corrected params
+   - Without changes: "Timeout, service may recover" → Retry with same params
+3. **`IsTransientError` flag** - LLM sets this for infrastructure issues (timeouts, service unavailable)
+4. **Tool's `retryable: false` is overridden** - When LLM identifies a transient error, the executor continues retrying even if the tool said "don't retry"
+
+**Decision Matrix:**
+
+| LLM Result | Action |
+|------------|--------|
+| `should_retry=true`, `suggested_changes` non-empty | Retry with new parameters |
+| `should_retry=true`, `suggested_changes` empty | Retry with same parameters (transient) |
+| `should_retry=false`, `is_transient_error=true` | Resilience retry (backoff) |
+| `should_retry=false`, `is_transient_error=false` | Don't retry |
+
+This ensures that transient infrastructure errors don't fail permanently when a simple retry might succeed.
+
 ### Configuration
 
 ```go

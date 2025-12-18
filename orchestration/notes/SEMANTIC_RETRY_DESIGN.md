@@ -689,6 +689,88 @@ attempt = 0  // decremented
 
 The corrected parameters flow directly into the same HTTP call logic - no special handling needed. The tool receives a valid request and responds normally.
 
+### Transient Error Handling
+
+A critical edge case arises with **transient infrastructure errors** (503 timeouts, service unavailable). For these errors:
+
+1. **LLM may return `should_retry=true` with empty `suggested_changes`** - meaning "retry with same parameters"
+2. **Tool responses may contain `retryable: false`** - but LLM's assessment should take precedence for transient issues
+
+#### The `IsTransientError` Field
+
+The `ErrorAnalysisResult` includes an `IsTransientError` field that LLM sets for infrastructure issues:
+
+```go
+type ErrorAnalysisResult struct {
+    ShouldRetry      bool                   `json:"should_retry"`
+    Reason           string                 `json:"reason"`
+    SuggestedChanges map[string]interface{} `json:"suggested_changes,omitempty"`
+    // IsTransientError signals temporary infrastructure issues
+    // (timeouts, service unavailable, connection refused)
+    IsTransientError bool `json:"is_transient_error,omitempty"`
+}
+```
+
+#### The `isTransientErrorDetected` Flag
+
+In `executor.go`, a local flag tracks when LLM identifies a transient error:
+
+```go
+for attempt := 1; attempt <= maxAttempts; attempt++ {
+    isTransientErrorDetected := false  // Reset each attempt
+
+    // ... HTTP call and error analysis ...
+
+    if analysisResult.IsTransientError {
+        isTransientErrorDetected = true
+        // Continue with resilience retry (same payload + backoff)
+    }
+
+    // IMPORTANT: Skip isNonRetryableToolError check for transient errors
+    // LLM's assessment takes precedence over tool's retryable flag
+    if !isTransientErrorDetected && isNonRetryableToolError(responseBody) {
+        break  // Tool says don't retry, respect it
+    }
+}
+```
+
+This ensures that when LLM detects a transient error (e.g., 503 timeout), the executor doesn't break out early due to `retryable: false` in the tool response.
+
+#### The `should_retry=true` with Empty Changes Scenario
+
+When LLM determines an error is retryable but doesn't have specific parameter changes:
+
+```go
+// Changed from:
+if analysisResult.ShouldRetry && len(analysisResult.SuggestedChanges) > 0 {
+
+// To:
+if analysisResult.ShouldRetry {
+    // Handles both:
+    // 1. Parameter changes needed (SuggestedChanges non-empty)
+    // 2. Transient errors where retry with same params may work (SuggestedChanges empty)
+
+    // Merge changes (no-op if empty)
+    for key, val := range analysisResult.SuggestedChanges {
+        parameters[key] = val
+    }
+
+    attempt--
+    continue
+}
+```
+
+This ensures transient errors that slip through HTTP status routing (like 503 errors with structured tool responses) are handled correctly.
+
+#### When Each Path Activates
+
+| Scenario | `ShouldRetry` | `SuggestedChanges` | `IsTransientError` | Action |
+|----------|---------------|--------------------|--------------------|--------|
+| Typo fix (e.g., "Tokio" → "Tokyo") | `true` | `{location: "Tokyo"}` | `false` | Retry with new params |
+| Transient timeout | `true` | `{}` | `true` | Retry with same params |
+| Permanent error (auth fail) | `false` | `{}` | `false` | Don't retry |
+| Transient but not fixable | `false` | `{}` | `true` | Resilience retry |
+
 ---
 
 ## Integration Points

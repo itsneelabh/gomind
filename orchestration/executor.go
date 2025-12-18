@@ -1401,6 +1401,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result.Attempts = attempt
+		isTransientErrorDetected := false // Reset for each attempt - tracks if LLM identified transient error
 
 		if e.logger != nil {
 			e.logger.Debug("Making HTTP call to agent", map[string]interface{}{
@@ -1492,7 +1493,11 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 					})
 				}
 				// Continue with normal retry logic (same payload)
-			} else if analysisResult.ShouldRetry && len(analysisResult.SuggestedChanges) > 0 {
+			} else if analysisResult.ShouldRetry {
+				// LLM determined this error is retryable
+				// This handles both:
+				// 1. Parameter changes needed (SuggestedChanges non-empty)
+				// 2. Transient errors where retry with same params may work (SuggestedChanges empty)
 				validationRetries++
 
 				// Telemetry: Add span event for LLM error analysis
@@ -1506,6 +1511,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 					attribute.String("error_message", err.Error()),
 					attribute.String("error_response", truncateString(responseBody, 500)),
 					attribute.String("suggested_changes", string(suggestedChangesJSON)),
+					attribute.Int("suggested_changes_count", len(analysisResult.SuggestedChanges)),
 				)
 				telemetry.Counter("orchestration.error_analysis.retry",
 					"capability", capability,
@@ -1513,19 +1519,33 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 					"module", telemetry.ModuleOrchestration,
 				)
 
+				// Log appropriately based on whether we have parameter changes
+				hasChanges := len(analysisResult.SuggestedChanges) > 0
 				if e.logger != nil {
-					e.logger.Info("LLM error analysis suggests retry with changes", map[string]interface{}{
-						"operation":         "error_analysis_retry",
-						"step_id":           step.StepID,
-						"capability":        capability,
-						"http_status":       httpStatus,
-						"reason":            analysisResult.Reason,
-						"suggested_changes": analysisResult.SuggestedChanges,
-						"validation_retry":  validationRetries,
-					})
+					if hasChanges {
+						e.logger.Info("LLM error analysis suggests retry with parameter changes", map[string]interface{}{
+							"operation":         "error_analysis_retry",
+							"step_id":           step.StepID,
+							"capability":        capability,
+							"http_status":       httpStatus,
+							"reason":            analysisResult.Reason,
+							"suggested_changes": analysisResult.SuggestedChanges,
+							"validation_retry":  validationRetries,
+						})
+					} else {
+						e.logger.Info("LLM error analysis suggests retry with same parameters (transient)", map[string]interface{}{
+							"operation":        "error_analysis_retry_same_params",
+							"step_id":          step.StepID,
+							"capability":       capability,
+							"http_status":      httpStatus,
+							"reason":           analysisResult.Reason,
+							"is_transient":     analysisResult.IsTransientError,
+							"validation_retry": validationRetries,
+						})
+					}
 				}
 
-				// Merge suggested changes into parameters
+				// Merge suggested changes into parameters (no-op if empty)
 				for key, val := range analysisResult.SuggestedChanges {
 					parameters[key] = val
 				}
@@ -1624,8 +1644,43 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				}
 				// END LAYER 4
 
-				// Break out of retry loop - neither ErrorAnalyzer nor ContextualReResolver could fix
-				break
+				// ============================================================
+				// TRANSIENT ERROR HANDLING (503 timeouts, service unavailable)
+				// If LLM identified this as a transient error, continue with
+				// resilience retry (same payload + exponential backoff) instead
+				// of breaking out of the retry loop.
+				// ============================================================
+				if analysisResult.IsTransientError {
+					isTransientErrorDetected = true // Flag to skip isNonRetryableToolError check below
+					if e.logger != nil {
+						e.logger.Info("Transient error detected, continuing with resilience retry", map[string]interface{}{
+							"operation":   "transient_error_resilience_retry",
+							"step_id":     step.StepID,
+							"capability":  capability,
+							"http_status": httpStatus,
+							"reason":      analysisResult.Reason,
+							"attempt":     attempt,
+						})
+					}
+					telemetry.AddSpanEvent(ctx, "transient_error_resilience_retry",
+						attribute.String("step_id", step.StepID),
+						attribute.String("capability", capability),
+						attribute.Int("http_status", httpStatus),
+						attribute.String("reason", analysisResult.Reason),
+						attribute.Int("attempt", attempt),
+					)
+					telemetry.Counter("orchestration.transient_error.resilience_retry",
+						"capability", capability,
+						"http_status", fmt.Sprintf("%d", httpStatus),
+						"module", telemetry.ModuleOrchestration,
+					)
+					// Don't break - continue to regular retry with exponential backoff
+					// (the code below handles waiting and retry logic)
+				} else {
+					// Break out of retry loop - neither ErrorAnalyzer nor ContextualReResolver could fix
+					// and this is not a transient error
+					break
+				}
 			}
 		}
 
@@ -1729,7 +1784,9 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		// Check if error is explicitly non-retryable - don't waste retries on permanent errors
 		// This prevents blind retries when a tool explicitly says "don't retry"
 		// (e.g., LOCATION_NOT_FOUND, INVALID_SYMBOL, COUNTRY_NOT_FOUND)
-		if isNonRetryableToolError(responseBody) {
+		// IMPORTANT: Skip this check if LLM detected a transient error - LLM's assessment
+		// takes precedence over the tool's retryable flag for infrastructure issues
+		if !isTransientErrorDetected && isNonRetryableToolError(responseBody) {
 			// Telemetry: Record that we stopped early due to non-retryable error
 			telemetry.AddSpanEvent(ctx, "non_retryable_error_detected",
 				attribute.String("step_id", step.StepID),

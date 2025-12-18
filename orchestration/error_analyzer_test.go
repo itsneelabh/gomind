@@ -661,6 +661,166 @@ func TestTruncateString(t *testing.T) {
 	}
 }
 
+// TestAnalyzeError_503TransientError verifies that transient errors (timeouts, service unavailable)
+// are correctly identified by LLM with is_transient_error=true
+func TestAnalyzeError_503TransientError(t *testing.T) {
+	ai := &errorAnalyzerMockAI{
+		response: `{
+			"should_retry": false,
+			"reason": "Service timeout - this is a temporary infrastructure issue",
+			"is_transient_error": true
+		}`,
+	}
+	analyzer := NewErrorAnalyzer(ai, &mockLogger{})
+
+	result, err := analyzer.AnalyzeError(context.Background(), &ErrorAnalysisContext{
+		HTTPStatus:    503,
+		ErrorResponse: `{"error": "request failed: net/http: request canceled (Client.Timeout exceeded)"}`,
+	})
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected result for 503 transient error")
+	}
+	if result.ShouldRetry {
+		t.Error("Expected ShouldRetry=false for transient error (not a parameter issue)")
+	}
+	if !result.IsTransientError {
+		t.Error("Expected IsTransientError=true for timeout error")
+	}
+}
+
+// TestAnalyzeError_503NonTransientError verifies that non-transient 503 errors
+// (semantic errors like "location not found") are NOT marked as transient
+func TestAnalyzeError_503NonTransientError(t *testing.T) {
+	ai := &errorAnalyzerMockAI{
+		response: `{
+			"should_retry": false,
+			"reason": "Location 'Narnia' does not exist",
+			"is_transient_error": false
+		}`,
+	}
+	analyzer := NewErrorAnalyzer(ai, &mockLogger{})
+
+	result, err := analyzer.AnalyzeError(context.Background(), &ErrorAnalysisContext{
+		HTTPStatus:      503,
+		ErrorResponse:   `{"error": "Location 'Narnia' not found", "code": "LOCATION_NOT_FOUND"}`,
+		OriginalRequest: map[string]interface{}{"location": "Narnia"},
+	})
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected result for 503 semantic error")
+	}
+	if result.IsTransientError {
+		t.Error("Expected IsTransientError=false for semantic error (location doesn't exist)")
+	}
+}
+
+// TestAnalyzeError_TransientErrorWithResilienceRetry verifies that when LLM identifies
+// a transient error, the executor should continue with resilience retry (same payload + backoff)
+// rather than breaking out of the retry loop
+func TestAnalyzeError_TransientErrorField(t *testing.T) {
+	tests := []struct {
+		name              string
+		response          string
+		expectTransient   bool
+		expectShouldRetry bool
+	}{
+		{
+			name: "timeout_error",
+			response: `{
+				"should_retry": false,
+				"reason": "Request timed out - temporary issue",
+				"is_transient_error": true
+			}`,
+			expectTransient:   true,
+			expectShouldRetry: false,
+		},
+		{
+			name: "service_unavailable",
+			response: `{
+				"should_retry": false,
+				"reason": "Service is temporarily unavailable",
+				"is_transient_error": true
+			}`,
+			expectTransient:   true,
+			expectShouldRetry: false,
+		},
+		{
+			name: "connection_refused",
+			response: `{
+				"should_retry": false,
+				"reason": "Connection refused - service may be restarting",
+				"is_transient_error": true
+			}`,
+			expectTransient:   true,
+			expectShouldRetry: false,
+		},
+		{
+			name: "semantic_error_not_transient",
+			response: `{
+				"should_retry": false,
+				"reason": "Invalid country name - cannot be fixed",
+				"is_transient_error": false
+			}`,
+			expectTransient:   false,
+			expectShouldRetry: false,
+		},
+		{
+			name: "fixable_typo",
+			response: `{
+				"should_retry": true,
+				"reason": "Typo detected, can be fixed",
+				"suggested_changes": {"city": "Tokyo"},
+				"is_transient_error": false
+			}`,
+			expectTransient:   false,
+			expectShouldRetry: true,
+		},
+		{
+			name: "transient_retry_same_params",
+			response: `{
+				"should_retry": true,
+				"reason": "Service timeout - retry with same parameters may succeed",
+				"suggested_changes": {},
+				"is_transient_error": true
+			}`,
+			expectTransient:   true,
+			expectShouldRetry: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ai := &errorAnalyzerMockAI{response: tt.response}
+			analyzer := NewErrorAnalyzer(ai, &mockLogger{})
+
+			result, err := analyzer.AnalyzeError(context.Background(), &ErrorAnalysisContext{
+				HTTPStatus:    503,
+				ErrorResponse: "test error",
+			})
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+			if result == nil {
+				t.Fatal("Expected result")
+			}
+			if result.IsTransientError != tt.expectTransient {
+				t.Errorf("Expected IsTransientError=%v, got %v", tt.expectTransient, result.IsTransientError)
+			}
+			if result.ShouldRetry != tt.expectShouldRetry {
+				t.Errorf("Expected ShouldRetry=%v, got %v", tt.expectShouldRetry, result.ShouldRetry)
+			}
+		})
+	}
+}
+
 // Helper function
 func contains(s, substr string) bool {
 	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr)))
