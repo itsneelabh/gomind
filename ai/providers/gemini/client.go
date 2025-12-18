@@ -67,6 +67,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	// Apply defaults
 	options = c.ApplyDefaults(options)
 
+	// Resolve model alias (e.g., "smart" -> "gemini-1.5-pro")
+	options.Model = resolveModel(options.Model)
+
 	// Add model to span attributes after defaults are applied
 	span.SetAttribute("ai.model", options.Model)
 

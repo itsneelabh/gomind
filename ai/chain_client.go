@@ -464,3 +464,53 @@ func WithChainTelemetry(telemetry core.Telemetry) ChainOption {
 		c.Telemetry = telemetry
 	}
 }
+
+// ChainProviderInfo contains information about the AI provider chain configuration.
+// This is returned by GetProviderInfo() for status reporting and observability.
+type ChainProviderInfo struct {
+	// AvailableProviders are the providers that were successfully initialized
+	// (have valid API keys and could be created)
+	AvailableProviders []string `json:"available_providers"`
+
+	// ProviderCount is the number of available providers
+	ProviderCount int `json:"provider_count"`
+
+	// FailoverEnabled indicates if failover is possible (more than 1 provider)
+	FailoverEnabled bool `json:"failover_enabled"`
+
+	// PrimaryProvider is the first provider in the chain (used first)
+	PrimaryProvider string `json:"primary_provider"`
+
+	// FailoverProviders are the backup providers (used if primary fails)
+	FailoverProviders []string `json:"failover_providers,omitempty"`
+}
+
+// GetProviderInfo returns information about the configured provider chain.
+// This is useful for status endpoints and observability dashboards to display
+// the AI failover configuration.
+//
+// Example output:
+//
+//	{
+//	  "available_providers": ["openai", "anthropic"],
+//	  "provider_count": 2,
+//	  "failover_enabled": true,
+//	  "primary_provider": "openai",
+//	  "failover_providers": ["anthropic"]
+//	}
+func (c *ChainClient) GetProviderInfo() ChainProviderInfo {
+	info := ChainProviderInfo{
+		AvailableProviders: c.providerAliases,
+		ProviderCount:      len(c.providers),
+		FailoverEnabled:    len(c.providers) > 1,
+	}
+
+	if len(c.providerAliases) > 0 {
+		info.PrimaryProvider = c.providerAliases[0]
+		if len(c.providerAliases) > 1 {
+			info.FailoverProviders = c.providerAliases[1:]
+		}
+	}
+
+	return info
+}
