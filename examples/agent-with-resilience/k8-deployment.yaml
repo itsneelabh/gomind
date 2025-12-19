@@ -77,7 +77,7 @@ spec:
         - configMapRef:
             name: research-agent-resilience-config
         - secretRef:
-            name: ai-provider-keys
+            name: ai-provider-keys-resilience-agent
             optional: true
 
         # Additional environment variables

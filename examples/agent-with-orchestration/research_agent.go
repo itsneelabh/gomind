@@ -97,11 +97,17 @@ type StepResultSummary struct {
 func NewTravelResearchAgent() (*TravelResearchAgent, error) {
 	agent := core.NewBaseAgent("travel-research-orchestration")
 
-	// Auto-configure AI client - detects provider from environment
-	aiClient, err := ai.NewClient()
+	// Create Chain Client for automatic failover between providers
+	// Provider chain: OpenAI (primary) → Anthropic (backup) → Groq (emergency)
+	// If primary fails (e.g., invalid key), automatically tries the next provider
+	aiClient, err := ai.NewChainClient(
+		ai.WithProviderChain("openai", "anthropic", "openai.groq"),
+		ai.WithChainTelemetry(telemetry.GetTelemetryProvider()),
+		ai.WithChainLogger(agent.Logger),
+	)
 	if err != nil {
 		// AI is optional - orchestration works without it for predefined workflows
-		agent.Logger.Warn("AI client creation failed, some features will be limited", map[string]interface{}{
+		agent.Logger.Warn("AI chain client creation failed, some features will be limited", map[string]interface{}{
 			"error": err.Error(),
 		})
 	} else {

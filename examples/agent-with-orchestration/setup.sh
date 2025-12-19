@@ -281,7 +281,7 @@ build_tools() {
 build_docker() {
     log_info "Building Docker images..."
 
-    # Build using the standalone Dockerfile (fetches gomind from GitHub)
+    # Build using standalone Dockerfile (fetches modules from GitHub)
     docker build -t travel-research-agent:latest "$AGENT_DIR"
     log_success "travel-research-agent:latest built"
 }
@@ -377,14 +377,14 @@ setup_k8s_secrets() {
         fi
     fi
 
-    # Create AI provider keys secret
-    kubectl create secret generic ai-provider-keys \
+    # Create AI provider keys secret (unique per example to avoid conflicts)
+    kubectl create secret generic ai-provider-keys-travel-agent \
         --from-literal=OPENAI_API_KEY="${OPENAI_KEY}" \
         --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_KEY}" \
         --from-literal=GROQ_API_KEY="${GROQ_KEY}" \
-        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -n $NAMESPACE -f -
 
-    log_success "API keys configured as K8s secret"
+    log_success "API keys configured as K8s secret (ai-provider-keys-travel-agent)"
 }
 
 # Deploy to Kubernetes

@@ -8,6 +8,7 @@ Multi-agent coordination with AI-driven orchestration and declarative workflows.
 - [🚀 Quick Start](#-quick-start)
 - [🧠 How It Works](#-how-it-works)
 - [🤖 AI Orchestration in Detail](#-ai-orchestration-in-detail)
+  - [LLM-Generated Execution Plan Structure](#llm-execution-plan)
 - [🔧 Workflow Engine in Detail](#-workflow-engine-in-detail)
 - [🎭 When to Use Each Mode](#-when-to-use-each-mode)
 - [🏗️ Architecture & Design Decisions](#️-architecture--design-decisions)
@@ -204,6 +205,201 @@ Recent factory announcement drives positive sentiment (72%).
 Technical indicators suggest continued bullish trend.
 Recommendation: Strong Buy"
 ```
+
+### LLM-Generated Execution Plan Structure {#llm-execution-plan}
+
+When the AI orchestrator processes a natural language request, the LLM generates a **DAG-based execution plan** in JSON format. This plan defines which tools/agents to call, their parameters, and dependencies between steps.
+
+#### JSON Plan Structure
+
+```json
+{
+  "plan_id": "travel-plan-1766115892559988547",
+  "steps": [
+    {
+      "step_id": "step-1",
+      "agent_name": "stock-service",
+      "capability": "stock_quote",
+      "description": "Get TSLA stock quote to calculate funds",
+      "parameters": {"symbol": "TSLA"},
+      "depends_on": []
+    },
+    {
+      "step_id": "step-2",
+      "agent_name": "country-info-tool",
+      "capability": "get_country_info",
+      "description": "Get Switzerland currency info",
+      "parameters": {"country": "Switzerland"},
+      "depends_on": []
+    },
+    {
+      "step_id": "step-3",
+      "agent_name": "currency-tool",
+      "capability": "convert_currency",
+      "description": "Convert USD to CHF using step-1 & step-2 data",
+      "parameters": {
+        "from": "USD",
+        "to": "{{step-2.response.data.currency.code}}",
+        "amount": "{{step-1.response.data.price}}"
+      },
+      "depends_on": ["step-1", "step-2"]
+    },
+    {
+      "step_id": "step-4",
+      "agent_name": "geocoding-tool",
+      "capability": "geocode_location",
+      "description": "Get Zurich coordinates for weather lookup",
+      "parameters": {"location": "Zurich"},
+      "depends_on": []
+    },
+    {
+      "step_id": "step-5",
+      "agent_name": "weather-tool-v2",
+      "capability": "get_current_weather",
+      "description": "Get Zurich weather using coordinates from step-4",
+      "parameters": {
+        "lat": "{{step-4.response.data.lat}}",
+        "lon": "{{step-4.response.data.lon}}"
+      },
+      "depends_on": ["step-4"]
+    },
+    {
+      "step_id": "step-6",
+      "agent_name": "news-tool",
+      "capability": "search_news",
+      "description": "Search news about Zurich",
+      "parameters": {"query": "Zurich", "max_results": 5},
+      "depends_on": []
+    }
+  ]
+}
+```
+
+#### Key Fields
+
+| Field | Description |
+|-------|-------------|
+| `plan_id` | Unique identifier for the execution plan |
+| `step_id` | Unique identifier for each step (used in `depends_on` references) |
+| `agent_name` | The tool/agent to call (discovered via Redis) |
+| `capability` | The specific capability/action to invoke |
+| `parameters` | Input parameters, may include template references |
+| `depends_on` | Array of step IDs that must complete before this step runs |
+
+#### Template References
+
+Parameters can reference outputs from previous steps using the template syntax:
+- `{{step-N.response.data.field}}` - Access nested field from step N's response
+- At execution time, templates are resolved with actual values from completed steps
+
+#### DAG Visualization: Parallel Execution Groups
+
+The executor analyzes `depends_on` to determine which steps can run in parallel:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  PARALLEL GROUP 1 (4 independent steps - no dependencies)          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌─────────────┐  ┌─────────────────┐  ┌──────────────┐  ┌───────┐ │
+│  │   step-1    │  │     step-2      │  │    step-4    │  │step-6 │ │
+│  │ stock_quote │  │ get_country_info│  │geocode_location│ │ news │ │
+│  │  (TSLA)     │  │  (Switzerland)  │  │   (Zurich)   │  │       │ │
+│  └──────┬──────┘  └────────┬────────┘  └──────┬───────┘  └───────┘ │
+│         │                  │                  │                     │
+└─────────┼──────────────────┼──────────────────┼─────────────────────┘
+          │                  │                  │
+          ▼                  ▼                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  PARALLEL GROUP 2 (2 dependent steps - wait for dependencies)      │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌───────────────────────────────┐    ┌──────────────────────────┐ │
+│  │           step-3              │    │         step-5           │ │
+│  │     convert_currency          │    │   get_current_weather    │ │
+│  │  depends_on: [step-1, step-2] │    │   depends_on: [step-4]   │ │
+│  │                               │    │                          │ │
+│  │  amount: {{step-1...price}}   │    │  lat: {{step-4...lat}}   │ │
+│  │  to: {{step-2...currency}}    │    │  lon: {{step-4...lon}}   │ │
+│  └───────────────────────────────┘    └──────────────────────────┘ │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │    RESPONSE     │
+                    │  (all 6 steps   │
+                    │   aggregated)   │
+                    └─────────────────┘
+```
+
+**Execution Flow:**
+1. **Group 1**: Steps 1, 2, 4, 6 execute concurrently (no dependencies)
+2. **Group 2**: Steps 3, 5 execute concurrently after their dependencies complete
+3. **Response**: All results are aggregated and optionally synthesized by AI
+
+#### Intelligent Error Recovery
+
+When a step fails (e.g., wrong parameters, validation errors), the executor uses a **4-layer error recovery system**:
+
+| Layer | Component | Trigger | Capability |
+|-------|-----------|---------|------------|
+| **Layer 1** | Auto-Wirer | Before execution | Exact name matching, type coercion |
+| **Layer 2** | Micro-Resolver | Before execution | LLM extracts values from source data |
+| **Layer 3** | Error Analyzer | After 4xx error | LLM suggests parameter corrections |
+| **Layer 4** | Semantic Retry | After Layer 3 fails | LLM computes derived values with full context |
+
+**Example: Layer 4 Semantic Retry in Action**
+
+```
+User: "Sell 100 Tesla shares and convert to EUR"
+
+Step 1: stock_quote("TSLA") → {price: 468.285}
+
+Step 3: convert_currency({amount: 0}) → HTTP 400 "amount must be > 0"
+        ↓
+Layer 3: ErrorAnalyzer says "cannot fix - don't know the amount"
+        ↓
+Layer 4: ContextualReResolver sees:
+         - User query: "sell 100 shares"
+         - Source data: {price: 468.285}
+         - Computes: 100 × 468.285 = 46,828.50
+        ↓
+Retry:  convert_currency({amount: 46828.5}) → HTTP 200 ✓
+```
+
+> 📖 **Full Details**: See [LLM-First Hybrid Parameter Resolution](#-production-ready-enhancements) and [SEMANTIC_RETRY_DESIGN.md](notes/SEMANTIC_RETRY_DESIGN.md) for the complete 4-layer architecture.
+
+#### Observing Plans in Jaeger
+
+The execution plan and its execution are fully traced in Jaeger:
+
+1. **Find the trace**: Use the `request_id` from your API response to search in Jaeger
+2. **Plan generation span**: Look for `orchestrator.plan` span with attributes:
+   - `plan_steps`: Number of steps in the plan
+   - `ai.tokens_used`: Tokens consumed by LLM for planning
+   - `ai.model`: Model used (e.g., `gpt-4o-mini`)
+3. **Step execution spans**: Each `executor.step.*` span shows:
+   - `step_id`: Which step executed
+   - `agent_name`: Tool/agent called
+   - `capability`: Action invoked
+   - `duration`: Execution time
+   - `status`: Success/failure
+4. **Parallel execution**: Steps in the same group will have overlapping timestamps
+
+**Example Jaeger URL:**
+```
+http://localhost:16686/trace/<trace_id>
+```
+
+**Key Metrics from Trace:**
+| Metric | Where to Find |
+|--------|---------------|
+| Plan generation time | `orchestrator.plan` span duration |
+| Total execution time | Root span duration |
+| Per-step latency | Individual `executor.step.*` spans |
+| LLM token usage | `ai.tokens_used` attribute |
+| Parallelization efficiency | Compare overlapping step timestamps |
 
 ### Setting Up AI Orchestration
 
@@ -619,64 +815,77 @@ This design is a textbook example of the **Dependency Inversion Principle**:
 
 ### The Orchestra Metaphor - Complete Picture
 
+The orchestration module offers **two modes** - the application chooses which to use:
+
 ```
-┌─────────────────────────────────────────────┐
-│          🎭 User Request                     │
-│     "Analyze Tesla and recommend action"     │
-└──────────────────┬──────────────────────────┘
-                   │
-        ┌──────────▼──────────┐
-        │   🎼 Orchestrator   │ (The Conductor)
-        │  Decides: AI or     │
-        │  Workflow approach? │
-        └──────────┬──────────┘
-                   │
-      ┌────────────┴────────────┐
-      │                         │
-┌─────▼─────┐           ┌───────▼────────┐
-│ 🤖 AI     │           │ 📋 Workflow    │
-│ Router    │           │ Engine         │
-│           │           │                │
-│ "Let me   │           │ "I'll follow   │
-│ figure    │           │ the recipe"    │
-│ this out" │           │                │
-└─────┬─────┘           └───────┬────────┘
-      │                         │
-      └───────────┬─────────────┘
-                  │
-        ┌─────────▼──────────┐
-        │   🎯 Executor      │ (The Stage Manager)
-        │                    │
-        │ Calls agents in    │
-        │ parallel when      │
-        │ possible           │
-        └─────────┬──────────┘
-                  │
-     ┌────────────┼────────────┐
-     │            │            │
-┌────▼───┐  ┌────▼───┐  ┌────▼───┐
-│  Tool  │  │  Tool  │  │ Agent  │ (The Musicians)
-│   A    │  │   B    │  │   C    │
-└────┬───┘  └────┬───┘  └────┬───┘
-     │            │            │
-     └────────────┼────────────┘
-                  │
-        ┌─────────▼──────────┐
-        │  🎨 Synthesizer    │ (The Editor)
-        │                    │
-        │ Combines all       │
-        │ responses into     │
-        │ one answer         │
-        └─────────┬──────────┘
-                  │
-        ┌─────────▼──────────┐
-        │   📜 Response      │
-        │                    │
-        │ "Tesla: BUY        │
-        │  Confidence: 85%   │
-        │  Reasons: ..."     │
-        └────────────────────┘
+                    ┌─────────────────────────────────────────────┐
+                    │          🎭 User Request                     │
+                    │     "Analyze Tesla and recommend action"     │
+                    └──────────────────┬──────────────────────────┘
+                                       │
+                         ┌─────────────┴─────────────┐
+                         │   Application chooses     │
+                         │   which mode to use       │
+                         └─────────────┬─────────────┘
+                                       │
+          ┌────────────────────────────┴────────────────────────────┐
+          │                                                         │
+          ▼                                                         ▼
+┌──────────────────────┐                              ┌──────────────────────┐
+│  🤖 AI Orchestrator  │                              │  📋 Workflow Engine  │
+│  ProcessRequest()    │                              │  ExecuteWorkflow()   │
+│                      │                              │                      │
+│  "I'll figure out    │                              │  "I'll follow the    │
+│   what to call"      │                              │   predefined recipe" │
+└──────────┬───────────┘                              └──────────┬───────────┘
+           │                                                     │
+           ▼                                                     │
+┌──────────────────────┐                                         │
+│  🧠 LLM Planner      │                                         │
+│                      │                                         │
+│  Generates DAG-based │                                         │
+│  execution plan      │                                         │
+└──────────┬───────────┘                                         │
+           │                                                     │
+           └────────────────────┬────────────────────────────────┘
+                                │
+                      ┌─────────▼──────────┐
+                      │   🎯 Executor      │ (The Stage Manager)
+                      │                    │
+                      │ Calls agents in    │
+                      │ parallel when      │
+                      │ possible           │
+                      └─────────┬──────────┘
+                                │
+               ┌────────────────┼────────────────┐
+               │                │                │
+          ┌────▼───┐       ┌────▼───┐       ┌────▼───┐
+          │  Tool  │       │  Tool  │       │ Agent  │ (The Musicians)
+          │   A    │       │   B    │       │   C    │
+          └────┬───┘       └────┬───┘       └────┬───┘
+               │                │                │
+               └────────────────┼────────────────┘
+                                │
+                      ┌─────────▼──────────┐
+                      │  🎨 Synthesizer    │ (The Editor)
+                      │                    │
+                      │ Combines all       │
+                      │ responses into     │
+                      │ one answer         │
+                      └─────────┬──────────┘
+                                │
+                      ┌─────────▼──────────┐
+                      │   📜 Response      │
+                      │                    │
+                      │ "Tesla: BUY        │
+                      │  Confidence: 85%   │
+                      │  Reasons: ..."     │
+                      └────────────────────┘
 ```
+
+**Key difference:**
+- **AI Orchestrator**: LLM dynamically generates the execution plan based on discovered capabilities
+- **Workflow Engine**: Uses a predefined workflow definition (no LLM planning step)
 
 ### How Components Work Together
 
@@ -869,12 +1078,19 @@ config.CapabilityProviderType = "default"  // This is the default
 ```
 
 #### 2. Service Provider (Large Scale: 100s-1000s of agents)
+
+**Kubernetes (Recommended):** Use environment variable for the endpoint:
+```bash
+export GOMIND_CAPABILITY_SERVICE_URL="http://capability-service:8080"
+```
+
 ```go
 // Uses external RAG service for semantic search
+// Endpoint is read from GOMIND_CAPABILITY_SERVICE_URL environment variable
 config := orchestration.DefaultConfig()
 config.CapabilityProviderType = "service"
 config.CapabilityService = orchestration.ServiceCapabilityConfig{
-    Endpoint:  "http://capability-service:8080",
+    // Endpoint: automatically loaded from GOMIND_CAPABILITY_SERVICE_URL
     TopK:      20,       // Return top 20 most relevant agents
     Threshold: 0.7,      // Minimum relevance score
     Timeout:   10 * time.Second,
@@ -888,6 +1104,8 @@ deps := orchestration.OrchestratorDependencies{
 
 orchestrator, _ := orchestration.CreateOrchestrator(config, deps)
 ```
+
+> **Note:** If `GOMIND_CAPABILITY_SERVICE_URL` is not set and `CapabilityService.Endpoint` is empty, `CreateOrchestrator` returns an error. See [factory.go:79](factory.go#L79).
 
 ### How Service Provider Works
 

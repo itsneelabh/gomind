@@ -69,6 +69,7 @@ func NewGeocodingTool() *GeocodingTool {
 		BaseTool: core.NewTool("geocoding-tool"),
 		httpClient: &http.Client{
 			Transport: otelhttp.NewTransport(transport),
+			Timeout:   10 * time.Second, // Prevent hanging on slow Nominatim responses
 		},
 	}
 

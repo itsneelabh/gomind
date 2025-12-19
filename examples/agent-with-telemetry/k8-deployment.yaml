@@ -79,7 +79,7 @@ spec:
         - configMapRef:
             name: research-agent-telemetry-config
         - secretRef:
-            name: ai-provider-keys
+            name: ai-provider-keys-telemetry-agent
             optional: true
 
         # Additional environment variables

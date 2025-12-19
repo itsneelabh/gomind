@@ -801,11 +801,21 @@ result, err := orchestrator.ProcessRequest(ctx, "Get weather in Tokyo and conver
 // Result contains synthesized response from multiple tools
 ```
 
+**REST API** - How you communicate with deployed agents:
+```bash
+curl -X POST http://localhost:8080/api/research \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request": "Get the weather of Tokyo in Celsius, and tell me how much is USD 100 in local currency.",
+    "use_ai": true
+  }'
+```
+
 **What Happens Behind the Scenes**:
-- LLM understands your intent and available tool capabilities
-- Creates an execution plan with proper dependencies
-- Runs tools in parallel when possible
-- Synthesizes results using AI
+- LLM understands your intent and discovers available tools
+- Creates an execution plan: weather-tool → currency-tool (parallel if independent)
+- Executes tools and synthesizes results using AI
+- Returns a coherent response combining all data
 
 → See [agent-with-orchestration](examples/agent-with-orchestration/) for travel research agent with workflow orchestration
 

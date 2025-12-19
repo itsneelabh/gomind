@@ -93,7 +93,7 @@ spec:
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
-              name: ai-provider-keys
+              name: ai-provider-keys-research-agent
               key: OPENAI_API_KEY
               optional: true
         resources:

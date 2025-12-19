@@ -165,6 +165,36 @@ This script will:
    - View in Grafana dashboards (see your cluster's monitoring setup)
    - View traces in Jaeger
 
+## AI Module Distributed Tracing
+
+This example includes distributed tracing for AI operations. When you view traces in Jaeger, you'll see `ai.generate_response` and `ai.http_attempt` spans with full details including:
+
+- **Token usage**: `ai.prompt_tokens`, `ai.completion_tokens`, `ai.total_tokens`
+- **Model info**: `ai.provider`, `ai.model`
+- **HTTP details**: `http.status_code`, `ai.attempt_duration_ms`
+- **Retry tracking**: `ai.attempt`, `ai.max_retries`, `ai.is_retry`
+
+### Critical: Initialization Order
+
+**The telemetry module MUST be initialized BEFORE creating the AI client.** This example demonstrates the correct order in `main.go`:
+
+```go
+func main() {
+    // 1. Set component type for service_type labeling
+    core.SetCurrentComponentType(core.ComponentTypeAgent)
+
+    // 2. Initialize telemetry BEFORE creating agent
+    initTelemetry(serviceName)
+    defer telemetry.Shutdown(context.Background())
+
+    // 3. Create agent AFTER telemetry - AI client gets the provider
+    agent, err := NewResearchAgent()
+    // ...
+}
+```
+
+If you reverse this order (creating the agent before telemetry), `telemetry.GetTelemetryProvider()` returns `nil` and no AI spans will appear in your traces.
+
 ## Migration Guide
 
 If you have an existing agent based on [agent-example](../agent-example), follow these steps to add telemetry:

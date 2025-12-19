@@ -32,6 +32,8 @@ The Travel Research Agent demonstrates **predefined workflow orchestration** - a
 
 This guide focuses on the **predefined workflow** mode.
 
+> 📖 **For AI-generated execution plans**: See [LLM-Generated Execution Plan Structure](../../orchestration/README.md#llm-execution-plan) in the orchestration module documentation for the JSON plan format, DAG visualization, and Jaeger tracing details.
+
 ---
 
 ## Request Payload

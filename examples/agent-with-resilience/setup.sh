@@ -340,11 +340,11 @@ setup_k8s_secrets() {
     fi
 
     # Create AI provider keys secret (empty string for unset keys - won't be detected as available)
-    kubectl create secret generic ai-provider-keys \
+    kubectl create secret generic ai-provider-keys-resilience-agent \
         --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
         --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
         --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
-        -n gomind-examples --dry-run=client -o yaml | kubectl apply -f -
+        -n gomind-examples --dry-run=client -o yaml | kubectl apply -n $NAMESPACE -f -
 
     log_success "API keys configured"
 }
@@ -357,7 +357,7 @@ deploy_k8s() {
     load_env
 
     # Create namespace if not exists
-    kubectl create namespace gomind-examples --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create namespace gomind-examples --dry-run=client -o yaml | kubectl apply -n $NAMESPACE -f -
 
     # Setup secrets
     setup_k8s_secrets

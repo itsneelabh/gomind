@@ -342,6 +342,8 @@ orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient)
 Request → Understanding → Discovery → Planning → Execution → Synthesis → Response
 ```
 
+> 📖 **Plan Structure Details**: For the complete JSON plan structure, DAG visualization, and Jaeger tracing guide, see [LLM-Generated Execution Plan Structure](README.md#llm-execution-plan).
+
 #### Request Processing Pipeline
 
 ```go

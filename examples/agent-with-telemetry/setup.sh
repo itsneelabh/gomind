@@ -98,18 +98,15 @@ cmd_run() {
     ./research-agent-telemetry
 }
 
-# Build Docker image with local workspace dependencies
+# Build Docker image (fetches modules from GitHub)
 cmd_docker_build() {
-    print_header "Building Docker Image (Local Workspace)"
+    print_header "Building Docker Image"
 
-    print_info "Building from workspace root with local modules..."
-    print_info "This includes any uncommitted changes to core/ai/telemetry modules"
+    print_info "Building with standalone Dockerfile (fetches modules from GitHub)..."
 
-    # Navigate to workspace root and build
-    WORKSPACE_ROOT="$SCRIPT_DIR/../.."
-    docker build -f "$SCRIPT_DIR/Dockerfile.workspace" -t $APP_NAME:latest "$WORKSPACE_ROOT"
+    docker build -t $APP_NAME:latest "$SCRIPT_DIR"
 
-    print_success "Docker image built with local workspace: $APP_NAME:latest"
+    print_success "Docker image built: $APP_NAME:latest"
 }
 
 # Create Kind cluster with port mappings for monitoring
@@ -189,11 +186,11 @@ setup_api_keys() {
     fi
 
     # Create secret with available keys
-    kubectl create secret generic ai-provider-keys \
+    kubectl create secret generic ai-provider-keys-telemetry-agent \
         --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
         --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
         --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
-        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -n $NAMESPACE -f -
 
     print_success "API keys configured"
 }
@@ -215,7 +212,7 @@ cmd_deploy() {
     fi
 
     # Create namespace
-    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -n $NAMESPACE -f -
 
     # Setup API keys
     setup_api_keys

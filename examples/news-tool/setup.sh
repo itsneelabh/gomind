@@ -178,32 +178,10 @@ cmd_infra() {
 }
 
 # Setup API keys as Kubernetes secrets
+# NOTE: This tool does NOT need AI API keys - it only needs GNEWS_API_KEY
+# We intentionally do NOT create ai-provider-keys to avoid conflicts with agents
 setup_api_keys() {
-    print_info "Setting up API keys..."
-
-    # Check for AI API keys (loaded from .env)
-    if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ]; then
-        print_info "No AI API keys found in .env file"
-        echo ""
-        echo "To enable AI features, add API keys to your .env file:"
-        echo "  OPENAI_API_KEY=your-key"
-        echo "  # or"
-        echo "  ANTHROPIC_API_KEY=your-key"
-        echo "  # or"
-        echo "  GROQ_API_KEY=your-key"
-        echo ""
-    else
-        print_success "Using AI API keys from .env file"
-    fi
-
-    # Create AI provider secret with available keys
-    kubectl create secret generic ai-provider-keys \
-        --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-        --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-        --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
-        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-
-    print_success "AI API keys configured"
+    print_info "Setting up GNEWS API key..."
 
     # Setup GNEWS_API_KEY
     if [ -z "$GNEWS_API_KEY" ] || [ "$GNEWS_API_KEY" = "your_api_key_here" ]; then

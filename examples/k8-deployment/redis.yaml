@@ -33,6 +33,9 @@ spec:
         - 256mb
         - --maxmemory-policy
         - allkeys-lru
+        # Prevent write blocking when RDB snapshot fails (common in Kind/dev environments)
+        - --stop-writes-on-bgsave-error
+        - "no"
         resources:
           requests:
             memory: "128Mi"
@@ -117,6 +120,8 @@ data:
     # Persistence
     appendonly yes
     appendfsync everysec
+    # Prevent write blocking when RDB snapshot fails (common in Kind/dev environments)
+    stop-writes-on-bgsave-error no
     
     # Memory management
     maxmemory 256mb

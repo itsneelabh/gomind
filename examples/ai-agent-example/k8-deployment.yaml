@@ -197,19 +197,19 @@ spec:
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
-              name: ai-provider-keys
+              name: ai-provider-keys-ai-agent
               key: OPENAI_API_KEY
               optional: true
         - name: GROQ_API_KEY
           valueFrom:
             secretKeyRef:
-              name: ai-provider-keys
+              name: ai-provider-keys-ai-agent
               key: GROQ_API_KEY
               optional: true
         - name: ANTHROPIC_API_KEY
           valueFrom:
             secretKeyRef:
-              name: ai-provider-keys
+              name: ai-provider-keys-ai-agent
               key: ANTHROPIC_API_KEY
               optional: true
         resources:

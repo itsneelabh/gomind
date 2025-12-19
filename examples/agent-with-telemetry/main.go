@@ -62,16 +62,13 @@ func main() {
 	// Get service name from environment (validated above)
 	serviceName := getServiceName()
 
-	// 2. Create research agent FIRST so component type is set for telemetry
-	// The agent constructor calls core.SetCurrentComponentType(ComponentTypeAgent)
-	// which enables automatic service_type inference in telemetry
-	agent, err := NewResearchAgent()
-	if err != nil {
-		log.Fatalf("Failed to create research agent: %v", err)
-	}
+	// 2. Set component type FIRST for telemetry auto-inference
+	// This must happen before telemetry initialization so service_type is set correctly
+	core.SetCurrentComponentType(core.ComponentTypeAgent)
 
-	// 3. Initialize telemetry AFTER agent creation
-	// This ensures core.GetCurrentComponentType() returns "agent" for auto-inference
+	// 3. Initialize telemetry BEFORE agent creation
+	// This ensures telemetry.GetTelemetryProvider() returns a valid provider
+	// when the AI client is created in NewResearchAgent()
 	initTelemetry(serviceName)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -80,6 +77,13 @@ func main() {
 			log.Printf("⚠️  Warning: Telemetry shutdown error: %v", err)
 		}
 	}()
+
+	// 4. Create research agent AFTER telemetry is initialized
+	// The AI client will now receive the telemetry provider for distributed tracing
+	agent, err := NewResearchAgent()
+	if err != nil {
+		log.Fatalf("Failed to create research agent: %v", err)
+	}
 
 	// Initialize schema cache with Redis (for Phase 3 validation caching)
 	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {

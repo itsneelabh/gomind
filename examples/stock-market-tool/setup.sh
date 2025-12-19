@@ -215,15 +215,8 @@ cmd_deploy() {
             -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
     fi
 
-    # AI API keys
-    if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$GROQ_API_KEY" ]; then
-        kubectl create secret generic ai-provider-keys \
-            --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-            --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-            --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
-            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-        print_success "AI API keys configured"
-    fi
+    # NOTE: This tool does NOT create ai-provider-keys to avoid conflicts with agents
+    # Tools only need their specific API keys (e.g., FINNHUB_API_KEY)
 
     print_info "Waiting for any existing deployment..."
     kubectl wait --for=condition=available --timeout=30s deployment/$APP_NAME -n $NAMESPACE 2>/dev/null || true
@@ -403,14 +396,7 @@ cmd_rollout() {
         print_success "Finnhub API key updated"
     fi
 
-    if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$GROQ_API_KEY" ]; then
-        kubectl create secret generic ai-provider-keys \
-            --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
-            --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-            --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
-            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-        print_success "AI API keys updated"
-    fi
+    # NOTE: This tool does NOT update ai-provider-keys to avoid conflicts with agents
 
     # Rebuild if requested
     if [ "$rebuild" = true ]; then
@@ -510,10 +496,8 @@ cmd_help() {
     echo "Environment Variables:"
     echo "  REDIS_URL         Redis connection URL (required for run)"
     echo "  PORT              HTTP server port (default: 8082)"
-    echo "  FINNHUB_API_KEY   Finnhub API key for real stock data (optional)"
-    echo "  OPENAI_API_KEY    OpenAI API key (optional)"
-    echo "  ANTHROPIC_API_KEY Anthropic API key (optional)"
-    echo "  GROQ_API_KEY      Groq API key (optional)"
+    echo "  FINNHUB_API_KEY   Finnhub API key for real stock data"
+    echo "                    Get a FREE key: https://finnhub.io/register"
     echo ""
     echo "Configuration:"
     echo "  CLUSTER_NAME: $CLUSTER_NAME"

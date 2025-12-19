@@ -359,6 +359,38 @@ kubectl port-forward -n gomind-examples svc/grafana 3000:80
 # Open http://localhost:3000
 ```
 
+### AI Module Distributed Tracing
+
+This example demonstrates full AI telemetry integration. When you view traces in Jaeger, you'll see:
+
+- **`ai.generate_response`** spans for each AI call with token usage and model info
+- **`ai.http_attempt`** spans showing HTTP-level details and retry behavior
+
+**Critical: Initialization Order**
+
+The telemetry module MUST be initialized BEFORE creating the AI client. This example follows the correct order in `main.go`:
+
+```go
+func main() {
+    // 1. Set component type
+    core.SetCurrentComponentType(core.ComponentTypeAgent)
+
+    // 2. Initialize telemetry BEFORE agent creation
+    initTelemetry("travel-research-orchestration")
+    defer telemetry.Shutdown(context.Background())
+
+    // 3. Create agent AFTER telemetry
+    agent, err := NewTravelResearchAgent()
+}
+```
+
+### Viewing AI Traces
+
+1. Port-forward Jaeger: `kubectl port-forward -n gomind-examples svc/jaeger-query 16686:80`
+2. Open: `http://localhost:16686`
+3. Select service: `travel-research-orchestration`
+4. Find a trace and expand it to see `ai.generate_response` and `ai.http_attempt` spans
+
 ## Troubleshooting
 
 ### "Orchestrator not initialized"

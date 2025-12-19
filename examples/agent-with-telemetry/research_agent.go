@@ -89,7 +89,12 @@ func NewResearchAgent() (*ResearchAgent, error) {
 	agent := core.NewBaseAgent(serviceName)
 
 	// Auto-configured AI client - detects from environment
-	aiClient, err := ai.NewClient() // Auto-detects best available provider
+	// Pass telemetry to enable distributed tracing for AI operations
+	// Pass logger to enable structured logging with trace ID correlation
+	aiClient, err := ai.NewClient(
+		ai.WithTelemetry(telemetry.GetTelemetryProvider()),
+		ai.WithLogger(agent.Logger),
+	)
 	if err != nil {
 		log.Printf("AI client creation failed, using mock: %v", err)
 		// In production, you might want to fail here or use a fallback

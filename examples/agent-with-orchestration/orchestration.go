@@ -125,6 +125,7 @@ Results:
 Provide a well-organized summary that highlights the key information a traveler would need.`, workflowName, resultsText)
 
 	response, err := t.AI.GenerateResponse(ctx, prompt, &core.AIOptions{
+		Model:       "smart", // Uses alias - can be overridden via GOMIND_OPENAI_MODEL_SMART env var
 		Temperature: 0.5,
 		MaxTokens:   1000,
 	})

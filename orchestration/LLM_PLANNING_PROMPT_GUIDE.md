@@ -6,6 +6,8 @@ This guide covers the extensible PromptBuilder system for customizing LLM orches
 
 The PromptBuilder system enables customization of prompts sent to the LLM for execution plan generation. It follows a three-layer architecture that balances ease of use with flexibility:
 
+> 📖 **Output Structure**: For the JSON plan structure that the LLM generates, see [LLM-Generated Execution Plan Structure](README.md#llm-execution-plan).
+
 | Layer | Builder Type | Use Case | Configuration |
 |-------|-------------|----------|---------------|
 | **Layer 1** | `DefaultPromptBuilder` | Zero-config, works out of the box | `PromptConfig.AdditionalTypeRules`, `Domain` |

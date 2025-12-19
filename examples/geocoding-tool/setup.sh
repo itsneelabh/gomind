@@ -99,50 +99,19 @@ cmd_infra() {
     print_success "Infrastructure setup complete"
 }
 
-# Setup API keys secret
+# Setup API keys secret - SKIPPED for geocoding-tool
+# Geocoding-tool uses the free Nominatim API and does NOT need AI API keys
+# We intentionally do NOT create/modify any shared secrets to avoid conflicts
 setup_api_keys() {
-    print_info "Setting up API keys secret..."
+    print_info "Geocoding-tool uses free Nominatim API - no AI keys needed"
+    print_info "Skipping secret creation (this tool doesn't use AI)"
 
     load_env
 
     # Create namespace if it doesn't exist
     kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
-    # Check for required API keys
-    local has_keys=false
-    local secret_args=""
-
-    if [ -n "$OPENAI_API_KEY" ]; then
-        secret_args="${secret_args} --from-literal=OPENAI_API_KEY=${OPENAI_API_KEY}"
-        has_keys=true
-        print_info "Found OPENAI_API_KEY"
-    fi
-
-    if [ -n "$ANTHROPIC_API_KEY" ]; then
-        secret_args="${secret_args} --from-literal=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
-        has_keys=true
-        print_info "Found ANTHROPIC_API_KEY"
-    fi
-
-    if [ -n "$GROQ_API_KEY" ]; then
-        secret_args="${secret_args} --from-literal=GROQ_API_KEY=${GROQ_API_KEY}"
-        has_keys=true
-        print_info "Found GROQ_API_KEY"
-    fi
-
-    if [ "$has_keys" = false ]; then
-        print_error "No API keys found in .env file"
-        print_info "Please set at least one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY"
-        exit 1
-    fi
-
-    # Create or update secret
-    kubectl create secret generic ai-provider-keys \
-        --namespace="${NAMESPACE}" \
-        ${secret_args} \
-        --dry-run=client -o yaml | kubectl apply -f -
-
-    print_success "API keys secret created/updated"
+    print_success "Namespace ready (no secrets created)"
 }
 
 # Build the tool
@@ -521,9 +490,13 @@ cmd_help() {
     echo "Environment Variables (.env file):"
     echo "  REDIS_URL           Redis connection URL (required for run)"
     echo "  PORT                HTTP server port (default: 8095)"
-    echo "  OPENAI_API_KEY      OpenAI API key (optional)"
-    echo "  ANTHROPIC_API_KEY   Anthropic API key (optional)"
-    echo "  GROQ_API_KEY        Groq API key (optional)"
+    echo ""
+    echo "  NOTE: This tool uses the free Nominatim geocoding API."
+    echo "        No AI API keys are required for basic functionality."
+    echo ""
+    echo "  OPENAI_API_KEY      OpenAI API key (optional, for AI-enhanced features)"
+    echo "  ANTHROPIC_API_KEY   Anthropic API key (optional, for AI-enhanced features)"
+    echo "  GROQ_API_KEY        Groq API key (optional, for AI-enhanced features)"
     echo ""
     echo "Examples:"
     echo "  # Complete 1-click deployment"

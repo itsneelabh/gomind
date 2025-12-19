@@ -78,7 +78,7 @@ spec:
         - configMapRef:
             name: travel-research-agent-config
         - secretRef:
-            name: ai-provider-keys
+            name: ai-provider-keys-travel-agent
             optional: true
 
         # Additional environment variables
@@ -140,6 +140,22 @@ spec:
         # GOMIND_HTTP_READ_TIMEOUT: HTTP server read timeout (default: 30s)
         - name: GOMIND_HTTP_READ_TIMEOUT
           value: "5m"
+        # Model Alias Override: Test env var override for ALL calls
+        # Without GOMIND_OPENAI_MODEL_DEFAULT: all calls use gpt-5.2-chat-latest (hardcoded default)
+        # With GOMIND_OPENAI_MODEL_DEFAULT: all calls use gpt-4o-mini (env override)
+        - name: GOMIND_OPENAI_MODEL_DEFAULT
+          value: "gpt-4o-mini"
+        # Also override "smart" alias for explicit Model: "smart" calls
+        - name: GOMIND_OPENAI_MODEL_SMART
+          value: "gpt-4o-mini"
+        # Anthropic Model Alias Override: Test env var override for ALL Anthropic calls
+        # Without GOMIND_ANTHROPIC_MODEL_DEFAULT: all calls use claude-sonnet-4-5-20250929
+        # With GOMIND_ANTHROPIC_MODEL_DEFAULT: all calls use claude-3-haiku (cheaper for testing)
+        - name: GOMIND_ANTHROPIC_MODEL_DEFAULT
+          value: "claude-3-haiku-20240307"
+        # Also override "smart" alias for Model: "smart" calls (used in synthesis)
+        - name: GOMIND_ANTHROPIC_MODEL_SMART
+          value: "claude-3-haiku-20240307"
 
         # Resource limits
         resources:

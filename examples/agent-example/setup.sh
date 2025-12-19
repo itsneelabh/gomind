@@ -215,11 +215,11 @@ setup_api_keys() {
     fi
 
     # Create or update secret
-    kubectl create secret generic ai-provider-keys \
+    kubectl create secret generic ai-provider-keys-research-agent \
         --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
         --from-literal=ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
         --from-literal=GROQ_API_KEY="${GROQ_API_KEY:-}" \
-        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+        -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -n $NAMESPACE -f -
 
     print_success "API keys configured in cluster"
     echo ""
@@ -231,7 +231,7 @@ cmd_deploy() {
 
     # Ensure namespace exists
     print_step "Ensuring namespace exists..."
-    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -n $NAMESPACE -f -
     print_success "Namespace ready"
     echo ""
 
@@ -534,8 +534,8 @@ cmd_clean() {
     fi
 
     # Remove API keys secret
-    if kubectl get secret ai-provider-keys -n $NAMESPACE &>/dev/null; then
-        kubectl delete secret ai-provider-keys -n $NAMESPACE
+    if kubectl get secret ai-provider-keys-research-agent -n $NAMESPACE &>/dev/null; then
+        kubectl delete secret ai-provider-keys-research-agent -n $NAMESPACE
         print_success "API keys secret removed"
     fi
 
