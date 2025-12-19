@@ -145,7 +145,7 @@ curl -X POST http://localhost:8093/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "weather in New York",
-    "use_ai": true
+    "ai_synthesis": true
   }'
 ```
 
@@ -333,7 +333,7 @@ The agent supports two modes for calling tools:
 # AI analyzes the query and decides which tools to use
 curl -X POST http://localhost:8093/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
-  -d '{"topic":"What grocery products are available?","use_ai":true}'
+  -d '{"topic":"What grocery products are available?","ai_synthesis":true}'
 ```
 
 The AI will:
@@ -362,7 +362,7 @@ The AI will:
 # Explicitly target specific tools - bypasses AI decision-making
 curl -X POST http://localhost:8093/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
-  -d '{"topic":"grocery","sources":["grocery-service"],"use_ai":false}'
+  -d '{"topic":"grocery","sources":["grocery-service"],"ai_synthesis":false}'
 ```
 
 This mode is used in the test scenarios below to:
@@ -435,7 +435,7 @@ curl -X POST http://localhost:8081/admin/reset
 # Make request through agent
 curl -X POST http://localhost:8093/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
-  -d '{"topic":"grocery","sources":["grocery-service"],"use_ai":false}'
+  -d '{"topic":"grocery","sources":["grocery-service"],"ai_synthesis":false}'
 ```
 
 **Expected Response:**
@@ -461,7 +461,7 @@ for i in 1 2 3 4; do
   echo "Request $i:"
   curl -s -X POST http://localhost:8093/api/capabilities/research_topic \
     -H "Content-Type: application/json" \
-    -d '{"topic":"grocery","sources":["grocery-service"],"use_ai":false}' | jq '{success_rate, partial, metadata}'
+    -d '{"topic":"grocery","sources":["grocery-service"],"ai_synthesis":false}' | jq '{success_rate, partial, metadata}'
 done
 ```
 
@@ -503,7 +503,7 @@ curl -X POST http://localhost:8081/admin/reset
 # Make recovery request
 curl -X POST http://localhost:8093/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
-  -d '{"topic":"grocery","sources":["grocery-service"],"use_ai":false}'
+  -d '{"topic":"grocery","sources":["grocery-service"],"ai_synthesis":false}'
 ```
 
 **Expected Response:**
@@ -536,7 +536,7 @@ curl -X POST http://localhost:8081/admin/reset
 # Make a request
 curl -X POST http://localhost:8093/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
-  -d '{"topic":"What groceries are available?","use_ai":true}'
+  -d '{"topic":"What groceries are available?","ai_synthesis":true}'
 ```
 
 **What happens internally:**
@@ -563,7 +563,7 @@ curl -X POST http://localhost:8081/admin/inject-error \
 # Make second request
 curl -X POST http://localhost:8093/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
-  -d '{"topic":"List grocery items","use_ai":true}'
+  -d '{"topic":"List grocery items","ai_synthesis":true}'
 ```
 
 **What happens internally:**
@@ -636,7 +636,7 @@ curl -X POST http://localhost:8081/admin/reset
 # Make recovery request
 curl -X POST http://localhost:8093/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
-  -d '{"topic":"What groceries can I buy?","use_ai":true}'
+  -d '{"topic":"What groceries can I buy?","ai_synthesis":true}'
 ```
 
 **What happens internally:**

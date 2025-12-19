@@ -226,7 +226,7 @@ curl -X POST http://localhost:8091/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "current price of Apple stock",
-    "use_ai": true
+    "ai_synthesis": true
   }'
 
 # Multi-entity comparison
@@ -234,7 +234,7 @@ curl -X POST http://localhost:8091/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "Compare AAPL vs GOOGL vs MSFT stock prices",
-    "use_ai": true
+    "ai_synthesis": true
   }'
 ```
 

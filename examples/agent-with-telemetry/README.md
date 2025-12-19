@@ -123,7 +123,7 @@ This script will:
    ```bash
    curl -X POST http://localhost:8092/api/capabilities/research_topic \
      -H "Content-Type: application/json" \
-     -d '{"topic": "latest AI developments", "use_ai": true}'
+     -d '{"topic": "latest AI developments", "ai_synthesis": true}'
    ```
 
 ### Kubernetes Deployment

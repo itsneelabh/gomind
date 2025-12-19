@@ -173,18 +173,18 @@ make help       # Show all commands
 
 ## 🧪 Testing the Agent
 
-### Understanding the `use_ai` Parameter
+### Understanding the `ai_synthesis` Parameter
 
 The research agent supports **hybrid operation** - combining tool orchestration with AI intelligence:
 
-| Scenario | `use_ai` Setting | Behavior | Use Case |
+| Scenario | `ai_synthesis` Setting | Behavior | Use Case |
 |----------|------------------|----------|----------|
 | **Tools Available** | `false` | Tools only, basic text summary | Fast, deterministic results |
 | **Tools Available** | `true` | Tools + AI synthesis | Intelligent analysis of tool results |
 | **No Tools Available** | `false` | Empty results | N/A - need relevant tools |
 | **No Tools Available** | `true` | **AI answers directly** | General knowledge questions |
 
-**Key Discovery**: When `use_ai: true` and no relevant tools are found, the agent automatically falls back to direct AI responses. This enables the agent to answer general questions:
+**Key Discovery**: When `ai_synthesis: true` and no relevant tools are found, the agent automatically falls back to direct AI responses. This enables the agent to answer general questions:
 
 ```bash
 # Example: Product recommendation (no tools available)
@@ -192,7 +192,7 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "Recommend top 3 wifi routers supporting 2 Gbps for home use",
-    "use_ai": true,
+    "ai_synthesis": true,
     "max_results": 1
   }'
 # ✓ Works - AI provides recommendations directly
@@ -202,7 +202,7 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "Recommend top 3 wifi routers supporting 2 Gbps for home use",
-    "use_ai": false
+    "ai_synthesis": false
   }'
 # ✗ Returns empty results - no relevant tools
 ```
@@ -225,7 +225,7 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "weather in New York",
-    "use_ai": true,
+    "ai_synthesis": true,
     "max_results": 5
   }'
 
@@ -368,7 +368,7 @@ func (r *ResearchAgent) handleResearchTopic(w http.ResponseWriter, req *http.Req
     }
     
     // Step 4: Use AI to synthesize (if available)
-    if r.aiClient != nil && request.UseAI {
+    if r.aiClient != nil && request.AISynthesis {
         analysis := r.generateAIAnalysis(ctx, request.Topic, results)
     }
 }
@@ -819,7 +819,7 @@ func (r *ResearchAgent) handleWithTracing(w http.ResponseWriter, req *http.Reque
     // Add attributes
     span.SetAttributes(
         attribute.String("topic", request.Topic),
-        attribute.Bool("ai_enabled", request.UseAI),
+        attribute.Bool("ai_synthesis", request.AISynthesis),
     )
 
     // Pass context through call chain
@@ -958,7 +958,7 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "weather in San Francisco",
-    "use_ai": true,
+    "ai_synthesis": true,
     "max_results": 3
   }'
 ```
@@ -1178,7 +1178,7 @@ When the research-agent is deployed and running, it automatically registers itse
         ],
         "optional_fields": [
           {
-            "name": "use_ai",
+            "name": "ai_synthesis",
             "type": "boolean",
             "example": true,
             "description": "Enable AI-powered analysis and synthesis"

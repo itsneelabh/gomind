@@ -147,7 +147,7 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "current weather conditions in San Francisco",
-    "use_ai": true,
+    "ai_synthesis": true,
     "max_results": 5
   }'
 ```

@@ -87,7 +87,7 @@ curl -X POST http://localhost:8094/orchestrate/natural \
   -H "Content-Type: application/json" \
   -d '{
     "request": "I am planning a trip to Paris next week. What is the weather like and what currency do they use?",
-    "use_ai": true
+    "ai_synthesis": true
   }'
 ```
 
@@ -96,7 +96,7 @@ curl -X POST http://localhost:8094/orchestrate/natural \
 | Parameter | Required | Type | Description | Example |
 |-----------|----------|------|-------------|---------|
 | `request` | Yes | string | Natural language travel research request | `"What's the weather in Tokyo?"` |
-| `use_ai` | No | boolean | Enable AI synthesis (default: true) | `true` |
+| `ai_synthesis` | No | boolean | Enable AI synthesis (default: true) | `true` |
 | `metadata` | No | object | Additional context and preferences | `{"user_preferences": {...}}` |
 
 The orchestrator:
@@ -146,7 +146,7 @@ curl -X POST http://localhost:8094/orchestrate/natural \
   -H "Content-Type: application/json" \
   -d '{
     "request": "I am planning a 2-week vacation to Tokyo, Japan starting next month. Can you help me with: 1) What is the current weather like in Tokyo? 2) What currency do they use in Japan and how much would 5000 USD convert to? 3) Tell me about Japan - population, languages spoken, and capital city. 4) Are there any recent travel news or advisories about Tokyo I should know about?",
-    "use_ai": true
+    "ai_synthesis": true
   }'
 ```
 
@@ -169,7 +169,7 @@ curl -X POST http://localhost:8094/orchestrate/natural \
   -H "Content-Type: application/json" \
   -d '{
     "request": "I want to compare traveling to Paris, France versus Berlin, Germany for a winter holiday. For each city, I need: the current weather conditions, currency information and how much 2000 USD would convert to their local currency, population and what languages are spoken, and any travel news about these cities.",
-    "use_ai": true
+    "ai_synthesis": true
   }'
 ```
 
@@ -419,3 +419,7 @@ kubectl apply -f ../weather-tool-v2/k8-deployment.yaml
 - **agent-with-resilience** - Resilience patterns (circuit breakers, retries)
 - **agent-with-telemetry** - Distributed tracing and metrics
 - **workflow-example** - Pure workflow execution without orchestration
+
+## TODO
+
+- [ ] **YAML Workflow Support** - Replace hardcoded Go workflow definitions with YAML files using the framework's `WorkflowEngine.ParseWorkflowYAML()`. This would demonstrate the declarative workflow feature documented in the orchestration module.
