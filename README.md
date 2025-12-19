@@ -3,7 +3,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **Note:** This framework is currently under active feature development. Please wait for the BETA release.
+> **Note:** This framework is currently under active feature development. All the examples are working and can be run in a local Kind cluster. However, the framework has not yet reached Beta release.
 
 GoMind is a comprehensive platform for building autonomous AI agent systems, designed from the ground up to operate reliably in production environments. It provides AI-driven orchestration for multi-agent coordination, seamless integration with multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, DeepSeek, and more) as well as your own in-house hosted models via OpenAI-compatible endpoints, Redis-based service discovery for dynamic tool and agent networks, production-grade resilience patterns (circuit breakers, intelligent retry, panic recovery), and full observability through OpenTelemetry integration with distributed tracing and unified metrics. Written in Go for minimal resource footprint and Kubernetes-native deployment.
 
