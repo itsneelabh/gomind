@@ -189,7 +189,7 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 	summary := r.createBasicSummary(request.Topic, results)
 	var aiAnalysis string
 
-	if request.UseAI && r.aiClient != nil {
+	if request.AISynthesis && r.aiClient != nil {
 		aiStart := time.Now()
 
 		aiAnalysis = r.generateAIAnalysis(ctx, request.Topic, results)

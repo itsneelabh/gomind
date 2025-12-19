@@ -532,7 +532,7 @@ test_orchestration() {
     log_info "Step 4: Test natural language orchestration"
     curl -s -X POST http://localhost:8094/api/orchestrate/natural \
         -H "Content-Type: application/json" \
-        -d '{"request":"What is the weather like in Tokyo?","use_ai":true}' | jq '{request_id, tools_used, confidence}' 2>/dev/null || echo "Request sent"
+        -d '{"request":"What is the weather like in Tokyo?","ai_synthesis":true}' | jq '{request_id, tools_used, confidence}' 2>/dev/null || echo "Request sent"
     echo ""
 
     log_success "Orchestration test complete!"

@@ -138,7 +138,7 @@ func (r *ResearchAgent) handleResearchTopic(rw http.ResponseWriter, req *http.Re
 	summary := r.createBasicSummary(request.Topic, results)
 	var aiAnalysis string
 
-	if request.UseAI && r.aiClient != nil && len(results) > 0 {
+	if request.AISynthesis && r.aiClient != nil && len(results) > 0 {
 		aiAnalysis = r.generateAIAnalysis(ctx, request.Topic, results)
 		if aiAnalysis != "" {
 			summary = aiAnalysis

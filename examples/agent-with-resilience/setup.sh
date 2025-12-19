@@ -426,7 +426,7 @@ test_resilience() {
     log_info "Step 2: Test normal operation"
     curl -s -X POST http://localhost:8093/api/capabilities/research_topic \
         -H "Content-Type: application/json" \
-        -d '{"topic":"groceries","sources":["grocery-service"],"use_ai":false}' | jq '{success_rate, partial}' 2>/dev/null || echo "Request sent"
+        -d '{"topic":"groceries","sources":["grocery-service"],"ai_synthesis":false}' | jq '{success_rate, partial}' 2>/dev/null || echo "Request sent"
     echo ""
 
     # Enable rate limiting
@@ -442,7 +442,7 @@ test_resilience() {
         echo "Request $i:"
         curl -s -X POST http://localhost:8093/api/capabilities/research_topic \
             -H "Content-Type: application/json" \
-            -d '{"topic":"groceries","sources":["grocery-service"],"use_ai":false}' | jq '{success_rate, partial}' 2>/dev/null || echo "Request sent"
+            -d '{"topic":"groceries","sources":["grocery-service"],"ai_synthesis":false}' | jq '{success_rate, partial}' 2>/dev/null || echo "Request sent"
     done
     echo ""
 
@@ -456,7 +456,7 @@ test_resilience() {
     curl -s -X POST http://localhost:8081/admin/reset | jq . 2>/dev/null || echo "Reset sent"
     curl -s -X POST http://localhost:8093/api/capabilities/research_topic \
         -H "Content-Type: application/json" \
-        -d '{"topic":"groceries","sources":["grocery-service"],"use_ai":false}' | jq '{success_rate, partial}' 2>/dev/null || echo "Recovery request sent"
+        -d '{"topic":"groceries","sources":["grocery-service"],"ai_synthesis":false}' | jq '{success_rate, partial}' 2>/dev/null || echo "Recovery request sent"
 
     log_success "Resilience test complete!"
 }

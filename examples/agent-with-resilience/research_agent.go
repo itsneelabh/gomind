@@ -48,8 +48,9 @@ type ResearchRequest struct {
 	// Metadata provides additional context or parameters
 	Metadata map[string]string `json:"metadata,omitempty"`
 
-	// UseAI enables AI-powered analysis and synthesis
-	UseAI bool `json:"use_ai,omitempty"`
+	// AISynthesis enables AI-powered synthesis of tool results
+	// When false: Returns raw tool data only (AI still used for tool selection)
+	AISynthesis bool `json:"ai_synthesis,omitempty"`
 
 	// WorkflowID enables tracking across multiple related requests
 	WorkflowID string `json:"workflow_id,omitempty"`
@@ -216,10 +217,10 @@ func (r *ResearchAgent) registerCapabilities() {
 					Description: "Maximum number of results to return",
 				},
 				{
-					Name:        "use_ai",
+					Name:        "ai_synthesis",
 					Type:        "boolean",
 					Example:     "true",
-					Description: "Whether to use AI for analysis and synthesis",
+					Description: "Enable AI synthesis of tool results into natural language",
 				},
 				{
 					Name:        "workflow_id",

@@ -51,7 +51,7 @@ Content-Type: application/json
   "country": "Japan",
   "base_currency": "USD",
   "amount": 1000,
-  "use_ai": false
+  "ai_synthesis": false
 }
 ```
 
@@ -63,7 +63,7 @@ Content-Type: application/json
 | `country` | string | Yes | Country name for country info lookup |
 | `base_currency` | string | Yes | Source currency for conversion (e.g., "USD") |
 | `amount` | number | Yes | Amount to convert for currency rates |
-| `use_ai` | boolean | No | If `true`, AI synthesizes a human-readable response. If `false` (default), returns raw JSON data. |
+| `ai_synthesis` | boolean | No | If `true`, AI synthesizes a human-readable response. If `false` (default), returns raw JSON data. |
 
 ### How Parameters Flow Through the Workflow
 
@@ -76,16 +76,16 @@ base_currency: "USD"         →  {{base_currency}}            →  "USD"
 amount: 1000                 →  {{amount}}                   →  1000 (number preserved)
 ```
 
-### The `use_ai` Flag
+### The `ai_synthesis` Flag
 
 This flag controls **response synthesis only** - it does NOT affect workflow generation:
 
-| use_ai | Workflow Steps | Response Format |
+| ai_synthesis | Workflow Steps | Response Format |
 |--------|----------------|-----------------|
 | `false` | Predefined (same) | Raw JSON from all tools concatenated |
 | `true` | Predefined (same) | AI-synthesized human-readable summary |
 
-**Important:** Whether `use_ai` is `true` or `false`, the **same workflow steps execute**. The only difference is how the final response is formatted.
+**Important:** Whether `ai_synthesis` is `true` or `false`, the **same workflow steps execute**. The only difference is how the final response is formatted.
 
 ---
 
@@ -290,7 +290,7 @@ Content-Type: application/json
   "country": "Japan",
   "base_currency": "USD",
   "amount": 1000,
-  "use_ai": false
+  "ai_synthesis": false
 }
 ```
 
@@ -306,7 +306,7 @@ if req.Parameters == nil || len(req.Parameters) == 0 {
         req.Parameters = make(map[string]interface{})
         knownFields := map[string]bool{
             "request": true, "workflow_name": true, "parameters": true,
-            "use_ai": true, "metadata": true,
+            "ai_synthesis": true, "metadata": true,
         }
         for key, value := range rawBody {
             if !knownFields[key] {
@@ -446,7 +446,7 @@ curl -X POST http://localhost:8094/orchestrate/travel-research \
     "country": "Japan",
     "base_currency": "USD",
     "amount": 1000,
-    "use_ai": false
+    "ai_synthesis": false
   }'
 ```
 
@@ -668,17 +668,17 @@ kubectl logs -n gomind-examples -l app=news-tool --tail=20
 
 ## AI Response Synthesis
 
-When `use_ai: true` is set, the agent uses an AI provider (OpenAI, Groq, etc.) to synthesize a human-readable response from the raw tool outputs.
+When `ai_synthesis: true` is set, the agent uses an AI provider (OpenAI, Groq, etc.) to synthesize a human-readable response from the raw tool outputs.
 
-### Comparison: `use_ai: false` vs `use_ai: true`
+### Comparison: `ai_synthesis: false` vs `ai_synthesis: true`
 
-#### With `use_ai: false` (Raw JSON)
+#### With `ai_synthesis: false` (Raw JSON)
 
 **Request:**
 ```bash
 curl -X POST http://localhost:8094/orchestrate/travel-research \
   -H "Content-Type: application/json" \
-  -d '{"destination":"Tokyo, Japan","country":"Japan","base_currency":"USD","amount":1000,"use_ai":false}'
+  -d '{"destination":"Tokyo, Japan","country":"Japan","base_currency":"USD","amount":1000,"ai_synthesis":false}'
 ```
 
 **Response (`response` field):**
@@ -694,13 +694,13 @@ news-tool: {"data":{"total_articles":229,"articles":[...]}}
 - **Response format:** Raw JSON concatenated from each tool
 - **Use case:** When you want to process the data programmatically
 
-#### With `use_ai: true` (AI-Synthesized)
+#### With `ai_synthesis: true` (AI-Synthesized)
 
 **Request:**
 ```bash
 curl -X POST http://localhost:8094/orchestrate/travel-research \
   -H "Content-Type: application/json" \
-  -d '{"destination":"Tokyo, Japan","country":"Japan","base_currency":"USD","amount":1000,"use_ai":true}'
+  -d '{"destination":"Tokyo, Japan","country":"Japan","base_currency":"USD","amount":1000,"ai_synthesis":true}'
 ```
 
 **Response (`response` field):**
@@ -761,7 +761,7 @@ If you want to know more, feel free to ask! Safe travels! 🌏✈️🇯🇵
 
 ### How AI Synthesis Works
 
-1. **Workflow Execution:** Same predefined steps execute regardless of `use_ai` value
+1. **Workflow Execution:** Same predefined steps execute regardless of `ai_synthesis` value
 2. **Data Collection:** All tool responses are gathered
 3. **AI Prompt:** The raw data is sent to the AI provider with a synthesis prompt
 4. **Response Generation:** AI creates a coherent, human-friendly summary
@@ -783,7 +783,7 @@ If you want to know more, feel free to ask! Safe travels! 🌏✈️🇯🇵
 │                          │                                   │
 │         ┌────────────────┴────────────────┐                  │
 │         │                                 │                  │
-│    use_ai: false                    use_ai: true             │
+│    ai_synthesis: false                    ai_synthesis: true             │
 │         │                                 │                  │
 │         ▼                                 ▼                  │
 │  ┌─────────────────┐            ┌──────────────────┐        │
@@ -815,4 +815,4 @@ env:
     value: "openai"  # or "groq", "anthropic", etc.
 ```
 
-Without a valid AI provider configuration, `use_ai: true` will fall back to returning raw JSON.
+Without a valid AI provider configuration, `ai_synthesis: true` will fall back to returning raw JSON.

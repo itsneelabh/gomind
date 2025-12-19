@@ -66,7 +66,7 @@ func (t *TravelResearchAgent) handleNaturalOrchestration(w http.ResponseWriter, 
 	// Add span event before orchestration
 	telemetry.AddSpanEvent(ctx, "orchestration_started",
 		attribute.String("request", req.Request),
-		attribute.Bool("use_ai", true),
+		attribute.Bool("ai_synthesis", true),
 	)
 
 	// Process through AI orchestrator
@@ -177,7 +177,7 @@ func (t *TravelResearchAgent) handleWorkflowExecution(w http.ResponseWriter, r *
 			// Known OrchestrationRequest fields to skip
 			knownFields := map[string]bool{
 				"request": true, "workflow_name": true, "parameters": true,
-				"use_ai": true, "metadata": true,
+				"ai_synthesis": true, "metadata": true,
 			}
 			for key, value := range rawBody {
 				if !knownFields[key] {
@@ -217,7 +217,7 @@ func (t *TravelResearchAgent) handleWorkflowExecution(w http.ResponseWriter, r *
 	telemetry.AddSpanEvent(ctx, "workflow_started",
 		attribute.String("workflow", workflowName),
 		attribute.Int("step_count", len(workflow.Steps)),
-		attribute.Bool("use_ai", req.UseAI),
+		attribute.Bool("ai_synthesis", req.AISynthesis),
 	)
 
 	// Convert workflow to routing plan
@@ -256,7 +256,7 @@ func (t *TravelResearchAgent) handleWorkflowExecution(w http.ResponseWriter, r *
 
 	// Synthesize response if AI is available
 	var synthesizedResponse string
-	if t.AI != nil && req.UseAI {
+	if t.AI != nil && req.AISynthesis {
 		synthesizedResponse, err = t.synthesizeWorkflowResults(ctx, workflow.Name, result)
 		if err != nil {
 			t.Logger.WarnWithContext(ctx, "AI synthesis failed, using raw results", map[string]interface{}{

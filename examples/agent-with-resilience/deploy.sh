@@ -205,7 +205,7 @@ print_summary() {
     echo ""
     echo "  curl -X POST http://localhost:8093/api/capabilities/research_topic \\"
     echo "    -H \"Content-Type: application/json\" \\"
-    echo "    -d '{\"topic\": \"weather in New York\", \"use_ai\": false}'"
+    echo "    -d '{\"topic\": \"weather in New York\", \"ai_synthesis\": false}'"
     echo ""
 }
 

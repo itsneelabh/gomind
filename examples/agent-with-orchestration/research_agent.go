@@ -64,8 +64,9 @@ type OrchestrationRequest struct {
 	// Parameters are workflow-specific parameters
 	Parameters map[string]interface{} `json:"parameters,omitempty"`
 
-	// UseAI enables AI synthesis of results (default: true)
-	UseAI bool `json:"use_ai"`
+	// AISynthesis enables AI synthesis of results (default: true)
+	// When false: Returns raw tool data only (AI still used for planning)
+	AISynthesis bool `json:"ai_synthesis"`
 
 	// Metadata provides additional context
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
@@ -479,10 +480,10 @@ func (t *TravelResearchAgent) registerCapabilities() {
 			},
 			OptionalFields: []core.FieldHint{
 				{
-					Name:        "use_ai",
+					Name:        "ai_synthesis",
 					Type:        "boolean",
 					Example:     "true",
-					Description: "Enable AI synthesis of results (default: true)",
+					Description: "Enable AI synthesis of tool results into natural language (default: true)",
 				},
 				{
 					Name:        "metadata",

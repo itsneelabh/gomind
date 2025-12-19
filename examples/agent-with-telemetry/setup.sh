@@ -286,7 +286,7 @@ cmd_test() {
     print_info "Testing research query..."
     curl -s -X POST http://localhost:8092/api/capabilities/research_topic \
         -H "Content-Type: application/json" \
-        -d '{"topic": "latest AI trends", "use_ai": false}' | jq . 2>/dev/null || echo "(install jq for pretty output)"
+        -d '{"topic": "latest AI trends", "ai_synthesis": false}' | jq . 2>/dev/null || echo "(install jq for pretty output)"
 
     # Kill port forward
     kill $PF_PID 2>/dev/null || true
