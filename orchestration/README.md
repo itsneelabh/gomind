@@ -650,6 +650,37 @@ steps:
 # ${steps.stepName.output.field} - Specific field from output
 ```
 
+## 🎯 When to Use the Orchestration Module
+
+Use this module when you need capabilities beyond basic tool/agent coordination:
+
+| Capability | Without Orchestration | With Orchestration |
+|------------|----------------------|-------------------|
+| Tool discovery | Manual HTTP calls | Automatic via registry |
+| Error handling | Fail or basic retry | **AI analyzes error, corrects parameters** |
+| Multi-tool workflows | Custom coordination code | Declarative YAML or AI-planned |
+| Parameter generation | Manual payload construction | **LLM-generated from natural language** |
+| Retry logic | Simple exponential backoff | **Semantic retry with parameter correction** |
+
+### Key Features You Get
+
+1. **Intelligent Error Recovery (Layer 4 Semantic Retry)**
+   - LLM analyzes why a tool call failed
+   - Automatically corrects parameters (e.g., "Flower Mound, TX" → "Flower Mound, US")
+   - Retries with corrected payload
+
+2. **AI-Powered Orchestration**
+   - Natural language request processing
+   - Dynamic tool/agent selection
+   - Intelligent parameter binding
+
+3. **Workflow Engine**
+   - Declarative YAML workflows
+   - Parallel and sequential execution
+   - Template variable interpolation
+
+> **Note**: If your agent only needs basic tool calls without intelligent retry, you can use `core` directly. For smarter error recovery, use this module.
+
 ## 🎭 When to Use Each Mode
 
 ### Use AI Orchestration When:

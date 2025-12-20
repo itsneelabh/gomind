@@ -370,6 +370,13 @@ const (
 
 Agents receive errors from tools and decide how to handle them. With AI, agents can even analyze errors and generate corrected payloads.
 
+> **Production Recommendation**: The retry logic shown in this section is for **educational purposes**. For production agents, use the **orchestration module** which provides:
+> - **Layer 4 Semantic Retry**: LLM-powered error analysis
+> - **Automatic Parameter Correction**: AI fixes payloads based on error context
+> - **Workflow-Level Coordination**: Retry logic integrated with multi-step workflows
+>
+> See: [orchestration/README.md](../orchestration/README.md#-when-to-use-the-orchestration-module)
+
 ### The Retry Decision Flow
 
 When a tool returns an error, the agent needs to answer two questions:

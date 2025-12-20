@@ -256,10 +256,25 @@ With the rise of AI and Large Language Models (LLMs), we need:
 
 ### ❌ NOT Included (Bring Your Own):
 - **AI/LLM integration** - Add via the `ai` module
-- **Workflow orchestration** - Add via the `orchestration` module  
+- **Workflow orchestration** - Add via the `orchestration` module
 - **Distributed tracing** - Add via the `telemetry` module
 - **Circuit breakers** - Add via the `resilience` module
-- **Actual business logic** - That's your job! 😊
+- **Actual business logic** - That's your job!
+
+### 🧠 Core vs Orchestration: Error Handling
+
+Core provides **error types and basic classification**. For **intelligent retry with AI**, use the orchestration module:
+
+| Feature | Core Module | Orchestration Module |
+|---------|-------------|---------------------|
+| Error types (`ToolError`, `ToolResponse`) | ✅ | Uses core types |
+| Error categories (`CategoryNotFound`, etc.) | ✅ | Uses core types |
+| Simple retry check (`Retryable` field) | ✅ | - |
+| **LLM error analysis** | ❌ | ✅ |
+| **AI-powered parameter correction** | ❌ | ✅ |
+| **Semantic retry (Layer 4)** | ❌ | ✅ |
+
+> **Need smarter error recovery?** Use the `orchestration` module which provides AI-powered retry with automatic parameter correction. See [orchestration/README.md](../orchestration/README.md).
 
 ### 🤖 Adding AI Support (Optional)
 

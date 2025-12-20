@@ -11,6 +11,8 @@ This example extends the basic [agent-example](../agent-example) with:
 - **Multi-Environment Profiles**: Development (100% sampling), Staging (10%), Production (0.1%)
 - **Production-Ready Configuration**: Environment-based telemetry with graceful degradation
 
+> **Scope**: This example focuses on **telemetry and observability**. For intelligent error handling with AI-powered retry and parameter correction, see [agent-with-orchestration](../agent-with-orchestration/) which uses the orchestration module.
+
 ## What You'll Learn
 
 - How to integrate the GoMind telemetry module into your agents

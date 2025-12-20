@@ -809,8 +809,23 @@ kind delete cluster --name gomind-demo
 **"I want production-grade AI reliability"**
 → `ai-multi-provider` → `telemetry` → `error_handling`
 
+**"I want intelligent error handling with AI-powered retry"**
+→ `agent-with-orchestration` → Uses orchestration module for semantic retry
+→ AI analyzes errors and corrects parameters automatically
+
 **"I want to understand the framework patterns"**
 → `tool-example` → `agent-example` → `context_propagation`
+
+### 📊 Error Handling Progression
+
+| Level | Example | Error Handling Capability |
+|-------|---------|--------------------------|
+| Basic | `agent-example` | Fails on error (no retry) |
+| Observability | `agent-with-telemetry` | Metrics + tracing (no intelligent retry) |
+| **Intelligent** | `agent-with-orchestration` | **AI-powered retry with parameter correction** |
+| Production | `agent-with-resilience` | Circuit breakers + intelligent retry |
+
+> **Note**: For AI-powered error correction, use the `orchestration` module. See [orchestration/README.md](../orchestration/README.md#-when-to-use-the-orchestration-module).
 
 ## 🏗️ Building Your Own Examples
 

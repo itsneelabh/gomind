@@ -27,38 +27,13 @@ type ToolCapabilityPair struct {
 }
 
 // ============================================================================
-// Intelligent Error Handling - Phase 2: Agent-Side AI-Powered Retry
+// Tool Calling - Simple HTTP-based tool invocation
 // ============================================================================
 //
-// This agent uses core.ToolError and core.ToolResponse for protocol compliance.
-// Agent-specific types (RetryConfig, ErrorContext) and retry logic stay local.
-// See: docs/INTELLIGENT_ERROR_HANDLING_ARCHITECTURE.md
-
-// RetryConfig controls the agent's retry behavior (agent-specific configuration)
-type RetryConfig struct {
-	MaxRetries      int           // Maximum retry attempts (default: 3)
-	UseAI           bool          // Use AI to analyze errors and generate fixes
-	BackoffDuration time.Duration // Wait between retries (for 5xx/429)
-}
-
-// ErrorContext provides AI with full context for error analysis (agent-specific)
-type ErrorContext struct {
-	HTTPStatus      int                    // HTTP status code
-	OriginalRequest map[string]interface{} // The payload that was sent
-	ToolError       *core.ToolError        // Structured error from tool (uses core type)
-	ToolName        string
-	Capability      string
-	AttemptNumber   int
-}
-
-// DefaultRetryConfig returns sensible retry defaults
-func DefaultRetryConfig() RetryConfig {
-	return RetryConfig{
-		MaxRetries:      3,
-		UseAI:           true,
-		BackoffDuration: 1 * time.Second,
-	}
-}
+// This example focuses on TELEMETRY, not intelligent retry.
+// For AI-powered retry with parameter correction, see agent-with-orchestration
+// which uses the orchestration module's Layer 4 Semantic Retry.
+// See: orchestration/README.md
 
 // selectToolsAndCapabilities performs AI-powered combined tool+capability selection
 // This is OPTIMIZATION #2: Reduces from 3 AI calls to 2 AI calls per request
@@ -165,32 +140,10 @@ Select the single best match.`, topic, catalog.String())
 	return nil
 }
 
-// callToolWithCapability calls a tool with a pre-selected capability (no AI capability selection needed)
-// Enhanced with intelligent error handling and AI-powered retry
+// callToolWithCapability calls a tool with a pre-selected capability
+// This is a simple implementation focused on telemetry - no intelligent retry.
+// For AI-powered retry with parameter correction, use the orchestration module.
 func (r *ResearchAgent) callToolWithCapability(ctx context.Context, tool *core.ServiceInfo, capability *core.Capability, topic string) *ToolResult {
-	// Use default retry config - can be made configurable via environment
-	config := DefaultRetryConfig()
-	if os.Getenv("GOMIND_AGENT_MAX_RETRIES") != "" {
-		if n, err := fmt.Sscanf(os.Getenv("GOMIND_AGENT_MAX_RETRIES"), "%d", &config.MaxRetries); err != nil || n != 1 {
-			config.MaxRetries = 3
-		}
-	}
-	if os.Getenv("GOMIND_AGENT_USE_AI_CORRECTION") == "false" {
-		config.UseAI = false
-	}
-
-	return r.callToolWithIntelligentRetry(ctx, tool, capability, topic, config)
-}
-
-// callToolWithIntelligentRetry calls a tool with AI-powered error analysis and retry logic
-// Implements HTTP status code-based retry strategy per INTELLIGENT_ERROR_HANDLING.md
-func (r *ResearchAgent) callToolWithIntelligentRetry(
-	ctx context.Context,
-	tool *core.ServiceInfo,
-	capability *core.Capability,
-	topic string,
-	config RetryConfig,
-) *ToolResult {
 	startTime := time.Now()
 
 	endpoint := capability.Endpoint
@@ -200,8 +153,8 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 
 	url := fmt.Sprintf("http://%s:%d%s", tool.Address, tool.Port, endpoint)
 
-	// Generate initial payload using AI
-	currentPayload, err := r.generateToolPayloadWithAI(ctx, topic, tool, capability)
+	// Generate payload using AI
+	payload, err := r.generateToolPayloadWithAI(ctx, topic, tool, capability)
 	if err != nil {
 		r.Logger.Error("AI payload generation failed", map[string]interface{}{
 			"tool":  tool.Name,
@@ -217,266 +170,99 @@ func (r *ResearchAgent) callToolWithIntelligentRetry(
 		}
 	}
 
-	r.Logger.Info("Calling tool with intelligent retry enabled", map[string]interface{}{
-		"tool":        tool.Name,
-		"capability":  capability.Name,
-		"endpoint":    endpoint,
-		"topic":       topic,
-		"max_retries": config.MaxRetries,
+	r.Logger.Info("Calling tool capability", map[string]interface{}{
+		"tool":       tool.Name,
+		"capability": capability.Name,
+		"endpoint":   endpoint,
+		"topic":      topic,
 	})
 
-	var lastError *core.ToolError
-	var lastHTTPStatus int
+	// Make HTTP request
+	jsonData, _ := json.Marshal(payload)
+	httpCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
-	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
-		if attempt > 0 {
-			r.Logger.Info("Retry attempt", map[string]interface{}{
-				"tool":    tool.Name,
-				"attempt": attempt + 1,
-				"payload": currentPayload,
-			})
-			telemetry.RecordToolCallRetry(telemetry.ModuleAgent, tool.Name)
+	req, err := http.NewRequestWithContext(httpCtx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		r.Logger.Error("Tool call request creation failed", map[string]interface{}{"tool": tool.Name, "error": err.Error()})
+		telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, "request_creation")
+		return &ToolResult{
+			ToolName:   tool.Name,
+			Capability: capability.Name,
+			Success:    false,
+			Error:      fmt.Sprintf("Request creation failed: %v", err),
+			Duration:   time.Since(startTime).String(),
 		}
+	}
+	req.Header.Set("Content-Type", "application/json")
 
-		// Make HTTP request
-		jsonData, _ := json.Marshal(currentPayload)
-		httpCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		req, err := http.NewRequestWithContext(httpCtx, "POST", url, bytes.NewBuffer(jsonData))
-		if err != nil {
-			cancel()
-			r.Logger.Error("Tool call request creation failed", map[string]interface{}{"tool": tool.Name, "error": err.Error()})
-			telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, "request_creation")
-			return &ToolResult{
-				ToolName:   tool.Name,
-				Capability: capability.Name,
-				Success:    false,
-				Error:      fmt.Sprintf("Request creation failed: %v", err),
-				Duration:   time.Since(startTime).String(),
-			}
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		r.Logger.Error("Tool call HTTP request failed", map[string]interface{}{
+			"tool":  tool.Name,
+			"error": err.Error(),
+		})
+		telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, classifyError(err))
+		return &ToolResult{
+			ToolName:   tool.Name,
+			Capability: capability.Name,
+			Success:    false,
+			Error:      fmt.Sprintf("HTTP call failed: %v", err),
+			Duration:   time.Since(startTime).String(),
 		}
-		req.Header.Set("Content-Type", "application/json")
+	}
+	defer resp.Body.Close()
 
-		resp, err := r.httpClient.Do(req)
-		cancel()
-
-		// Network error - might be retryable
-		if err != nil {
-			r.Logger.Warn("Tool call network error", map[string]interface{}{
-				"tool":    tool.Name,
-				"error":   err.Error(),
-				"attempt": attempt + 1,
-			})
-			telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, classifyError(err))
-			if attempt < config.MaxRetries {
-				time.Sleep(config.BackoffDuration)
-				continue // Retry with same payload
-			}
-			return &ToolResult{
-				ToolName:   tool.Name,
-				Capability: capability.Name,
-				Success:    false,
-				Error:      fmt.Sprintf("HTTP call failed after %d attempts: %v", attempt+1, err),
-				Duration:   time.Since(startTime).String(),
-			}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		r.Logger.Error("Tool call response reading failed", map[string]interface{}{"tool": tool.Name, "error": err.Error()})
+		telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, "response_reading")
+		return &ToolResult{
+			ToolName:   tool.Name,
+			Capability: capability.Name,
+			Success:    false,
+			Error:      fmt.Sprintf("Response reading failed: %v", err),
+			Duration:   time.Since(startTime).String(),
 		}
+	}
 
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			r.Logger.Error("Tool call response reading failed", map[string]interface{}{"tool": tool.Name, "error": err.Error()})
-			telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, "response_reading")
-			if attempt < config.MaxRetries {
-				continue
-			}
-			return &ToolResult{
-				ToolName:   tool.Name,
-				Capability: capability.Name,
-				Success:    false,
-				Error:      fmt.Sprintf("Response reading failed: %v", err),
-				Duration:   time.Since(startTime).String(),
-			}
-		}
-
-		lastHTTPStatus = resp.StatusCode
-
-		// ===== SUCCESS: 2xx status codes =====
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			// Check if response is in ToolResponse format
-			toolResp, err := r.parseToolResponse(body)
-			if err == nil && !toolResp.Success && toolResp.Error != nil {
-				// Tool returned 200 but with error in body (legacy pattern)
-				// Treat as error and potentially retry
-				lastError = toolResp.Error
-				r.Logger.Warn("Tool returned success HTTP but error in body", map[string]interface{}{
-					"tool":       tool.Name,
-					"error_code": toolResp.Error.Code,
-				})
-			} else {
-				// Actual success
-				var responseData interface{}
-				if toolResp != nil {
-					responseData = toolResp.Data
-				} else if err := json.Unmarshal(body, &responseData); err != nil {
-					responseData = string(body)
-				}
-
-				if attempt > 0 {
-					r.Logger.Info("Tool call succeeded after retry", map[string]interface{}{
-						"tool":    tool.Name,
-						"attempt": attempt + 1,
-					})
-				}
-
-				r.Logger.Info("Tool call completed", map[string]interface{}{
-					"tool":       tool.Name,
-					"capability": capability.Name,
-					"success":    true,
-					"topic":      topic,
-				})
-				telemetry.RecordToolCall(telemetry.ModuleAgent, tool.Name,
-					float64(time.Since(startTime).Milliseconds()), "success")
-
-				return &ToolResult{
-					ToolName:   tool.Name,
-					Capability: capability.Name,
-					Data:       responseData,
-					Success:    true,
-					Duration:   time.Since(startTime).String(),
-				}
-			}
-		}
-
-		// ===== Parse error response =====
-		toolResp, parseErr := r.parseToolResponse(body)
-		if parseErr == nil && toolResp.Error != nil {
-			lastError = toolResp.Error
-		} else {
-			// Create a generic error if not in ToolResponse format
-			lastError = &core.ToolError{
-				Code:      fmt.Sprintf("HTTP_%d", resp.StatusCode),
-				Message:   string(body),
-				Category:  "SERVICE_ERROR",
-				Retryable: resp.StatusCode >= 500,
-			}
-		}
-
-		// Log the error
-		r.Logger.Warn("Tool call returned error", map[string]interface{}{
+	// Check for non-2xx status codes
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		r.Logger.Error("Tool call returned error status", map[string]interface{}{
 			"tool":        tool.Name,
-			"http_status": resp.StatusCode,
-			"error_code":  lastError.Code,
-			"error_msg":   lastError.Message,
-			"attempt":     attempt + 1,
+			"status_code": resp.StatusCode,
+			"response":    string(body),
 		})
 		telemetry.RecordToolCallError(telemetry.ModuleAgent, tool.Name, fmt.Sprintf("http_%d", resp.StatusCode))
-
-		// ===== HTTP Status Code Decision Flow =====
-
-		// 401/403: Auth errors - NOT retryable (agent can't fix credentials)
-		if resp.StatusCode == 401 || resp.StatusCode == 403 {
-			r.Logger.Error("Auth error - not retryable", map[string]interface{}{
-				"tool":        tool.Name,
-				"http_status": resp.StatusCode,
-			})
-			return &ToolResult{
-				ToolName:   tool.Name,
-				Capability: capability.Name,
-				Success:    false,
-				Error:      fmt.Sprintf("Authentication error (HTTP %d): %s", resp.StatusCode, lastError.Message),
-				Duration:   time.Since(startTime).String(),
-			}
-		}
-
-		// 429: Rate limit - retryable after backoff
-		if resp.StatusCode == 429 {
-			retryAfter := r.parseRetryAfter(lastError)
-			r.Logger.Warn("Rate limited - backing off", map[string]interface{}{
-				"tool":        tool.Name,
-				"retry_after": retryAfter,
-			})
-			if attempt < config.MaxRetries {
-				time.Sleep(retryAfter)
-				continue // Retry with SAME payload
-			}
-		}
-
-		// 5xx: Server error - retry with SAME payload (transient)
-		if resp.StatusCode >= 500 {
-			r.Logger.Warn("Server error - retrying with same payload", map[string]interface{}{
-				"tool":        tool.Name,
-				"http_status": resp.StatusCode,
-			})
-			if attempt < config.MaxRetries {
-				time.Sleep(config.BackoffDuration)
-				continue // Retry with SAME payload
-			}
-		}
-
-		// 4xx: Client error - check ToolError.Retryable and use AI to correct
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			if lastError == nil || !lastError.Retryable {
-				r.Logger.Warn("Client error - not retryable", map[string]interface{}{
-					"tool":        tool.Name,
-					"http_status": resp.StatusCode,
-					"retryable":   lastError != nil && lastError.Retryable,
-				})
-				return &ToolResult{
-					ToolName:   tool.Name,
-					Capability: capability.Name,
-					Success:    false,
-					Error:      fmt.Sprintf("Client error (HTTP %d): %s", resp.StatusCode, lastError.Message),
-					Duration:   time.Since(startTime).String(),
-				}
-			}
-
-			// Retryable 4xx - use AI to CORRECT the payload
-			if config.UseAI && r.aiClient != nil && attempt < config.MaxRetries {
-				r.Logger.Info("Using AI to analyze and correct error", map[string]interface{}{
-					"tool":       tool.Name,
-					"error_code": lastError.Code,
-				})
-
-				correctedPayload, err := r.analyzeErrorAndCorrect(ctx, ErrorContext{
-					HTTPStatus:      resp.StatusCode,
-					OriginalRequest: currentPayload,
-					ToolError:       lastError,
-					ToolName:        tool.Name,
-					Capability:      capability.Name,
-					AttemptNumber:   attempt + 1,
-				})
-
-				if err != nil || correctedPayload == nil {
-					r.Logger.Warn("AI couldn't fix the error", map[string]interface{}{
-						"error_code": lastError.Code,
-						"ai_error":   err,
-					})
-					// Can't fix, don't retry
-					break
-				}
-
-				r.Logger.Info("AI corrected payload for retry", map[string]interface{}{
-					"tool":              tool.Name,
-					"attempt":           attempt + 2,
-					"corrected_payload": correctedPayload,
-				})
-
-				currentPayload = correctedPayload
-				continue // Retry with CORRECTED payload
-			}
+		return &ToolResult{
+			ToolName:   tool.Name,
+			Capability: capability.Name,
+			Success:    false,
+			Error:      fmt.Sprintf("Tool returned status %d: %s", resp.StatusCode, string(body)),
+			Duration:   time.Since(startTime).String(),
 		}
 	}
 
-	// All retries exhausted
-	errorMsg := "Unknown error"
-	if lastError != nil {
-		errorMsg = lastError.Message
+	// Parse response
+	var responseData interface{}
+	if err := json.Unmarshal(body, &responseData); err != nil {
+		responseData = string(body)
 	}
+
+	r.Logger.Info("Tool call completed", map[string]interface{}{
+		"tool":       tool.Name,
+		"capability": capability.Name,
+		"success":    true,
+		"topic":      topic,
+	})
+	telemetry.RecordToolCall(telemetry.ModuleAgent, tool.Name,
+		float64(time.Since(startTime).Milliseconds()), "success")
 
 	return &ToolResult{
 		ToolName:   tool.Name,
 		Capability: capability.Name,
-		Success:    false,
-		Error:      fmt.Sprintf("Failed after %d attempts (HTTP %d): %s", config.MaxRetries+1, lastHTTPStatus, errorMsg),
+		Data:       responseData,
+		Success:    true,
 		Duration:   time.Since(startTime).String(),
 	}
 }
@@ -1316,171 +1102,3 @@ func (r *ResearchAgent) validatePayload(payload map[string]interface{}, schema m
 	return nil
 }
 
-// ============================================================================
-// Intelligent Error Handling - Helper Functions
-// ============================================================================
-
-// parseToolResponse parses a tool's response body and detects structured errors
-func (r *ResearchAgent) parseToolResponse(body []byte) (*core.ToolResponse, error) {
-	var toolResp core.ToolResponse
-	if err := json.Unmarshal(body, &toolResp); err != nil {
-		// Not in core.ToolResponse format - treat as legacy response
-		return nil, err
-	}
-
-	// Check if this is actually a ToolResponse format (has success field)
-	// by checking if the JSON had the success field
-	var raw map[string]interface{}
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, err
-	}
-
-	if _, hasSuccess := raw["success"]; !hasSuccess {
-		// Not in core.ToolResponse format
-		return nil, fmt.Errorf("not in ToolResponse format")
-	}
-
-	return &toolResp, nil
-}
-
-// analyzeErrorAndCorrect uses AI to understand the error and generate a corrected payload
-func (r *ResearchAgent) analyzeErrorAndCorrect(ctx context.Context, errCtx ErrorContext) (map[string]interface{}, error) {
-	if r.aiClient == nil {
-		return nil, fmt.Errorf("AI client not available for error analysis")
-	}
-
-	// Build the details string
-	detailsStr := ""
-	if errCtx.ToolError != nil && len(errCtx.ToolError.Details) > 0 {
-		for k, v := range errCtx.ToolError.Details {
-			detailsStr += fmt.Sprintf("  %s: %s\n", k, v)
-		}
-	}
-
-	// Format the original payload
-	payloadJSON, _ := json.MarshalIndent(errCtx.OriginalRequest, "", "  ")
-
-	prompt := fmt.Sprintf(`You are an API error analyzer. A tool call failed and you need to decide if and how to fix it.
-
-## Error Information
-HTTP Status: %d
-Tool: %s
-Capability: %s
-Error Code: %s
-Error Category: %s
-Error Message: %s
-Error Details:
-%s
-
-## Original Request Payload
-%s
-
-## Your Task
-1. Analyze why this request failed
-2. Determine if the error can be fixed by modifying the input
-3. If fixable, generate a corrected JSON payload
-
-## Response Format
-Return ONLY valid JSON in this exact format:
-{
-  "can_fix": true/false,
-  "analysis": "Brief explanation of the error",
-  "corrected_payload": { ... }
-}
-
-IMPORTANT: If can_fix is false, do NOT include corrected_payload field.
-
-## Examples
-
-Example 1 - Location not found (fixable):
-Error: LOCATION_NOT_FOUND for "Flower Mound, TX"
-Response: {"can_fix": true, "analysis": "US state abbreviation 'TX' not recognized. Should use full state name with country.", "corrected_payload": {"location": "Flower Mound, Texas, US", "units": "metric"}}
-
-Example 2 - API key invalid (not fixable):
-Error: API_KEY_INVALID
-Response: {"can_fix": false, "analysis": "API key authentication error cannot be fixed by modifying the request payload."}
-
-Example 3 - Invalid stock symbol (fixable):
-Error: SYMBOL_NOT_FOUND for "MSFT Inc"
-Response: {"can_fix": true, "analysis": "Stock symbols should be ticker only, not company name.", "corrected_payload": {"symbol": "MSFT"}}`,
-		errCtx.HTTPStatus,
-		errCtx.ToolName,
-		errCtx.Capability,
-		errCtx.ToolError.Code,
-		errCtx.ToolError.Category,
-		errCtx.ToolError.Message,
-		detailsStr,
-		string(payloadJSON),
-	)
-
-	response, err := r.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
-		Temperature: 0.1, // Low for deterministic analysis
-		MaxTokens:   300,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("AI analysis failed: %w", err)
-	}
-
-	// Parse AI response
-	var aiResponse struct {
-		CanFix           bool                   `json:"can_fix"`
-		Analysis         string                 `json:"analysis"`
-		CorrectedPayload map[string]interface{} `json:"corrected_payload,omitempty"`
-	}
-
-	content := strings.TrimSpace(response.Content)
-	// Strip markdown code blocks if present
-	content = r.stripMarkdownCodeBlock(content)
-
-	if err := json.Unmarshal([]byte(content), &aiResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse AI response: %w (raw: %s)", err, content)
-	}
-
-	r.Logger.Debug("AI error analysis result", map[string]interface{}{
-		"can_fix":  aiResponse.CanFix,
-		"analysis": aiResponse.Analysis,
-	})
-
-	if !aiResponse.CanFix {
-		return nil, nil // Signal that error cannot be fixed
-	}
-
-	return aiResponse.CorrectedPayload, nil
-}
-
-// stripMarkdownCodeBlock removes markdown code fences from a string
-func (r *ResearchAgent) stripMarkdownCodeBlock(s string) string {
-	if strings.HasPrefix(s, "```") {
-		lines := strings.Split(s, "\n")
-		if len(lines) >= 3 {
-			// Find start and end of code block
-			startIdx := 1
-			endIdx := len(lines) - 1
-			for i := len(lines) - 1; i >= startIdx; i-- {
-				if strings.HasPrefix(strings.TrimSpace(lines[i]), "```") {
-					endIdx = i
-					break
-				}
-			}
-			if endIdx > startIdx {
-				return strings.Join(lines[startIdx:endIdx], "\n")
-			}
-		}
-	}
-	return s
-}
-
-// parseRetryAfter extracts retry-after duration from tool error details
-func (r *ResearchAgent) parseRetryAfter(toolErr *core.ToolError) time.Duration {
-	if toolErr == nil || toolErr.Details == nil {
-		return 60 * time.Second // Default to 60 seconds
-	}
-
-	if retryAfterStr, ok := toolErr.Details["retry_after"]; ok {
-		if d, err := time.ParseDuration(retryAfterStr); err == nil {
-			return d
-		}
-	}
-
-	return 60 * time.Second
-}

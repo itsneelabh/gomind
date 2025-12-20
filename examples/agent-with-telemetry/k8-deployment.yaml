@@ -168,7 +168,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: research-agent-telemetry
+  name: research-agent-telemetry-service
   namespace: gomind-examples
   labels:
     app: research-agent-telemetry
@@ -178,7 +178,7 @@ spec:
   type: ClusterIP
   ports:
   - name: http
-    port: 8092
+    port: 80
     targetPort: http
     protocol: TCP
   selector:
