@@ -157,6 +157,33 @@ type OrchestratorMetrics struct {
 	UptimeSeconds      int64         `json:"uptime_seconds"`
 }
 
+// StepCompleteCallback is called after each step in a routing plan completes.
+// This enables real-time progress reporting for async workflows that use
+// AI orchestration with multiple tool calls.
+//
+// The callback is invoked from within the executor goroutine after each step
+// completes (success or failure). It should be lightweight or delegate to a
+// channel for async processing to avoid blocking execution.
+//
+// Parameters:
+//   - stepIndex: 0-based index of the completed step
+//   - totalSteps: total number of steps in the plan
+//   - step: the step that completed (contains AgentName, StepID, etc.)
+//   - result: the step execution result (contains Success, Duration, Response, etc.)
+//
+// Usage with async tasks:
+//
+//	config.ExecutionOptions.OnStepComplete = func(stepIndex, totalSteps int, step RoutingStep, result StepResult) {
+//	    reporter.Report(&core.TaskProgress{
+//	        CurrentStep: stepIndex + 1,
+//	        TotalSteps:  totalSteps,
+//	        StepName:    step.AgentName,
+//	        Percentage:  float64(stepIndex+1) / float64(totalSteps) * 100,
+//	        Message:     fmt.Sprintf("Completed %s", step.AgentName),
+//	    })
+//	}
+type StepCompleteCallback func(stepIndex, totalSteps int, step RoutingStep, result StepResult)
+
 // ExecutionOptions configures execution behavior
 type ExecutionOptions struct {
 	MaxConcurrency   int           `json:"max_concurrency"`
@@ -172,6 +199,12 @@ type ExecutionOptions struct {
 	// When enabled, type errors trigger LLM-based parameter correction
 	ValidationFeedbackEnabled bool `json:"validation_feedback_enabled"`
 	MaxValidationRetries      int  `json:"max_validation_retries"` // Default: 2
+
+	// Step completion callback for progress reporting (v1 addition)
+	// Called after each step completes (success or failure).
+	// Used by async task handlers to report per-tool progress.
+	// See notes/ASYNC_TASK_DESIGN.md Phase 6 for details.
+	OnStepComplete StepCompleteCallback `json:"-"` // Not serializable
 }
 
 // ServiceCapabilityConfig holds configuration for the service capability provider

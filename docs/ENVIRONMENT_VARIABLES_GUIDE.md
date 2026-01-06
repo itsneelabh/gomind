@@ -24,9 +24,10 @@ This document provides a comprehensive reference for all environment variables s
 11. [Development Configuration](#development-configuration)
 12. [Kubernetes Configuration](#kubernetes-configuration)
 13. [Orchestration Configuration](#orchestration-configuration)
-14. [Prompt Configuration](#prompt-configuration)
-15. [Example/Tool Specific Variables](#exampletool-specific-variables)
-16. [Quick Reference Table](#quick-reference-table)
+14. [Async Task Configuration](#async-task-configuration)
+15. [Prompt Configuration](#prompt-configuration)
+16. [Example/Tool Specific Variables](#exampletool-specific-variables)
+17. [Quick Reference Table](#quick-reference-table)
 
 ---
 
@@ -644,6 +645,104 @@ export GOMIND_PLAN_RETRY_MAX=2
 export GOMIND_SEMANTIC_RETRY_ENABLED=true
 export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
 ```
+
+---
+
+## Async Task Configuration
+
+Configure asynchronous task processing for long-running operations. The async task system enables the HTTP 202 + Polling pattern for operations that may take minutes to complete.
+
+### Deployment Mode
+
+| Variable | Default | Status | Description | Used In |
+|----------|---------|--------|-------------|---------|
+| `GOMIND_MODE` | (empty) | **Example Only** | Deployment mode: `api`, `worker`, or empty for embedded mode | [agent-with-async](../examples/agent-with-async/) |
+| `WORKER_COUNT` | `5` | **Example Only** | Number of concurrent task workers | [agent-with-async](../examples/agent-with-async/) |
+
+### Deployment Modes Explained
+
+The `GOMIND_MODE` variable controls how the async agent is deployed:
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| (empty) | **Embedded mode** - API and workers in same process | Development, single-pod deployments |
+| `api` | **API mode** - Only serves HTTP endpoints, enqueues tasks | Production API tier (scalable) |
+| `worker` | **Worker mode** - Only processes tasks from queue | Production worker tier (scalable) |
+
+### Example: Embedded Mode (Development)
+
+```bash
+# Single process handles both API and task processing
+export GOMIND_AGENT_NAME="async-travel-agent"
+export WORKER_COUNT=3
+# GOMIND_MODE not set = embedded mode
+```
+
+### Example: Production Split Deployment
+
+**API Pod:**
+```yaml
+env:
+  - name: GOMIND_MODE
+    value: "api"
+  - name: GOMIND_AGENT_NAME
+    value: "async-travel-agent"
+  - name: REDIS_URL
+    value: "redis://redis:6379"
+```
+
+**Worker Pod:**
+```yaml
+env:
+  - name: GOMIND_MODE
+    value: "worker"
+  - name: GOMIND_AGENT_NAME
+    value: "async-travel-agent"
+  - name: WORKER_COUNT
+    value: "5"
+  - name: REDIS_URL
+    value: "redis://redis:6379"
+```
+
+### Architecture Diagram
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     Production Deployment                         │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌─────────────────┐         ┌─────────────────┐                 │
+│  │   API Pod       │         │   Worker Pod    │                 │
+│  │ (GOMIND_MODE=   │         │ (GOMIND_MODE=   │                 │
+│  │     api)        │         │    worker)      │                 │
+│  │                 │         │                 │                 │
+│  │ POST /api/v1/   │         │  ┌───────────┐  │                 │
+│  │     tasks ──────┼────┬────┼─►│ Worker 1  │  │                 │
+│  │ GET  /api/v1/   │    │    │  ├───────────┤  │                 │
+│  │     tasks/:id   │    │    │  │ Worker 2  │  │                 │
+│  └─────────────────┘    │    │  ├───────────┤  │                 │
+│                         │    │  │ Worker N  │  │                 │
+│                         │    │  └───────────┘  │                 │
+│                         │    └─────────────────┘                 │
+│                         │                                        │
+│                    ┌────▼────┐                                   │
+│                    │  Redis  │                                   │
+│                    │ (Queue) │                                   │
+│                    └─────────┘                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Related Framework Types
+
+The async task system uses these core framework types (no additional env vars required):
+
+- `core.Task` - Task data structure with status, progress, result
+- `core.TaskQueue` - Redis-backed task queue interface
+- `core.TaskStore` - Redis-backed task state storage
+- `core.TaskWorkerPool` - Worker pool implementation
+- `orchestration.TaskAPIHandler` - HTTP API handler for task endpoints
+
+See [Async Orchestration Guide](ASYNC_ORCHESTRATION_GUIDE.md) for detailed usage.
 
 ---
 

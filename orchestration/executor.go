@@ -79,6 +79,11 @@ type SmartExecutor struct {
 	// this component can compute derived values using full context.
 	contextualReResolver *ContextualReResolver
 	maxSemanticRetries   int // Default: 2
+
+	// Step completion callback for async progress reporting (v1 addition)
+	// Called after each step completes to enable per-tool progress reporting.
+	// See notes/ASYNC_TASK_DESIGN.md Phase 6 for details.
+	onStepComplete StepCompleteCallback
 }
 
 // NewSmartExecutor creates a new smart executor
@@ -208,6 +213,14 @@ func (e *SmartExecutor) SetMaxSemanticRetries(max int) {
 		max = 0
 	}
 	e.maxSemanticRetries = max
+}
+
+// SetOnStepComplete sets the callback for step completion notifications.
+// Used by async task handlers to receive per-step progress updates.
+// The callback is invoked after each step completes (success or failure).
+// See notes/ASYNC_TASK_DESIGN.md Phase 6 for usage details.
+func (e *SmartExecutor) SetOnStepComplete(cb StepCompleteCallback) {
+	e.onStepComplete = cb
 }
 
 // collectSourceDataFromDependencies converts step results to a flat source data map.
@@ -418,11 +431,19 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 				stepResults[s.StepID] = &stepResult
 				result.Steps = append(result.Steps, stepResult)
 				executed[s.StepID] = true
+				stepIndex := len(result.Steps) - 1 // Capture index while holding lock
 
 				if !stepResult.Success {
 					result.Success = false
 				}
 				resultsMutex.Unlock()
+
+				// Invoke step completion callback (outside lock to avoid blocking)
+				// This enables async task handlers to report per-tool progress.
+				// See notes/ASYNC_TASK_DESIGN.md Phase 6 for details.
+				if e.onStepComplete != nil {
+					e.onStepComplete(stepIndex, len(plan.Steps), s, stepResult)
+				}
 			}(step)
 		}
 

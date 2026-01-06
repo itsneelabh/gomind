@@ -11,6 +11,7 @@ Multi-agent coordination with AI-driven orchestration and declarative workflows.
   - [LLM-Generated Execution Plan Structure](#llm-execution-plan)
 - [🔧 Workflow Engine in Detail](#-workflow-engine-in-detail)
 - [🎭 When to Use Each Mode](#-when-to-use-each-mode)
+- [⏱️ Async Tasks for Long-Running Operations](#️-async-tasks-for-long-running-operations)
 - [🏗️ Architecture & Design Decisions](#️-architecture--design-decisions)
 - [🏗️ How Everything Fits Together](#️-how-everything-fits-together)
 - [📊 Performance & Caching](#-performance--caching-explained)
@@ -694,6 +695,75 @@ Use this module when you need capabilities beyond basic tool/agent coordination:
 - You need guaranteed execution order
 - Predictable performance is important
 - Avoiding LLM costs for routine tasks
+
+## ⏱️ Async Tasks for Long-Running Operations
+
+### The Problem: When AI Takes Too Long
+
+Imagine you walk into a restaurant and order a slow-cooked brisket. The waiter doesn't make you stand at the counter for 6 hours waiting—they give you a ticket number and tell you they'll let you know when it's ready.
+
+The same principle applies to AI orchestration. When your workflow involves:
+- Multiple tool calls executed in sequence or parallel
+- AI reasoning that takes 30+ seconds
+- External API calls with unpredictable latency
+- Complex research tasks spanning several services
+
+...the HTTP connection might timeout before you get results. Your client is left wondering: "Did it fail? Is it still running?"
+
+### The Solution: HTTP 202 + Polling Pattern
+
+GoMind provides an async task system that works like that restaurant ticket:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Async Task Flow                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   1. Client submits task    →  HTTP 202 + Task ID (instant)        │
+│   2. Worker processes task  →  Background (takes as long as needed) │
+│   3. Client polls status    →  GET /tasks/{id} (progress updates)   │
+│   4. Task completes         →  Results available in response        │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+The framework provides two components:
+- **TaskAPIHandler**: Accepts task submissions, returns HTTP 202 immediately
+- **TaskWorkerPool**: Processes tasks in background with configurable concurrency
+
+### When to Use Async Tasks
+
+| Scenario | Sync (Regular HTTP) | Async (Task System) |
+|----------|---------------------|---------------------|
+| Single tool call (< 5s) | ✅ | Overkill |
+| Multi-tool orchestration (< 30s) | ✅ | Optional |
+| Complex AI research (30s - 5min) | ⚠️ Risky | ✅ Recommended |
+| Batch processing or pipelines | ❌ Timeout likely | ✅ Required |
+
+### Quick Example
+
+```go
+// Register an async-capable handler
+workerPool.RegisterHandler("research", func(ctx context.Context, task *core.Task, reporter core.ProgressReporter) error {
+    // Report progress as you go
+    reporter.Report(&core.TaskProgress{
+        CurrentStep: 1,
+        TotalSteps:  3,
+        Message:     "Calling weather service...",
+    })
+
+    // Use orchestrator for AI-driven tool selection
+    response, err := orchestrator.ProcessRequest(ctx, task.Input["query"].(string), nil)
+    if err != nil {
+        return err
+    }
+
+    task.Result = response
+    return nil
+})
+```
+
+📖 **For complete implementation details, deployment patterns, and production configuration, see the [Async Orchestration Guide](../docs/ASYNC_ORCHESTRATION_GUIDE.md).**
 
 ## 🏗️ Architecture & Design Decisions
 

@@ -56,7 +56,7 @@ func isRedisReachable() bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	_ = conn.Close() // Error ignored - only checking connectivity
 	return true
 }
 
