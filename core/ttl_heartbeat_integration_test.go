@@ -32,7 +32,7 @@ func TestTTLAndHeartbeatIntegration(t *testing.T) {
 		tool := NewTool("ttl-test-tool")
 		registry, err := NewRedisRegistry("redis://localhost:6379")
 		require.NoError(t, err)
-		
+
 		// Manually register (bypassing Initialize to avoid heartbeat)
 		serviceInfo := &ServiceInfo{
 			ID:           tool.ID,
@@ -42,26 +42,26 @@ func TestTTLAndHeartbeatIntegration(t *testing.T) {
 			Address:      "localhost",
 			Port:         8080,
 		}
-		
+
 		err = registry.Register(ctx, serviceInfo)
 		require.NoError(t, err)
-		
+
 		// Verify tool is initially discoverable
 		discovery, err := NewRedisDiscovery("redis://localhost:6379")
 		require.NoError(t, err)
-		
+
 		tools, err := discovery.Discover(ctx, DiscoveryFilter{Type: ComponentTypeTool})
 		require.NoError(t, err)
 		assert.Len(t, tools, 1, "Tool should be discoverable initially")
-		
+
 		t.Log("Waiting 35 seconds for TTL expiration (without heartbeat)...")
 		time.Sleep(35 * time.Second)
-		
+
 		// Tool should disappear (TTL expired, no heartbeat)
 		tools, err = discovery.Discover(ctx, DiscoveryFilter{Type: ComponentTypeTool})
 		require.NoError(t, err)
 		assert.Len(t, tools, 0, "Tool should disappear after TTL expiration")
-		
+
 		t.Log("CONFIRMED: Tool disappears after 30s without heartbeat")
 	})
 
@@ -71,27 +71,27 @@ func TestTTLAndHeartbeatIntegration(t *testing.T) {
 		registry, err := NewRedisRegistry("redis://localhost:6379")
 		require.NoError(t, err)
 		tool.Registry = registry
-		
+
 		// Initialize tool (starts heartbeat)
 		err = tool.Initialize(ctx)
 		require.NoError(t, err)
-		
+
 		// Verify tool is discoverable
 		discovery, err := NewRedisDiscovery("redis://localhost:6379")
 		require.NoError(t, err)
-		
+
 		tools, err := discovery.Discover(ctx, DiscoveryFilter{Type: ComponentTypeTool})
 		require.NoError(t, err)
 		assert.Len(t, tools, 1, "Tool should be discoverable initially")
-		
+
 		t.Log("Waiting 35 seconds to test heartbeat keeps registration alive...")
 		time.Sleep(35 * time.Second)
-		
+
 		// Tool should STILL exist (heartbeat prevented TTL expiration)
 		tools, err = discovery.Discover(ctx, DiscoveryFilter{Type: ComponentTypeTool})
 		require.NoError(t, err)
 		assert.Len(t, tools, 1, "Tool should persist with heartbeat")
-		
+
 		t.Log("CONFIRMED: Tool persists beyond 30s TTL with heartbeat")
 	})
 
@@ -115,7 +115,7 @@ func TestTTLAndHeartbeatIntegration(t *testing.T) {
 		frameworkDone := make(chan error, 1)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		
+
 		go func() {
 			frameworkDone <- framework.Run(ctx)
 		}()

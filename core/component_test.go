@@ -12,11 +12,11 @@ func TestComponentTypes(t *testing.T) {
 	if ComponentTypeTool != "tool" {
 		t.Errorf("ComponentTypeTool = %v, want 'tool'", ComponentTypeTool)
 	}
-	
+
 	if ComponentTypeAgent != "agent" {
 		t.Errorf("ComponentTypeAgent = %v, want 'agent'", ComponentTypeAgent)
 	}
-	
+
 	// Verify types are distinct
 	if ComponentTypeTool == ComponentTypeAgent {
 		t.Fatal("ComponentTypeTool and ComponentTypeAgent must be distinct")
@@ -26,7 +26,7 @@ func TestComponentTypes(t *testing.T) {
 // TestServiceInfo validates ServiceInfo structure
 func TestServiceInfo(t *testing.T) {
 	now := time.Now()
-	
+
 	info := &ServiceInfo{
 		ID:          "test-123",
 		Name:        "test-service",
@@ -45,34 +45,34 @@ func TestServiceInfo(t *testing.T) {
 		Health:   HealthHealthy,
 		LastSeen: now,
 	}
-	
+
 	// Test JSON serialization
 	data, err := json.Marshal(info)
 	if err != nil {
 		t.Fatalf("Failed to marshal ServiceInfo: %v", err)
 	}
-	
+
 	// Test JSON deserialization
 	var decoded ServiceInfo
 	err = json.Unmarshal(data, &decoded)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal ServiceInfo: %v", err)
 	}
-	
+
 	// Verify fields
 	if decoded.ID != info.ID {
 		t.Errorf("ID = %v, want %v", decoded.ID, info.ID)
 	}
-	
+
 	if decoded.Type != info.Type {
 		t.Errorf("Type = %v, want %v", decoded.Type, info.Type)
 	}
-	
+
 	if len(decoded.Capabilities) != len(info.Capabilities) {
-		t.Errorf("Capabilities count = %v, want %v", 
+		t.Errorf("Capabilities count = %v, want %v",
 			len(decoded.Capabilities), len(info.Capabilities))
 	}
-	
+
 	if decoded.Health != info.Health {
 		t.Errorf("Health = %v, want %v", decoded.Health, info.Health)
 	}
@@ -208,8 +208,8 @@ func TestDiscoveryFilter(t *testing.T) {
 		{
 			name: "complex filter - all match",
 			filter: DiscoveryFilter{
-				Type: ComponentTypeTool,
-				Name: "calculator",
+				Type:         ComponentTypeTool,
+				Name:         "calculator",
 				Capabilities: []string{"add", "subtract"},
 			},
 			service: ServiceInfo{
@@ -226,8 +226,8 @@ func TestDiscoveryFilter(t *testing.T) {
 		{
 			name: "complex filter - type mismatch",
 			filter: DiscoveryFilter{
-				Type: ComponentTypeAgent,
-				Name: "calculator",
+				Type:         ComponentTypeAgent,
+				Name:         "calculator",
 				Capabilities: []string{"add"},
 			},
 			service: ServiceInfo{
@@ -240,7 +240,7 @@ func TestDiscoveryFilter(t *testing.T) {
 			shouldMatch: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// This test validates the filter logic conceptually
@@ -259,12 +259,12 @@ func validateFilter(filter DiscoveryFilter, service ServiceInfo) bool {
 	if filter.Type != "" && filter.Type != service.Type {
 		return false
 	}
-	
+
 	// Check name filter
 	if filter.Name != "" && filter.Name != service.Name {
 		return false
 	}
-	
+
 	// Check capabilities filter
 	if len(filter.Capabilities) > 0 {
 		for _, requiredCap := range filter.Capabilities {
@@ -280,7 +280,7 @@ func validateFilter(filter DiscoveryFilter, service ServiceInfo) bool {
 			}
 		}
 	}
-	
+
 	// Check metadata filter
 	if len(filter.Metadata) > 0 {
 		for key, value := range filter.Metadata {
@@ -289,7 +289,7 @@ func validateFilter(filter DiscoveryFilter, service ServiceInfo) bool {
 			}
 		}
 	}
-	
+
 	return true
 }
 
@@ -297,38 +297,38 @@ func validateFilter(filter DiscoveryFilter, service ServiceInfo) bool {
 func TestComponentInterfaceCompliance(t *testing.T) {
 	// Create a tool
 	tool := NewTool("test-tool")
-	
+
 	// Verify it implements Component interface
 	var _ Component = tool
-	
+
 	// Test Component methods
 	if id := tool.GetID(); id == "" {
 		t.Error("Tool GetID() returned empty")
 	}
-	
+
 	if name := tool.GetName(); name != "test-tool" {
 		t.Errorf("Tool GetName() = %v, want test-tool", name)
 	}
-	
+
 	if typ := tool.GetType(); typ != ComponentTypeTool {
 		t.Errorf("Tool GetType() = %v, want %v", typ, ComponentTypeTool)
 	}
-	
+
 	// Create an agent
 	agent := NewBaseAgent("test-agent")
-	
+
 	// Verify it implements Component interface
 	var _ Component = agent
-	
+
 	// Test Component methods
 	if id := agent.GetID(); id == "" {
 		t.Error("Agent GetID() returned empty")
 	}
-	
+
 	if name := agent.GetName(); name != "test-agent" {
 		t.Errorf("Agent GetName() = %v, want test-agent", name)
 	}
-	
+
 	if typ := agent.GetType(); typ != ComponentTypeAgent {
 		t.Errorf("Agent GetType() = %v, want %v", typ, ComponentTypeAgent)
 	}
@@ -338,13 +338,13 @@ func TestComponentInterfaceCompliance(t *testing.T) {
 func TestToolVsAgentCapabilities(t *testing.T) {
 	// Tools should NOT have Discovery
 	_ = NewTool("tool")
-	
+
 	// This test passes by compilation - tools don't have Discovery field
 	// If someone adds Discovery to tools, this would fail to compile
-	
+
 	// Agents SHOULD have Discovery
 	agent := NewBaseAgent("agent")
-	
+
 	// Verify agent has Discovery capability
 	if agent.Discovery == nil {
 		t.Skip("Agent doesn't have Discovery set in this test")
@@ -354,24 +354,24 @@ func TestToolVsAgentCapabilities(t *testing.T) {
 // TestServiceInfoDefaults validates default values
 func TestServiceInfoDefaults(t *testing.T) {
 	info := &ServiceInfo{}
-	
+
 	// Test zero values
 	if info.ID != "" {
 		t.Error("Default ID should be empty")
 	}
-	
+
 	if info.Type != "" {
 		t.Error("Default Type should be empty")
 	}
-	
+
 	if info.Health != "" {
 		t.Error("Default Health should be empty")
 	}
-	
+
 	if info.Port != 0 {
 		t.Error("Default Port should be 0")
 	}
-	
+
 	// Set to healthy
 	info.Health = HealthHealthy
 	if info.Health != "healthy" {
@@ -388,25 +388,25 @@ func TestCapabilityStructure(t *testing.T) {
 		InputTypes:  []string{"string", "number"},
 		OutputTypes: []string{"object"},
 	}
-	
+
 	// Test JSON serialization
 	data, err := json.Marshal(cap)
 	if err != nil {
 		t.Fatalf("Failed to marshal Capability: %v", err)
 	}
-	
+
 	// Test JSON deserialization
 	var decoded Capability
 	err = json.Unmarshal(data, &decoded)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal Capability: %v", err)
 	}
-	
+
 	// Verify fields
 	if decoded.Name != cap.Name {
 		t.Errorf("Name = %v, want %v", decoded.Name, cap.Name)
 	}
-	
+
 	if decoded.Description != cap.Description {
 		t.Errorf("Description = %v, want %v", decoded.Description, cap.Description)
 	}
@@ -418,15 +418,15 @@ func TestHealthStatus(t *testing.T) {
 	if HealthHealthy != "healthy" {
 		t.Errorf("HealthHealthy = %v, want 'healthy'", HealthHealthy)
 	}
-	
+
 	if HealthUnhealthy != "unhealthy" {
 		t.Errorf("HealthUnhealthy = %v, want 'unhealthy'", HealthUnhealthy)
 	}
-	
+
 	if HealthUnknown != "unknown" {
 		t.Errorf("HealthUnknown = %v, want 'unknown'", HealthUnknown)
 	}
-	
+
 	// Verify they are distinct
 	if HealthHealthy == HealthUnhealthy || HealthHealthy == HealthUnknown || HealthUnhealthy == HealthUnknown {
 		t.Error("Health status constants must be distinct")
@@ -593,13 +593,13 @@ func BenchmarkServiceInfoSerialization(b *testing.B) {
 		Health:   HealthHealthy,
 		LastSeen: time.Now(),
 	}
-	
+
 	b.Run("Marshal", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			_, _ = json.Marshal(info)
 		}
 	})
-	
+
 	b.Run("Unmarshal", func(b *testing.B) {
 		data, _ := json.Marshal(info)
 		b.ResetTimer()

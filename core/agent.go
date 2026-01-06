@@ -153,12 +153,12 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 	initStart := time.Now()
 
 	b.Logger.Info("Starting agent initialization", map[string]interface{}{
-		"id":                 b.ID,
-		"name":               b.Name,
-		"type":               b.Type,
-		"config_provided":    b.Config != nil,
-		"discovery_enabled":  b.Config != nil && b.Config.Discovery.Enabled,
-		"namespace":          getNamespaceFromConfig(b.Config),
+		"id":                b.ID,
+		"name":              b.Name,
+		"type":              b.Type,
+		"config_provided":   b.Config != nil,
+		"discovery_enabled": b.Config != nil && b.Config.Discovery.Enabled,
+		"namespace":         getNamespaceFromConfig(b.Config),
 	})
 
 	// Initialize components based on config
@@ -166,9 +166,9 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 		// Initialize discovery if configured
 		if b.Config.Discovery.Enabled && b.Discovery == nil {
 			b.Logger.Info("Initializing service discovery", map[string]interface{}{
-				"provider":      b.Config.Discovery.Provider,
-				"mock_mode":     b.Config.Development.MockDiscovery,
-				"redis_url":     b.Config.Discovery.RedisURL != "",
+				"provider":  b.Config.Discovery.Provider,
+				"mock_mode": b.Config.Development.MockDiscovery,
+				"redis_url": b.Config.Discovery.RedisURL != "",
 			})
 
 			if b.Config.Development.MockDiscovery {
@@ -310,9 +310,9 @@ func (b *BaseAgent) Initialize(ctx context.Context) error {
 		}
 	} else {
 		b.Logger.Warn("Agent running without service discovery", map[string]interface{}{
-			"reason":          "discovery_not_configured",
-			"impact":          "agent_not_discoverable",
-			"manual_config":   "required_for_service_mesh",
+			"reason":        "discovery_not_configured",
+			"impact":        "agent_not_discoverable",
+			"manual_config": "required_for_service_mesh",
 		})
 	}
 
@@ -557,15 +557,15 @@ func (b *BaseAgent) handleCapabilityRequest(cap Capability) http.HandlerFunc {
 			// Log error but response is already partially written
 			if b.Logger != nil {
 				b.Logger.Error("Failed to encode response", map[string]interface{}{
-					"error":             err,
-					"error_type":        fmt.Sprintf("%T", err),
-					"agent_id":          b.ID,
-					"request_method":    r.Method,
-					"request_path":      r.URL.Path,
-					"request_remote":    r.RemoteAddr,
+					"error":              err,
+					"error_type":         fmt.Sprintf("%T", err),
+					"agent_id":           b.ID,
+					"request_method":     r.Method,
+					"request_path":       r.URL.Path,
+					"request_remote":     r.RemoteAddr,
 					"capabilities_count": len(b.Capabilities),
-					"user_agent":        r.Header.Get("User-Agent"),
-					"content_length":    r.ContentLength,
+					"user_agent":         r.Header.Get("User-Agent"),
+					"content_length":     r.ContentLength,
 				})
 			}
 		}
@@ -693,12 +693,12 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 	}
 
 	b.Logger.Info("Configuring HTTP server", map[string]interface{}{
-		"port":                   port,
-		"cors_enabled":           b.Config.HTTP.CORS.Enabled,
-		"health_check_enabled":   b.Config.HTTP.EnableHealthCheck,
-		"read_timeout":           b.Config.HTTP.ReadTimeout.String(),
-		"write_timeout":          b.Config.HTTP.WriteTimeout.String(),
-		"registered_endpoints":   len(b.registeredPatterns),
+		"port":                 port,
+		"cors_enabled":         b.Config.HTTP.CORS.Enabled,
+		"health_check_enabled": b.Config.HTTP.EnableHealthCheck,
+		"read_timeout":         b.Config.HTTP.ReadTimeout.String(),
+		"write_timeout":        b.Config.HTTP.WriteTimeout.String(),
+		"registered_endpoints": len(b.registeredPatterns),
 	})
 
 	// Add health endpoint if enabled
@@ -716,15 +716,15 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 					// Log error but response is already partially written
 					if b.Logger != nil {
 						b.Logger.Error("Failed to encode health response", map[string]interface{}{
-							"error":             err,
-							"error_type":        fmt.Sprintf("%T", err),
-							"agent_id":          b.ID,
-									"request_method":    r.Method,
-							"request_path":      r.URL.Path,
-							"request_remote":    r.RemoteAddr,
+							"error":              err,
+							"error_type":         fmt.Sprintf("%T", err),
+							"agent_id":           b.ID,
+							"request_method":     r.Method,
+							"request_path":       r.URL.Path,
+							"request_remote":     r.RemoteAddr,
 							"capabilities_count": len(b.Capabilities),
-							"user_agent":        r.Header.Get("User-Agent"),
-							"content_length":    r.ContentLength,
+							"user_agent":         r.Header.Get("User-Agent"),
+							"content_length":     r.ContentLength,
 						})
 					}
 				}
@@ -743,15 +743,15 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 				// Log error but response is already partially written
 				if b.Logger != nil {
 					b.Logger.Error("Failed to encode capabilities", map[string]interface{}{
-						"error":             err,
-						"error_type":        fmt.Sprintf("%T", err),
-						"agent_id":          b.ID,
-							"request_method":    r.Method,
-						"request_path":      r.URL.Path,
-						"request_remote":    r.RemoteAddr,
+						"error":              err,
+						"error_type":         fmt.Sprintf("%T", err),
+						"agent_id":           b.ID,
+						"request_method":     r.Method,
+						"request_path":       r.URL.Path,
+						"request_remote":     r.RemoteAddr,
 						"capabilities_count": len(b.Capabilities),
-						"user_agent":        r.Header.Get("User-Agent"),
-						"content_length":    r.ContentLength,
+						"user_agent":         r.Header.Get("User-Agent"),
+						"content_length":     r.ContentLength,
 					})
 				}
 			}
@@ -765,9 +765,9 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 			endpoints = append(endpoints, pattern)
 		}
 		b.Logger.Info("HTTP endpoints registered", map[string]interface{}{
-			"endpoints":      endpoints,
-			"total_count":    len(endpoints),
-			"capabilities":   len(b.Capabilities),
+			"endpoints":    endpoints,
+			"total_count":  len(endpoints),
+			"capabilities": len(b.Capabilities),
 		})
 	}
 
@@ -807,10 +807,10 @@ func (b *BaseAgent) Start(ctx context.Context, port int) error {
 	if b.Discovery != nil {
 		address, registrationPort := ResolveServiceAddress(b.Config, b.Logger)
 		b.Logger.Info("Updating service registration with server details", map[string]interface{}{
-			"service_id":            b.ID,
-			"registration_address":  address,
-			"registration_port":     registrationPort,
-			"server_port":           port,
+			"service_id":           b.ID,
+			"registration_address": address,
+			"registration_port":    registrationPort,
+			"server_port":          port,
 		})
 	}
 

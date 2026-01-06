@@ -113,10 +113,10 @@ func (m *MemoryStore) Set(ctx context.Context, key string, value string, ttl tim
 
 	if m.logger != nil {
 		logFields := map[string]interface{}{
-			"operation":   "cache_set",
-			"key":         key,
-			"value_size":  len(value),
-			"has_ttl":     ttl > 0,
+			"operation":  "cache_set",
+			"key":        key,
+			"value_size": len(value),
+			"has_ttl":    ttl > 0,
 		}
 		if ttl > 0 {
 			logFields["ttl"] = ttl.String()

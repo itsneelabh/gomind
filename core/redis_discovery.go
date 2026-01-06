@@ -12,7 +12,7 @@ import (
 // RedisDiscovery provides Redis-based service discovery (implements Discovery interface)
 // It embeds RedisRegistry and adds discovery capabilities
 type RedisDiscovery struct {
-	*RedisRegistry // Embed for registration capabilities
+	*RedisRegistry        // Embed for registration capabilities
 	logger         Logger // Optional logger for discovery operations
 }
 
@@ -76,7 +76,7 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 				"type_key": typeKey,
 			})
 		}
-		
+
 		ids, err := d.client.SMembers(ctx, typeKey).Result()
 		if err != nil && err != redis.Nil {
 			// Emit framework metrics for discovery error
@@ -105,10 +105,10 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 			return nil, fmt.Errorf("failed to find services by type %s: %w", filter.Type, err)
 		}
 		serviceIDs = append(serviceIDs, ids...)
-		
+
 		if d.logger != nil {
 			d.logger.Debug("Found services by type", map[string]interface{}{
-				"type":          filter.Type,
+				"type":           filter.Type,
 				"services_count": len(ids),
 			})
 		}
@@ -123,7 +123,7 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 				"name_key": nameKey,
 			})
 		}
-		
+
 		ids, err := d.client.SMembers(ctx, nameKey).Result()
 		if err != nil && err != redis.Nil {
 			// Emit framework metrics for name lookup error
@@ -151,17 +151,17 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 			}
 			return nil, fmt.Errorf("failed to find services by name %s: %w", filter.Name, err)
 		}
-		
+
 		if filter.Type != "" {
 			// Intersect with type filter
 			beforeCount := len(serviceIDs)
 			serviceIDs = intersect(serviceIDs, ids)
 			if d.logger != nil {
 				d.logger.Debug("Applied name filter intersection", map[string]interface{}{
-					"name":               filter.Name,
+					"name":                filter.Name,
 					"before_intersection": beforeCount,
 					"after_intersection":  len(serviceIDs),
-					"name_matches":       len(ids),
+					"name_matches":        len(ids),
 				})
 			}
 		} else {
@@ -183,7 +183,7 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 				"capabilities_count": len(filter.Capabilities),
 			})
 		}
-		
+
 		var capIDs []string
 		for _, capability := range filter.Capabilities {
 			capKey := fmt.Sprintf("%s:capabilities:%s", d.namespace, capability)
@@ -200,7 +200,7 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 				continue
 			}
 			capIDs = append(capIDs, ids...)
-			
+
 			if d.logger != nil {
 				d.logger.Debug("Found services by capability", map[string]interface{}{
 					"capability":     capability,
@@ -208,7 +208,7 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 				})
 			}
 		}
-		
+
 		if len(serviceIDs) > 0 {
 			// Intersect with existing filters
 			beforeCount := len(serviceIDs)
@@ -239,7 +239,7 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 				"namespace": d.namespace,
 			})
 		}
-		
+
 		// Get all service keys
 		pattern := fmt.Sprintf("%s:services:*", d.namespace)
 		keys, err := d.client.Keys(ctx, pattern).Result()
@@ -254,13 +254,13 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 			}
 			return nil, fmt.Errorf("failed to list all services: %w", err)
 		}
-		
+
 		for _, key := range keys {
 			// Extract service ID from key
 			serviceID := key[len(fmt.Sprintf("%s:services:", d.namespace)):]
 			serviceIDs = append(serviceIDs, serviceID)
 		}
-		
+
 		if d.logger != nil {
 			d.logger.Debug("Found all services", map[string]interface{}{
 				"total_services": len(serviceIDs),
@@ -282,15 +282,15 @@ func (d *RedisDiscovery) Discover(ctx context.Context, filter DiscoveryFilter) (
 	// Fetch service info for each ID
 	if d.logger != nil {
 		d.logger.Debug("Fetching service details", map[string]interface{}{
-			"unique_services": len(uniqueIDs),
+			"unique_services":     len(uniqueIDs),
 			"has_metadata_filter": len(filter.Metadata) > 0,
 		})
 	}
-	
+
 	skippedExpired := 0
 	skippedMalformed := 0
 	skippedMetadata := 0
-	
+
 	for _, id := range uniqueIDs {
 		key := fmt.Sprintf("%s:services:%s", d.namespace, id)
 		data, err := d.client.Get(ctx, key).Result()

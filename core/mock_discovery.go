@@ -139,7 +139,7 @@ func (m *MockDiscovery) FindService(ctx context.Context, serviceName string) ([]
 	return m.Discover(ctx, DiscoveryFilter{Name: serviceName})
 }
 
-// FindByCapability finds services by capability (backward compatibility) 
+// FindByCapability finds services by capability (backward compatibility)
 func (m *MockDiscovery) FindByCapability(ctx context.Context, capability string) ([]*ServiceInfo, error) {
 	return m.Discover(ctx, DiscoveryFilter{Capabilities: []string{capability}})
 }

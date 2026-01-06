@@ -618,11 +618,11 @@ func TestSchemaCache_TypePreservation(t *testing.T) {
 
 	// Test various JSON types
 	schema := map[string]interface{}{
-		"string_field":  "test",
-		"number_field":  42.5,
-		"bool_field":    true,
-		"null_field":    nil,
-		"array_field":   []interface{}{"a", "b", "c"},
+		"string_field": "test",
+		"number_field": 42.5,
+		"bool_field":   true,
+		"null_field":   nil,
+		"array_field":  []interface{}{"a", "b", "c"},
 		"object_field": map[string]interface{}{
 			"nested": "value",
 		},

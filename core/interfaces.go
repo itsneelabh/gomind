@@ -139,10 +139,14 @@ func (n *NoOpLogger) Error(msg string, fields map[string]interface{}) {}
 func (n *NoOpLogger) Warn(msg string, fields map[string]interface{})  {}
 func (n *NoOpLogger) Debug(msg string, fields map[string]interface{}) {}
 
-func (n *NoOpLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{})  {}
-func (n *NoOpLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {}
-func (n *NoOpLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{})  {}
-func (n *NoOpLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {}
+func (n *NoOpLogger) InfoWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
+func (n *NoOpLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
+func (n *NoOpLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
+func (n *NoOpLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
 
 // NoOpTelemetry provides a no-op telemetry implementation
 type NoOpTelemetry struct{}
@@ -247,9 +251,10 @@ func SetMetricsRegistry(registry MetricsRegistry) {
 // This enables framework modules to emit metrics without creating circular dependencies.
 //
 // Usage pattern:
-//   if registry := core.GetGlobalMetricsRegistry(); registry != nil {
-//       registry.EmitWithContext(ctx, "metric.name", value, labels...)
-//   }
+//
+//	if registry := core.GetGlobalMetricsRegistry(); registry != nil {
+//	    registry.EmitWithContext(ctx, "metric.name", value, labels...)
+//	}
 func GetGlobalMetricsRegistry() MetricsRegistry {
 	return globalMetricsRegistry
 }

@@ -109,7 +109,7 @@ func TestPortParameterPrecedence(t *testing.T) {
 	})
 }
 
-// TestPortConfigFallback tests that config port is used when parameter is negative  
+// TestPortConfigFallback tests that config port is used when parameter is negative
 func TestPortConfigFallback(t *testing.T) {
 	t.Run("Tool_Uses_Config_When_Parameter_Negative", func(t *testing.T) {
 		tool := NewTool("test-tool")
@@ -187,7 +187,7 @@ func TestPortConfigFallback(t *testing.T) {
 
 		// Cleanup - cancel context to stop the agent
 		cancel()
-		
+
 		// Give agent time to shutdown gracefully
 		time.Sleep(100 * time.Millisecond)
 
@@ -219,14 +219,14 @@ func TestPortValidation(t *testing.T) {
 		t.Run("Tool_"+tc.name, func(t *testing.T) {
 			tool := NewTool("test-tool")
 			config := &Config{Address: "localhost"}
-			
+
 			// Special case: set invalid config port for the invalid config test
 			if tc.name == "Invalid_Port_With_Invalid_Config" {
 				config.Port = 70000 // Invalid port in config
 			}
-			
+
 			tool.Config = config
-			
+
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
@@ -243,20 +243,20 @@ func TestPortValidation(t *testing.T) {
 				go func() {
 					startErr <- tool.Start(ctx, tc.port)
 				}()
-				
+
 				// Give server time to start
 				time.Sleep(100 * time.Millisecond)
-				
+
 				// Verify success by attempting connection (or that it's listening)
 				if tc.port > 0 {
 					// For specific ports, verify connection works
 					verifyServerOnPort(t, tc.port, true, fmt.Sprintf("port %d should be listening", tc.port))
 				}
-				
+
 				// Cleanup
 				tool.Shutdown(ctx)
 				cancel()
-				
+
 				// Verify start completed without error (or with expected error)
 				select {
 				case err := <-startErr:
@@ -272,14 +272,14 @@ func TestPortValidation(t *testing.T) {
 		t.Run("Agent_"+tc.name, func(t *testing.T) {
 			agent := NewBaseAgent("test-agent")
 			config := &Config{Address: "localhost"}
-			
+
 			// Special case: set invalid config port for the invalid config test
 			if tc.name == "Invalid_Port_With_Invalid_Config" {
 				config.Port = 70000 // Invalid port in config
 			}
-			
+
 			agent.Config = config
-			
+
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
@@ -301,19 +301,19 @@ func TestPortValidation(t *testing.T) {
 				go func() {
 					startErr <- agent.Start(ctx, tc.port)
 				}()
-				
+
 				// Give server time to start
 				time.Sleep(100 * time.Millisecond)
-				
+
 				// Verify success by attempting connection (or that it's listening)
 				if tc.port > 0 {
 					// For specific ports, verify connection works
 					verifyServerOnPort(t, tc.port, true, fmt.Sprintf("agent port %d should be listening", tc.port))
 				}
-				
+
 				// Cleanup - cancel context to stop agent
 				cancel()
-				
+
 				// Verify start completed without error (or with expected error)
 				select {
 				case err := <-startErr:
@@ -370,20 +370,20 @@ func findAvailablePort(t *testing.T) int {
 		t.Fatalf("Failed to find available port: %v", err)
 	}
 	defer listener.Close()
-	
+
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
 // verifyServerOnPort checks if a server is listening on a specific port
 func verifyServerOnPort(t *testing.T, port int, shouldBeListening bool, message string) {
 	t.Helper()
-	
+
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), 500*time.Millisecond)
 	isListening := err == nil
 	if conn != nil {
 		conn.Close()
 	}
-	
+
 	if shouldBeListening && !isListening {
 		t.Errorf("%s - expected server on port %d but not found", message, port)
 	}

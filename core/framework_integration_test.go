@@ -29,8 +29,8 @@ func TestFrameworkToolRegistrationFix(t *testing.T) {
 		// Framework should auto-initialize Registry
 		framework, err := NewFramework(tool,
 			WithPort(8083),
-			WithDevelopmentMode(true),                   // Use mock for testing
-			WithDiscovery(true, "redis"),               // Enable discovery
+			WithDevelopmentMode(true),    // Use mock for testing
+			WithDiscovery(true, "redis"), // Enable discovery
 		)
 		require.NoError(t, err, "Framework creation should succeed")
 
@@ -38,8 +38,8 @@ func TestFrameworkToolRegistrationFix(t *testing.T) {
 		agent := NewBaseAgent("framework-test-agent")
 		agentFramework, err := NewFramework(agent,
 			WithPort(8084),
-			WithDevelopmentMode(true),                   // Use mock for testing
-			WithDiscovery(true, "redis"),               // Enable discovery
+			WithDevelopmentMode(true),    // Use mock for testing
+			WithDiscovery(true, "redis"), // Enable discovery
 		)
 		require.NoError(t, err, "Agent framework creation should succeed")
 
@@ -74,23 +74,23 @@ func TestFrameworkToolRegistrationFix(t *testing.T) {
 				t.Logf("Found tool: Name='%s', ID='%s', Type='%s'", service.Name, service.ID, service.Type)
 			}
 		}
-		
+
 		assert.Greater(t, len(tools), 0, "Should discover at least 1 tool")
 
 		// Find our specific tool (framework generates ID with our name + random suffix)
 		var ourTool *ServiceInfo
 		for _, tool := range tools {
-			if tool.Name == "framework-test-tool" || 
-			   strings.Contains(tool.ID, "framework-test-tool") {
+			if tool.Name == "framework-test-tool" ||
+				strings.Contains(tool.ID, "framework-test-tool") {
 				ourTool = tool
 				break
 			}
 		}
-		
+
 		require.NotNil(t, ourTool, "Our framework-managed tool should be discovered")
 
 		// Verify tool details (framework may override name to default)
-		assert.True(t, ourTool.Name == "framework-test-tool" || ourTool.Name == "gomind-agent", 
+		assert.True(t, ourTool.Name == "framework-test-tool" || ourTool.Name == "gomind-agent",
 			"Tool name should be original or framework default")
 		assert.Equal(t, ComponentTypeTool, ourTool.Type)
 		assert.Len(t, ourTool.Capabilities, 1)

@@ -344,4 +344,3 @@ func TestMetadataCopy(t *testing.T) {
 		})
 	}
 }
-

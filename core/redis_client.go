@@ -37,11 +37,13 @@
 // - Graceful shutdown support
 //
 // Usage:
-// client, err := NewRedisClient(RedisClientOptions{
-//     RedisURL: "redis://localhost:6379",
-//     DB: RedisDBRateLimiting,
-//     Namespace: "gomind:ratelimit",
-// })
+//
+//	client, err := NewRedisClient(RedisClientOptions{
+//	    RedisURL: "redis://localhost:6379",
+//	    DB: RedisDBRateLimiting,
+//	    Namespace: "gomind:ratelimit",
+//	})
+//
 // Used throughout the framework for distributed state management.
 package core
 
@@ -167,7 +169,7 @@ func (r *RedisClient) Close() error {
 			"namespace": r.namespace,
 		})
 	}
-	
+
 	err := r.client.Close()
 	if err != nil && r.logger != nil {
 		r.logger.Error("Failed to close Redis client", map[string]interface{}{
@@ -177,7 +179,7 @@ func (r *RedisClient) Close() error {
 			"namespace":  r.namespace,
 		})
 	}
-	
+
 	return err
 }
 
@@ -299,7 +301,7 @@ func (r *RedisClient) HealthCheck(ctx context.Context) error {
 			})
 		}
 	}
-	
+
 	return err
 }
 
@@ -308,25 +310,25 @@ func (r *RedisClient) HealthCheck(ctx context.Context) error {
 const (
 	// RedisDBServiceDiscovery is for service registry (default)
 	RedisDBServiceDiscovery = 0
-	
+
 	// RedisDBRateLimiting is for rate limiting (isolated)
 	RedisDBRateLimiting = 1
-	
+
 	// RedisDBSessions is for session storage
 	RedisDBSessions = 2
-	
+
 	// RedisDBCache is for general caching
 	RedisDBCache = 3
-	
+
 	// RedisDBCircuitBreaker is for circuit breaker state
 	RedisDBCircuitBreaker = 4
-	
+
 	// RedisDBMetrics is for metrics buffering
 	RedisDBMetrics = 5
-	
+
 	// RedisDBTelemetry is for telemetry data
 	RedisDBTelemetry = 6
-	
+
 	// RedisDBReserved7 through RedisDBReserved15 are reserved for future use
 	RedisDBReserved7  = 7
 	RedisDBReserved8  = 8

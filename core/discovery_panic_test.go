@@ -220,10 +220,10 @@ func TestMockDiscovery_FindByCapability(t *testing.T) {
 	// Register services with capabilities
 	for i := 0; i < 5; i++ {
 		service := &ServiceRegistration{
-			ID:           fmt.Sprintf("cap-service-%d", i),
-			Name:         fmt.Sprintf("cap-service-%d", i),
-			Address:      "localhost",
-			Port:         8080 + i,
+			ID:      fmt.Sprintf("cap-service-%d", i),
+			Name:    fmt.Sprintf("cap-service-%d", i),
+			Address: "localhost",
+			Port:    8080 + i,
 			Capabilities: []Capability{
 				{Name: "test-cap"},
 				{Name: "other-cap"},

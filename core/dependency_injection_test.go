@@ -51,7 +51,7 @@ func TestWithDiscoveryAutoConfiguresRedisURL(t *testing.T) {
 		// Clean environment first
 		os.Unsetenv("REDIS_URL")
 		os.Unsetenv("GOMIND_REDIS_URL")
-		
+
 		// Set both variables
 		os.Setenv("REDIS_URL", "redis://primary.example.com:6379")
 		os.Setenv("GOMIND_REDIS_URL", "redis://secondary.example.com:6379")

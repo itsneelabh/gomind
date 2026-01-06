@@ -8,8 +8,8 @@ const (
 	EnvValidatePayloads = "GOMIND_VALIDATE_PAYLOADS" // Enable Phase 3 schema validation
 
 	// Service Discovery
-	EnvRedisURL    = "REDIS_URL"              // Redis connection URL for discovery
-	EnvNamespace   = "NAMESPACE"              // Kubernetes namespace for service isolation
+	EnvRedisURL    = "REDIS_URL"               // Redis connection URL for discovery
+	EnvNamespace   = "NAMESPACE"               // Kubernetes namespace for service isolation
 	EnvServiceName = "GOMIND_K8S_SERVICE_NAME" // Service name in Kubernetes
 
 	// Common Configuration

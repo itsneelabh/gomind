@@ -72,7 +72,7 @@ func TestToolHeartbeatRedisRegistry(t *testing.T) {
 func TestToolHeartbeatNonRedisRegistry(t *testing.T) {
 	ctx := context.Background()
 	tool := NewTool("mock-registry-tool")
-	
+
 	// Use mock registry (not Redis)
 	tool.Registry = &mockRegistryForTest{
 		registrations: make(map[string]*ServiceInfo),
@@ -150,7 +150,7 @@ func TestAgentHeartbeatRedisDiscovery(t *testing.T) {
 func TestAgentHeartbeatRegistrationFailure(t *testing.T) {
 	ctx := context.Background()
 	agent := NewBaseAgent("failing-agent")
-	
+
 	// Use failing discovery
 	agent.Discovery = &failingDiscovery{
 		shouldFail: true,

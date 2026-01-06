@@ -570,7 +570,7 @@ func (c *Config) LoadFromEnv() error {
 		} else if c.logger != nil {
 			c.logger.Warn("Invalid retry interval in environment variable", map[string]interface{}{
 				"GOMIND_DISCOVERY_RETRY_INTERVAL": v,
-				"error":                            err.Error(),
+				"error":                           err.Error(),
 			})
 		}
 	}
@@ -788,7 +788,7 @@ func (c *Config) LoadFromFile(path string) error {
 			return fmt.Errorf("failed to get working directory: %w", err)
 		}
 		cleanPath = filepath.Join(wd, cleanPath)
-		
+
 		if c.logger != nil {
 			c.logger.Debug("Resolved relative config path", map[string]interface{}{
 				"original_path": path,
@@ -833,7 +833,7 @@ func (c *Config) LoadFromFile(path string) error {
 				"file_path": cleanPath,
 			})
 		}
-		
+
 		if err := json.Unmarshal(data, c); err != nil {
 			if c.logger != nil {
 				c.logger.Error("Failed to parse JSON config file", map[string]interface{}{
@@ -845,7 +845,7 @@ func (c *Config) LoadFromFile(path string) error {
 			}
 			return fmt.Errorf("failed to parse JSON config file: %w", ErrInvalidConfiguration)
 		}
-		
+
 		if c.logger != nil {
 			c.logger.Info("Configuration file loaded successfully", map[string]interface{}{
 				"file_path": cleanPath,
@@ -853,7 +853,7 @@ func (c *Config) LoadFromFile(path string) error {
 				"file_size": len(data),
 			})
 		}
-		
+
 	case ".yaml", ".yml":
 		if c.logger != nil {
 			c.logger.Error("YAML configuration files not supported", map[string]interface{}{
@@ -1104,16 +1104,16 @@ func WithDiscovery(enabled bool, provider string) Option {
 	return func(c *Config) error {
 		c.Discovery.Enabled = enabled
 		c.Discovery.Provider = provider
-		
+
 		// Auto-configure Redis URL for Redis provider
 		if enabled && provider == "redis" {
 			// Check if RedisURL was explicitly set by user configuration
 			// We can distinguish this from LoadFromEnv by checking if it's not one of the common env values
 			currentURL := c.Discovery.RedisURL
-			wasExplicitlySet := currentURL != "" && 
-				currentURL != os.Getenv("REDIS_URL") && 
+			wasExplicitlySet := currentURL != "" &&
+				currentURL != os.Getenv("REDIS_URL") &&
 				currentURL != os.Getenv("GOMIND_REDIS_URL")
-			
+
 			if !wasExplicitlySet {
 				// Apply proper precedence: REDIS_URL takes precedence over GOMIND_REDIS_URL
 				redisURL := os.Getenv("REDIS_URL")
@@ -1136,7 +1136,9 @@ func WithDiscovery(enabled bool, provider string) Option {
 
 // WithRedisDiscovery is a convenience function that configures Redis-based discovery
 // with the specified Redis URL. This is equivalent to calling:
-//   WithDiscovery(true, "redis") + WithRedisURL(redisURL)
+//
+//	WithDiscovery(true, "redis") + WithRedisURL(redisURL)
+//
 // but more explicit and convenient for Redis-specific setups.
 func WithRedisDiscovery(redisURL string) Option {
 	return func(c *Config) error {
@@ -1531,9 +1533,9 @@ func parseLogLevel(level string) LogLevel {
 
 // ProductionLogger provides layered observability for framework operations
 type ProductionLogger struct {
-	level          LogLevel  // Numeric level for efficient comparison
+	level          LogLevel // Numeric level for efficient comparison
 	serviceName    string
-	component      string    // Component identifier (e.g., "framework/core", "agent/<name>", "tool/<name>")
+	component      string // Component identifier (e.g., "framework/core", "agent/<name>", "tool/<name>")
 	format         string
 	output         io.Writer
 	metricsEnabled bool // Metrics layer (enabled when telemetry available)

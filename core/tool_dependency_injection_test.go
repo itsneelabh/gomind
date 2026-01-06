@@ -11,10 +11,10 @@ import (
 // TestBaseTool_Initialize_AutoInjectsRegistry tests the new auto-injection functionality
 func TestBaseTool_Initialize_AutoInjectsRegistry(t *testing.T) {
 	tests := []struct {
-		name                string
-		config              *Config
-		presetRegistry      Registry
-		expectedRegistryNil bool
+		name                 string
+		config               *Config
+		presetRegistry       Registry
+		expectedRegistryNil  bool
 		expectedRegistryType string
 	}{
 		{
@@ -26,8 +26,8 @@ func TestBaseTool_Initialize_AutoInjectsRegistry(t *testing.T) {
 					RedisURL: "redis://localhost:6379",
 				},
 			},
-			presetRegistry:      nil,
-			expectedRegistryNil: false,
+			presetRegistry:       nil,
+			expectedRegistryNil:  false,
 			expectedRegistryType: "*core.RedisRegistry",
 		},
 		{
@@ -42,8 +42,8 @@ func TestBaseTool_Initialize_AutoInjectsRegistry(t *testing.T) {
 					MockDiscovery: true,
 				},
 			},
-			presetRegistry:      nil,
-			expectedRegistryNil: false,
+			presetRegistry:       nil,
+			expectedRegistryNil:  false,
 			expectedRegistryType: "*core.MockDiscovery",
 		},
 		{
@@ -55,8 +55,8 @@ func TestBaseTool_Initialize_AutoInjectsRegistry(t *testing.T) {
 					RedisURL: "redis://localhost:6379",
 				},
 			},
-			presetRegistry:      NewMockDiscovery(),
-			expectedRegistryNil: false,
+			presetRegistry:       NewMockDiscovery(),
+			expectedRegistryNil:  false,
 			expectedRegistryType: "*core.MockDiscovery",
 		},
 		{
@@ -68,15 +68,15 @@ func TestBaseTool_Initialize_AutoInjectsRegistry(t *testing.T) {
 					RedisURL: "redis://localhost:6379",
 				},
 			},
-			presetRegistry:      nil,
-			expectedRegistryNil: true,
+			presetRegistry:       nil,
+			expectedRegistryNil:  true,
 			expectedRegistryType: "",
 		},
 		{
-			name: "no_initialization_when_no_config",
-			config:              nil,
-			presetRegistry:      nil,
-			expectedRegistryNil: true,
+			name:                 "no_initialization_when_no_config",
+			config:               nil,
+			presetRegistry:       nil,
+			expectedRegistryNil:  true,
 			expectedRegistryType: "",
 		},
 		{
@@ -88,8 +88,8 @@ func TestBaseTool_Initialize_AutoInjectsRegistry(t *testing.T) {
 					RedisURL: "", // Empty URL
 				},
 			},
-			presetRegistry:      nil,
-			expectedRegistryNil: true,
+			presetRegistry:       nil,
+			expectedRegistryNil:  true,
 			expectedRegistryType: "",
 		},
 	}
@@ -121,7 +121,7 @@ func TestBaseTool_Initialize_AutoInjectsRegistry(t *testing.T) {
 				assert.Nil(t, tool.Registry, "Registry should be nil")
 			} else {
 				require.NotNil(t, tool.Registry, "Registry should be initialized")
-				assert.Equal(t, tt.expectedRegistryType, getTypeName(tool.Registry), 
+				assert.Equal(t, tt.expectedRegistryType, getTypeName(tool.Registry),
 					"Registry should be of expected type")
 			}
 		})
@@ -167,7 +167,7 @@ func TestBaseTool_Initialize_RegistrationWithAutoInjectedRegistry(t *testing.T) 
 		services, err := mockRegistry.Discover(ctx, DiscoveryFilter{})
 		require.NoError(t, err, "Discovery should work")
 		assert.Len(t, services, 1, "Tool should be registered")
-		
+
 		registeredTool := services[0]
 		assert.Equal(t, "test-tool", registeredTool.ID)
 		assert.Equal(t, "test-tool", registeredTool.Name)

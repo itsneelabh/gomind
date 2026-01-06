@@ -28,25 +28,27 @@ type HeartbeatStats struct {
 // This callback enables parent components (BaseTool, BaseAgent) to atomically update their
 // registry/discovery references in a thread-safe manner. The callback receives the new
 // registry instance and should:
-//   1. Acquire appropriate locks (e.g., mu.Lock())
-//   2. Stop old heartbeat if one exists
-//   3. Update the registry/discovery field
-//   4. Release locks
+//  1. Acquire appropriate locks (e.g., mu.Lock())
+//  2. Stop old heartbeat if one exists
+//  3. Update the registry/discovery field
+//  4. Release locks
 //
 // Example usage in BaseTool:
-//   onSuccess := func(newRegistry Registry) error {
-//       t.mu.Lock()
-//       defer t.mu.Unlock()
-//       if oldReg, ok := t.Registry.(*RedisRegistry); ok && oldReg != nil {
-//           oldReg.StopHeartbeat(ctx, t.ID)
-//       }
-//       t.Registry = newRegistry
-//       return nil
-//   }
+//
+//	onSuccess := func(newRegistry Registry) error {
+//	    t.mu.Lock()
+//	    defer t.mu.Unlock()
+//	    if oldReg, ok := t.Registry.(*RedisRegistry); ok && oldReg != nil {
+//	        oldReg.StopHeartbeat(ctx, t.ID)
+//	    }
+//	    t.Registry = newRegistry
+//	    return nil
+//	}
 //
 // The callback must return nil on success, or an error if the update failed.
 // Note: For agents, the registry will be *RedisDiscovery (implements Discovery interface).
-//       For tools, the registry will be *RedisRegistry (implements Registry interface).
+//
+//	For tools, the registry will be *RedisRegistry (implements Registry interface).
 type RegistryUpdateCallback func(newRegistry Registry) error
 
 // registryRetryState maintains state for background retry attempts.
@@ -74,7 +76,7 @@ type RedisRegistry struct {
 
 	// Self-healing state management (internal enhancement)
 	registrationState map[string]*ServiceInfo
-	stateMutex       sync.RWMutex
+	stateMutex        sync.RWMutex
 
 	// Heartbeat tracking for periodic summaries
 	heartbeatStats map[string]*HeartbeatStats
@@ -456,7 +458,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 					"capabilities_count": len(info.Capabilities),
 				})
 			}
-			
+
 			// Remove from capability indexes
 			for _, capability := range info.Capabilities {
 				capKey := fmt.Sprintf("%s:capabilities:%s", r.namespace, capability.Name)
@@ -575,7 +577,7 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 			"ttl":                (r.ttl * 2).String(),
 		})
 	}
-	
+
 	// Refresh capability indexes
 	for _, capability := range info.Capabilities {
 		capKey := fmt.Sprintf("%s:capabilities:%s", r.namespace, capability.Name)
@@ -591,7 +593,7 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 			// Continue with other indexes even if one fails
 		}
 	}
-	
+
 	// Refresh name index
 	nameKey := fmt.Sprintf("%s:names:%s", r.namespace, info.Name)
 	if err := r.client.Expire(ctx, nameKey, r.ttl*2).Err(); err != nil {
@@ -604,8 +606,8 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 			})
 		}
 	}
-	
-	// Refresh type index  
+
+	// Refresh type index
 	typeKey := fmt.Sprintf("%s:types:%s", r.namespace, info.Type)
 	if err := r.client.Expire(ctx, typeKey, r.ttl*2).Err(); err != nil {
 		if r.logger != nil {
@@ -617,7 +619,7 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 			})
 		}
 	}
-	
+
 	if r.logger != nil {
 		r.logger.Debug("Index set TTL refresh completed", map[string]interface{}{
 			"service_id":   info.ID,
@@ -894,7 +896,8 @@ func (r *RedisRegistry) logHeartbeatSummary(serviceID string, isFinal bool) {
 //   - serviceID: Unique identifier of the service whose heartbeat should stop
 //
 // Example usage:
-//   registry.StopHeartbeat(ctx, "my-service-123")
+//
+//	registry.StopHeartbeat(ctx, "my-service-123")
 func (r *RedisRegistry) StopHeartbeat(ctx context.Context, serviceID string) {
 	r.heartbeatsMu.Lock()
 	defer r.heartbeatsMu.Unlock()
@@ -984,15 +987,16 @@ func (r *RedisRegistry) StartHeartbeat(ctx context.Context, serviceID string) {
 //   - onSuccess: Callback invoked when retry succeeds (for updating parent's registry ref)
 //
 // Example usage in BaseTool initialization:
-//   if _, err := NewRedisRegistry(redisURL); err != nil {
-//       StartRegistryRetry(ctx, redisURL, serviceInfo, 30*time.Second, logger,
-//           func(newRegistry Registry) error {
-//               t.mu.Lock()
-//               defer t.mu.Unlock()
-//               t.Registry = newRegistry
-//               return nil
-//           })
-//   }
+//
+//	if _, err := NewRedisRegistry(redisURL); err != nil {
+//	    StartRegistryRetry(ctx, redisURL, serviceInfo, 30*time.Second, logger,
+//	        func(newRegistry Registry) error {
+//	            t.mu.Lock()
+//	            defer t.mu.Unlock()
+//	            t.Registry = newRegistry
+//	            return nil
+//	        })
+//	}
 //
 // Thread safety: Safe to call from multiple goroutines. Each invocation creates
 // an independent retry manager.
@@ -1017,8 +1021,8 @@ func StartRegistryRetry(
 //
 // This function implements the core retry logic with exponential backoff. It runs in a
 // background goroutine launched by StartRegistryRetry and continues until either:
-//   1. Reconnection succeeds and service is registered
-//   2. Context is cancelled (e.g., service shutdown)
+//  1. Reconnection succeeds and service is registered
+//  2. Context is cancelled (e.g., service shutdown)
 //
 // Retry algorithm:
 //   - Attempts reconnection at each timer tick

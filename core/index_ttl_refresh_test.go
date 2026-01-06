@@ -15,7 +15,7 @@ import (
 
 // TestIndexSetTTLRefresh tests the critical bug fix where healthy services
 // become undiscoverable after 60 seconds due to index set expiration.
-// 
+//
 // Problem: Service keys have 30s TTL (refreshed every 15s by heartbeat),
 // but index sets have 60s TTL (never refreshed). After 60s, healthy services
 // disappear from filtered discovery even though they're alive.
@@ -38,14 +38,14 @@ func TestIndexSetTTLRefresh(t *testing.T) {
 		client.Del(ctx, keys...)
 	}
 
-	// Create registry with realistic TTLs for testing  
+	// Create registry with realistic TTLs for testing
 	registry, err := NewRedisRegistryWithNamespace("redis://localhost:6379", "gomind-ttl-test")
 	require.NoError(t, err, "Failed to create test registry")
-	
+
 	// Override TTL for faster testing (normally 30s, use 10s for test)
 	// Service TTL = 10s, Index TTL = 20s (2x service TTL)
 	registry.ttl = 10 * time.Second
-	
+
 	// Create discovery client
 	discovery, err := NewRedisDiscoveryWithNamespace("redis://localhost:6379", "gomind-ttl-test")
 	require.NoError(t, err, "Failed to create discovery client")
@@ -53,7 +53,7 @@ func TestIndexSetTTLRefresh(t *testing.T) {
 	// Test service info
 	testService := &ServiceInfo{
 		ID:      "test-service-ttl-refresh",
-		Name:    "ttl-test-service", 
+		Name:    "ttl-test-service",
 		Type:    "tool",
 		Address: "localhost",
 		Port:    9999,
@@ -92,7 +92,7 @@ func TestIndexSetTTLRefresh(t *testing.T) {
 		nameTTL, _ := client.TTL(ctx, nameKey).Result()
 		typeTTL, _ := client.TTL(ctx, typeKey).Result()
 
-		t.Logf("Initial TTLs - Service: %v, Capability: %v, Name: %v, Type: %v", 
+		t.Logf("Initial TTLs - Service: %v, Capability: %v, Name: %v, Type: %v",
 			serviceTTL, capabilityTTL, nameTTL, typeTTL)
 
 		// Service TTL should be ~10s, index sets should be ~20s
@@ -114,7 +114,7 @@ func TestIndexSetTTLRefresh(t *testing.T) {
 		nameTTL, _ = client.TTL(ctx, nameKey).Result()
 		typeTTL, _ = client.TTL(ctx, typeKey).Result()
 
-		t.Logf("TTLs after heartbeat - Service: %v, Capability: %v, Name: %v, Type: %v", 
+		t.Logf("TTLs after heartbeat - Service: %v, Capability: %v, Name: %v, Type: %v",
 			serviceTTL, capabilityTTL, nameTTL, typeTTL)
 
 		// After heartbeat, both service and index TTLs should be refreshed
@@ -128,7 +128,7 @@ func TestIndexSetTTLRefresh(t *testing.T) {
 		assert.Len(t, services, 1, "Should still find 1 service after heartbeat")
 		assert.Equal(t, testService.ID, services[0].ID, "Should find correct service after heartbeat")
 
-		services, err = discovery.FindService(ctx, "ttl-test-service") 
+		services, err = discovery.FindService(ctx, "ttl-test-service")
 		require.NoError(t, err, "Name discovery after heartbeat failed")
 		assert.Len(t, services, 1, "Should still find 1 service by name after heartbeat")
 
@@ -142,7 +142,7 @@ func TestIndexSetTTLRefresh(t *testing.T) {
 		// Service should still be discoverable
 		t.Log("=== Testing discovery after second heartbeat ===")
 		services, err = discovery.FindByCapability(ctx, "test-capability")
-		require.NoError(t, err, "Capability discovery after second heartbeat failed") 
+		require.NoError(t, err, "Capability discovery after second heartbeat failed")
 		assert.Len(t, services, 1, "Should still find 1 service after second heartbeat")
 
 		services, err = discovery.FindService(ctx, "ttl-test-service")
@@ -201,7 +201,7 @@ func TestIndexSetTTLRefreshWithFailures(t *testing.T) {
 	testService := &ServiceInfo{
 		ID:      "test-service-failure",
 		Name:    "failure-test-service",
-		Type:    "tool", 
+		Type:    "tool",
 		Address: "localhost",
 		Port:    9998,
 		Capabilities: []Capability{

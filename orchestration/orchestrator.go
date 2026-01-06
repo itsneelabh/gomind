@@ -115,6 +115,13 @@ func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiC
 		o.executor.SetMaxSemanticRetries(config.SemanticRetry.MaxAttempts)
 	}
 
+	// Wire step completion callback for async progress reporting (v1 addition)
+	// This enables async task handlers to receive per-tool progress updates.
+	// See notes/ASYNC_TASK_DESIGN.md Phase 6 for details.
+	if config.ExecutionOptions.OnStepComplete != nil {
+		o.executor.SetOnStepComplete(config.ExecutionOptions.OnStepComplete)
+	}
+
 	return o
 }
 
