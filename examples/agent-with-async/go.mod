@@ -1,13 +1,13 @@
-module github.com/itsneelabh/gomind/examples/agent-with-telemetry
+module github.com/itsneelabh/gomind/examples/agent-with-async
 
 go 1.25
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/itsneelabh/gomind/ai v0.8.3
+	github.com/itsneelabh/gomind/ai v0.0.0
 	github.com/itsneelabh/gomind/core v0.8.3
+	github.com/itsneelabh/gomind/orchestration v0.0.0
 	github.com/itsneelabh/gomind/telemetry v0.8.3
-	go.opentelemetry.io/otel v1.38.0
 )
 
 require (
@@ -21,6 +21,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.58.0 // indirect
+	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.38.0 // indirect
@@ -36,4 +37,13 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250826171959-ef028d996bc1 // indirect
 	google.golang.org/grpc v1.75.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
+
+replace (
+	github.com/itsneelabh/gomind/ai => ../../ai
+	github.com/itsneelabh/gomind/core => ../../core
+	github.com/itsneelabh/gomind/orchestration => ../../orchestration
+	github.com/itsneelabh/gomind/resilience => ../../resilience
+	github.com/itsneelabh/gomind/telemetry => ../../telemetry
 )
