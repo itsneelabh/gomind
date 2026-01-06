@@ -179,6 +179,9 @@ func TestBaseTool_Initialize_RegistrationWithAutoInjectedRegistry(t *testing.T) 
 
 // TestBaseTool_Initialize_GracefulDegradation tests error handling
 func TestBaseTool_Initialize_GracefulDegradation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (Redis connection timeout)")
+	}
 	t.Run("graceful_degradation_on_redis_failure", func(t *testing.T) {
 		// Create tool with invalid Redis URL
 		tool := &BaseTool{

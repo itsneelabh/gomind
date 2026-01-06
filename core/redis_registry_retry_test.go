@@ -13,6 +13,9 @@ import (
 // TestRedisRegistry_InitialRetryDuration verifies that initial connection attempts
 // complete within the expected 10-13 second window
 func TestRedisRegistry_InitialRetryDuration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (waits for connection timeout)")
+	}
 	// Use non-existent Redis to trigger retry logic
 	redisURL := "redis://localhost:9999"
 
@@ -35,6 +38,9 @@ func TestRedisRegistry_InitialRetryDuration(t *testing.T) {
 // TestRedisRegistry_ExponentialBackoff verifies that the retry interval
 // doubles on each failure and caps at 5 minutes
 func TestRedisRegistry_ExponentialBackoff(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (30s timing test)")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -286,6 +292,9 @@ func TestRedisRegistry_RetryForTools(t *testing.T) {
 
 // TestRedisRegistry_RetryShutdown verifies graceful shutdown during active retry
 func TestRedisRegistry_RetryShutdown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (1s sleep)")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	shutdownChan := make(chan bool, 1)

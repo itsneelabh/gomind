@@ -140,6 +140,9 @@ func TestIntersect(t *testing.T) {
 
 // TestRedisDiscoveryConstructorValidation tests constructor parameter validation
 func TestRedisDiscoveryConstructorValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (Redis connection attempts)")
+	}
 	tests := []struct {
 		name        string
 		redisURL    string

@@ -200,6 +200,9 @@ func TestPortConfigFallback(t *testing.T) {
 
 // TestPortValidation tests port range validation
 func TestPortValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (server startup tests)")
+	}
 	// Use dynamic port allocation to avoid conflicts in CI
 	testCases := []struct {
 		name        string

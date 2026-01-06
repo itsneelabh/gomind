@@ -88,6 +88,9 @@ func TestBaseAgent_determineRegistrationAddress(t *testing.T) {
 
 // TestBaseAgent_Initialize tests the Initialize method with different configurations
 func TestBaseAgent_Initialize(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode (Redis connection attempts)")
+	}
 	ctx := context.Background()
 
 	t.Run("initialize with nil config", func(t *testing.T) {
