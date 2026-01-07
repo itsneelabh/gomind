@@ -99,12 +99,19 @@ cmd_run() {
 }
 
 # Build Docker image (fetches modules from GitHub)
+# Usage: cmd_docker_build [--no-cache]
 cmd_docker_build() {
     print_header "Building Docker Image"
 
+    local no_cache_flag=""
+    if [ "$DOCKER_NO_CACHE" = "true" ] || [ "$1" = "--no-cache" ]; then
+        print_info "Building with --no-cache (fresh dependency download)"
+        no_cache_flag="--no-cache"
+    fi
+
     print_info "Building with standalone Dockerfile (fetches modules from GitHub)..."
 
-    docker build -t $APP_NAME:latest "$SCRIPT_DIR"
+    docker build $no_cache_flag -t $APP_NAME:latest "$SCRIPT_DIR"
 
     print_success "Docker image built: $APP_NAME:latest"
 }
@@ -402,6 +409,50 @@ cmd_clean() {
     print_success "Agent cleanup complete"
 }
 
+# Rebuild with no-cache and redeploy
+# This ensures fresh dependencies are downloaded from GitHub
+cmd_rebuild() {
+    print_header "Rebuilding with Fresh Dependencies"
+
+    load_env
+
+    # Build Docker image with --no-cache
+    print_info "Building Docker image with --no-cache..."
+    DOCKER_NO_CACHE=true cmd_docker_build
+
+    # Load image into kind cluster if available
+    if command -v kind &> /dev/null; then
+        print_info "Loading image into kind cluster..."
+        kind load docker-image $APP_NAME:latest --name "$CLUSTER_NAME"
+        print_success "Image loaded"
+    fi
+
+    # Create namespace
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+    # Setup API keys if function exists
+    if type setup_api_keys &>/dev/null; then
+        setup_api_keys
+    fi
+
+    # Apply Kubernetes manifests
+    print_info "Applying Kubernetes manifests..."
+    kubectl apply -f k8-deployment.yaml
+
+    # Restart deployment to pick up new image
+    print_info "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    print_info "Waiting for deployment to be ready..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        print_success "$APP_NAME rebuilt and deployed with fresh dependencies!"
+    else
+        print_error "Deployment failed. Checking logs..."
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+}
+
 # Clean up everything including cluster
 cmd_clean_all() {
     print_header "Cleaning Up Everything"
@@ -440,6 +491,7 @@ cmd_help() {
     echo "Kubernetes Deployment Commands:"
     echo "  docker-build  Build Docker image with local workspace modules"
     echo "  deploy        Build, load, and deploy to Kubernetes"
+    echo "  rebuild       Rebuild with --no-cache and redeploy (fresh dependencies)"
     echo "  test          Run test requests against deployed agent"
     echo "  forward       Port forward the agent service only"
     echo "  forward-all   Port forward agent + monitoring dashboards"
@@ -485,6 +537,9 @@ case "${1:-help}" in
         ;;
     deploy)
         cmd_deploy
+        ;;
+    rebuild)
+        cmd_rebuild
         ;;
     full-deploy)
         cmd_full_deploy

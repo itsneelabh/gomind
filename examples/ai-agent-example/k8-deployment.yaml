@@ -92,8 +92,8 @@ spec:
         fsGroup: 1001
       containers:
       - name: ai-first-agent
-        image: ai-first-agent-example:latest
-        imagePullPolicy: Always
+        image: ai-first-agent:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - name: http
           containerPort: 8080

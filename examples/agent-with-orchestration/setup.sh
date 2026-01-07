@@ -278,11 +278,18 @@ build_tools() {
 }
 
 # Build Docker images
+# Set DOCKER_NO_CACHE=true to rebuild with fresh dependencies
 build_docker() {
     log_info "Building Docker images..."
 
+    local no_cache_flag=""
+    if [ "$DOCKER_NO_CACHE" = "true" ]; then
+        log_info "Building with --no-cache (fresh dependency download)"
+        no_cache_flag="--no-cache"
+    fi
+
     # Build using standalone Dockerfile (fetches modules from GitHub)
-    docker build -t travel-research-agent:latest "$AGENT_DIR"
+    docker build $no_cache_flag -t travel-research-agent:latest "$AGENT_DIR"
     log_success "travel-research-agent:latest built"
 }
 
@@ -775,6 +782,7 @@ Kubernetes Cluster Commands:
 Kubernetes Deployment Commands:
   docker         Build Docker images
   deploy         Build, load to Kind, and deploy to Kubernetes
+  rebuild        Rebuild with --no-cache and redeploy (fresh dependencies)
   forward        Port forward agent only
   forward-all    Port forward agent + monitoring (recommended)
   test           Run the orchestration test scenario
@@ -851,6 +859,43 @@ cleanup_all() {
     log_success "Full cleanup complete"
 }
 
+# Rebuild with no-cache and redeploy
+# This ensures fresh dependencies are downloaded from GitHub
+rebuild() {
+    log_info "Rebuilding with Fresh Dependencies"
+
+    # Build Docker image with --no-cache
+    log_info "Building Docker image with --no-cache..."
+    DOCKER_NO_CACHE=true build_docker
+
+    # Load image into kind cluster if available
+    if command -v kind &> /dev/null && kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+        log_info "Loading image into kind cluster..."
+        kind load docker-image travel-research-agent:latest --name "$CLUSTER_NAME"
+        log_success "Image loaded"
+    fi
+
+    # Create namespace
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+    # Apply Kubernetes manifests
+    log_info "Applying Kubernetes manifests..."
+    kubectl apply -f "$AGENT_DIR/k8-deployment.yaml"
+
+    # Restart deployment to pick up new image
+    log_info "Restarting deployment..."
+    kubectl rollout restart deployment/travel-research-agent -n $NAMESPACE
+
+    log_info "Waiting for deployment to be ready..."
+    if kubectl rollout status deployment/travel-research-agent -n $NAMESPACE --timeout=120s; then
+        log_success "travel-research-agent rebuilt and deployed with fresh dependencies!"
+    else
+        log_error "Deployment failed. Checking logs..."
+        kubectl logs -n $NAMESPACE -l app=travel-research-agent --tail=20
+        exit 1
+    fi
+}
+
 # Handle arguments
 case "${1:-setup}" in
     setup)
@@ -892,6 +937,10 @@ case "${1:-setup}" in
         build_docker
         load_to_kind
         deploy_k8s
+        ;;
+    rebuild)
+        check_prerequisites
+        rebuild
         ;;
     full-deploy)
         check_prerequisites

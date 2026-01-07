@@ -4,9 +4,9 @@ go 1.25
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/itsneelabh/gomind/ai v0.0.0
+	github.com/itsneelabh/gomind/ai v0.8.3
 	github.com/itsneelabh/gomind/core v0.8.3
-	github.com/itsneelabh/gomind/orchestration v0.0.0
+	github.com/itsneelabh/gomind/orchestration v0.8.3
 	github.com/itsneelabh/gomind/telemetry v0.8.3
 )
 
@@ -38,12 +38,4 @@ require (
 	google.golang.org/grpc v1.75.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
-
-replace (
-	github.com/itsneelabh/gomind/ai => ../../ai
-	github.com/itsneelabh/gomind/core => ../../core
-	github.com/itsneelabh/gomind/orchestration => ../../orchestration
-	github.com/itsneelabh/gomind/resilience => ../../resilience
-	github.com/itsneelabh/gomind/telemetry => ../../telemetry
 )

@@ -256,20 +256,27 @@ build_all() {
 }
 
 # Build Docker images
+# Set DOCKER_NO_CACHE=true to rebuild with fresh dependencies
 build_docker() {
     log_info "Building Docker images..."
 
+    local no_cache_flag=""
+    if [ "$DOCKER_NO_CACHE" = "true" ]; then
+        log_info "Building with --no-cache (fresh dependency download)"
+        no_cache_flag="--no-cache"
+    fi
+
     if [ -d "$GROCERY_API_DIR" ]; then
-        docker build -t grocery-store-api:latest "$GROCERY_API_DIR"
+        docker build $no_cache_flag -t grocery-store-api:latest "$GROCERY_API_DIR"
         log_success "grocery-store-api:latest built"
     fi
 
     if [ -d "$GROCERY_TOOL_DIR" ]; then
-        docker build -t grocery-tool:latest "$GROCERY_TOOL_DIR"
+        docker build $no_cache_flag -t grocery-tool:latest "$GROCERY_TOOL_DIR"
         log_success "grocery-tool:latest built"
     fi
 
-    docker build -t research-agent-resilience:latest "$AGENT_DIR"
+    docker build $no_cache_flag -t research-agent-resilience:latest "$AGENT_DIR"
     log_success "research-agent-resilience:latest built"
 }
 
@@ -891,6 +898,50 @@ cmd_rollout() {
     fi
 }
 
+# Rebuild with no-cache and redeploy
+# This ensures fresh dependencies are downloaded from GitHub
+cmd_rebuild() {
+    print_header "Rebuilding with Fresh Dependencies"
+
+    load_env
+
+    # Build Docker image with --no-cache
+    print_info "Building Docker image with --no-cache..."
+    DOCKER_NO_CACHE=true build_docker
+
+    # Load image into kind cluster if available
+    if command -v kind &> /dev/null; then
+        print_info "Loading image into kind cluster..."
+        load_to_kind
+        print_success "Image loaded"
+    fi
+
+    # Create namespace
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+    # Setup API keys if function exists
+    if type setup_k8s_secrets &>/dev/null; then
+        setup_k8s_secrets
+    fi
+
+    # Apply Kubernetes manifests
+    print_info "Applying Kubernetes manifests..."
+    kubectl apply -f "$AGENT_DIR/k8-deployment.yaml"
+
+    # Restart deployment to pick up new image
+    print_info "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    print_info "Waiting for deployment to be ready..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        print_success "$APP_NAME rebuilt and deployed with fresh dependencies!"
+    else
+        print_error "Deployment failed. Checking logs..."
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+}
+
 # Build the agent (standardized)
 cmd_build() {
     print_header "Building Agent"
@@ -957,6 +1008,7 @@ STANDARDIZED 1-CLICK DEPLOYMENT COMMANDS:
   infra         Setup infrastructure (Redis, Prometheus, Grafana, Jaeger)
   full-deploy   ONE-CLICK: cluster + infra + deploy + port forwards
   deploy        Build Docker images and deploy to Kubernetes
+  rebuild       Rebuild with --no-cache and redeploy (fresh dependencies)
   forward       Port forward the agent service only
   forward-all   Port forward agent + monitoring dashboards
   test          Run resilience test scenario
@@ -1022,6 +1074,9 @@ case "${1:-help}" in
         ;;
     deploy)
         cmd_deploy
+        ;;
+    rebuild)
+        cmd_rebuild
         ;;
     forward)
         cmd_forward

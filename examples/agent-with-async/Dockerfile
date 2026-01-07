@@ -1,15 +1,15 @@
-# Standalone Dockerfile for ai-first-agent
+# Standalone Dockerfile for async-travel-agent
 # This Dockerfile builds the agent independently without workspace dependencies
-# Usage (from ai-agent-example directory): docker build -t ai-first-agent:latest .
+# Usage (from agent-with-async directory): docker build -t async-travel-agent:latest .
 
 FROM golang:1.25-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git make gcc musl-dev ca-certificates tzdata
+RUN apk add --no-cache git make gcc musl-dev ca-certificates
 
 WORKDIR /app
 
-# Copy only the ai-agent-example directory (standalone build)
+# Copy only the agent-with-async directory (standalone build)
 COPY go.mod go.sum ./
 COPY *.go ./
 
@@ -26,15 +26,15 @@ RUN go mod download && go mod verify
 ARG TARGETARCH=arm64
 RUN go build -a -installsuffix cgo \
     -ldflags '-w -s -extldflags "-static"' \
-    -o ai-first-agent .
+    -o async-travel-agent .
 
 # Verify the binary was created
-RUN ls -lh ai-first-agent
+RUN ls -lh async-travel-agent
 
 # Runtime stage
 FROM alpine:latest
 
-# Install runtime dependencies
+# Install runtime dependencies (no curl - use K8s probes for health checks)
 RUN apk --no-cache add ca-certificates tzdata
 
 WORKDIR /app
@@ -44,28 +44,21 @@ RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
 # Copy binary from builder stage
-COPY --from=builder /app/ai-first-agent .
+COPY --from=builder /app/async-travel-agent .
 
 # Change ownership to non-root user
-RUN chown appuser:appgroup /app/ai-first-agent && \
-    chmod +x /app/ai-first-agent
+RUN chown appuser:appgroup /app/async-travel-agent && \
+    chmod +x /app/async-travel-agent
 USER appuser
 
 # Set default PORT if not provided
-ENV PORT=8080
+ENV PORT=8098
 
 # Note: Health checks handled by Kubernetes probes (livenessProbe/readinessProbe)
 # See k8-deployment.yaml for probe configuration
 
-# Expose port (default 8080, can be overridden by PORT env var)
+# Expose port (default 8098, can be overridden by PORT env var)
 EXPOSE ${PORT}
 
 # Run the binary
-ENTRYPOINT ["./ai-first-agent"]
-
-# Labels for container metadata
-LABEL maintainer="GoMind Framework Team"
-LABEL version="1.0.0"
-LABEL description="AI-First Agent where AI drives every decision and process"
-LABEL org.opencontainers.image.source="https://github.com/itsneelabh/gomind"
-LABEL org.opencontainers.image.documentation="https://github.com/itsneelabh/gomind/tree/main/examples/ai-agent-example"
+ENTRYPOINT ["./async-travel-agent"]

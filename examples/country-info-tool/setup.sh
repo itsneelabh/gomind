@@ -115,6 +115,7 @@ cmd_run() {
     ./"$APP_NAME"
 }
 
+# Usage: cmd_docker_build [--no-cache]
 cmd_docker_build() {
     print_header "Building Docker image"
 
@@ -122,8 +123,14 @@ cmd_docker_build() {
         exit 1
     fi
 
+    local no_cache_flag=""
+    if [ "$DOCKER_NO_CACHE" = "true" ] || [ "$1" = "--no-cache" ]; then
+        print_info "Building with --no-cache (fresh dependency download)"
+        no_cache_flag="--no-cache"
+    fi
+
     print_info "Building docker image: $APP_NAME:latest"
-    docker build -t "$APP_NAME:latest" .
+    docker build $no_cache_flag -t "$APP_NAME:latest" .
 
     print_success "Docker image built successfully"
     docker images | grep "$APP_NAME"
@@ -587,6 +594,49 @@ cmd_clean_all() {
 }
 
 ################################################################################
+# Rebuild Command
+################################################################################
+
+# Rebuild with no-cache and redeploy
+# This ensures fresh dependencies are downloaded from GitHub
+cmd_rebuild() {
+    print_header "Rebuilding with Fresh Dependencies"
+
+    load_env
+
+    # Build Docker image with --no-cache
+    print_info "Building Docker image with --no-cache..."
+    DOCKER_NO_CACHE=true cmd_docker_build
+
+    # Load image into kind cluster if available
+    if command -v kind &> /dev/null; then
+        print_info "Loading image into kind cluster..."
+        kind load docker-image $APP_NAME:latest --name "$CLUSTER_NAME"
+        print_success "Image loaded"
+    fi
+
+    # Create namespace
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+    # Apply Kubernetes manifests
+    print_info "Applying Kubernetes manifests..."
+    kubectl apply -f k8-deployment.yaml
+
+    # Restart deployment to pick up new image
+    print_info "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    print_info "Waiting for deployment to be ready..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        print_success "$APP_NAME rebuilt and deployed with fresh dependencies!"
+    else
+        print_error "Deployment failed. Checking logs..."
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+}
+
+################################################################################
 # Help Command
 ################################################################################
 
@@ -609,6 +659,7 @@ ${YELLOW}CLUSTER COMMANDS:${NC}
 
 ${YELLOW}DEPLOYMENT COMMANDS:${NC}
     ${GREEN}deploy${NC}              Deploy application to Kubernetes
+    ${GREEN}rebuild${NC}             Rebuild with --no-cache and redeploy (fresh dependencies)
     ${GREEN}full-deploy${NC}         ONE-CLICK: Create cluster + infra + deploy + port forward
 
 ${YELLOW}TESTING COMMANDS:${NC}
@@ -693,6 +744,9 @@ main() {
             ;;
         deploy)
             cmd_deploy
+            ;;
+        rebuild)
+            cmd_rebuild
             ;;
         full-deploy)
             cmd_full_deploy

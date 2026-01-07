@@ -1,0 +1,285 @@
+# Kubernetes Deployment for Async Travel Research Agent (EMBEDDED MODE)
+# Agent Namespace: gomind-examples
+# Infrastructure Namespace: default
+# Port: 8098
+#
+# This deployment runs in EMBEDDED mode (GOMIND_MODE unset or "embedded"):
+# - Both API and Workers run in the same process
+# - Suitable for development, testing, or simple deployments
+#
+# For PRODUCTION, use the split deployments:
+#   - k8-deployment-api.yaml    (GOMIND_MODE=api)
+#   - k8-deployment-worker.yaml (GOMIND_MODE=worker)
+#
+# This agent uses the GoMind async task system for long-running multi-tool orchestration.
+#
+# Prerequisites (deploy these first):
+#   - Redis (for task queue and discovery)
+#   - geocoding-tool
+#   - weather-tool-v2
+#   - news-tool
+#   - currency-tool
+#   - stock-market-tool
+#
+# API Endpoints:
+#   POST /api/v1/tasks       - Submit async travel research task (returns 202 + task ID)
+#   GET  /api/v1/tasks/:id   - Poll task status/result
+#   POST /api/v1/tasks/:id/cancel - Cancel running task
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: async-travel-agent-config
+  namespace: gomind-examples
+  labels:
+    app: async-travel-agent
+    component: agent
+    framework: gomind
+data:
+  # Environment configuration
+  APP_ENV: "production"
+  PORT: "8098"
+  NAMESPACE: "gomind-examples"
+
+  # Framework configuration
+  DEV_MODE: "false"
+  GOMIND_LOG_LEVEL: "debug"
+  GOMIND_DEBUG: "true"
+  GOMIND_VALIDATE_PAYLOADS: "false"
+
+  # Worker configuration
+  WORKER_COUNT: "3"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: async-travel-agent
+  namespace: gomind-examples
+  labels:
+    app: async-travel-agent
+    component: agent
+    framework: gomind
+    version: v1
+    module: async
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: async-travel-agent
+  template:
+    metadata:
+      labels:
+        app: async-travel-agent
+        component: agent
+        framework: gomind
+        version: v1
+        module: async
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8098"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: default
+
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+
+      containers:
+      - name: agent
+        image: async-travel-agent:latest
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: http
+          containerPort: 8098
+          protocol: TCP
+
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: async-travel-agent-config
+        - secretRef:
+            name: ai-provider-keys-async-agent
+            optional: true
+
+        # Additional environment variables
+        env:
+        - name: GOMIND_AGENT_NAME
+          value: "async-travel-agent"
+        - name: REDIS_URL
+          value: "redis://redis.gomind-examples:6379"
+        - name: GOMIND_REDIS_URL  # For backward compatibility
+          value: "redis://redis.gomind-examples:6379"
+        # Redis Registration Resilience (handles Redis startup race conditions)
+        - name: GOMIND_DISCOVERY_RETRY
+          value: "true"
+        - name: GOMIND_DISCOVERY_RETRY_INTERVAL
+          value: "30s"
+        - name: GOMIND_DEV_MODE
+          value: "false"
+        # Logging Configuration
+        - name: GOMIND_LOG_FORMAT
+          value: "json"
+        # K8s service discovery configuration (CRITICAL for proper registration)
+        - name: GOMIND_K8S_SERVICE_NAME
+          value: "async-travel-agent-service"
+        - name: GOMIND_K8S_SERVICE_PORT
+          value: "80"
+        - name: GOMIND_K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: GOMIND_K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        # Telemetry Configuration
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector.gomind-examples:4318"
+        # Timeout Configuration for Async Task Processing
+        - name: GOMIND_HTTP_WRITE_TIMEOUT
+          value: "5m"
+        - name: GOMIND_HTTP_READ_TIMEOUT
+          value: "5m"
+        # Model Alias Override: Use cheaper models for testing
+        - name: GOMIND_OPENAI_MODEL_DEFAULT
+          value: "gpt-4o-mini"
+        - name: GOMIND_OPENAI_MODEL_SMART
+          value: "gpt-4o-mini"
+        - name: GOMIND_ANTHROPIC_MODEL_DEFAULT
+          value: "claude-3-haiku-20240307"
+        - name: GOMIND_ANTHROPIC_MODEL_SMART
+          value: "claude-3-haiku-20240307"
+
+        # Resource limits
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Startup probe (for slow-starting applications)
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 12
+
+        # Security context for container
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: async-travel-agent-service
+  namespace: gomind-examples
+  labels:
+    app: async-travel-agent
+    component: agent
+    framework: gomind
+    gomind.framework/type: agent
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8098
+    protocol: TCP
+  selector:
+    app: async-travel-agent
+
+---
+# Horizontal Pod Autoscaler
+# For async agents, scaling based on CPU/memory is appropriate since
+# task queue depth can cause CPU spikes during processing
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: async-travel-agent-hpa
+  namespace: gomind-examples
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: async-travel-agent
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# PodDisruptionBudget (optional - uncomment for production)
+# apiVersion: policy/v1
+# kind: PodDisruptionBudget
+# metadata:
+#   name: async-travel-agent-pdb
+#   namespace: gomind-examples
+# spec:
+#   minAvailable: 1
+#   selector:
+#     matchLabels:
+#       app: async-travel-agent

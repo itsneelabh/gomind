@@ -132,11 +132,18 @@ cmd_run() {
     "./$APP_NAME"
 }
 
+# Usage: cmd_docker_build [--no-cache]
 cmd_docker_build() {
     print_header
     print_step "Building Docker image..."
 
-    docker build -t "$APP_NAME:latest" "$SCRIPT_DIR"
+    local no_cache_flag=""
+    if [ "$DOCKER_NO_CACHE" = "true" ] || [ "$1" = "--no-cache" ]; then
+        print_step "Building with --no-cache (fresh dependency download)"
+        no_cache_flag="--no-cache"
+    fi
+
+    docker build $no_cache_flag -t "$APP_NAME:latest" "$SCRIPT_DIR"
 
     print_success "Docker image built: $APP_NAME:latest"
     echo ""
@@ -544,6 +551,51 @@ cmd_clean() {
     echo ""
 }
 
+# Rebuild with no-cache and redeploy
+# This ensures fresh dependencies are downloaded from GitHub
+cmd_rebuild() {
+    print_header
+    print_step "Rebuilding with Fresh Dependencies"
+
+    load_env
+
+    # Build Docker image with --no-cache
+    print_step "Building Docker image with --no-cache..."
+    DOCKER_NO_CACHE=true cmd_docker_build
+
+    # Load image into kind cluster if available
+    if command -v kind &> /dev/null; then
+        print_step "Loading image into kind cluster..."
+        kind load docker-image $APP_NAME:latest --name "$CLUSTER_NAME"
+        print_success "Image loaded"
+    fi
+
+    # Create namespace
+    kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+    # Setup API keys if function exists
+    if type setup_api_keys &>/dev/null; then
+        setup_api_keys
+    fi
+
+    # Apply Kubernetes manifests
+    print_step "Applying Kubernetes manifests..."
+    kubectl apply -f "$SCRIPT_DIR/k8-deployment.yaml"
+
+    # Restart deployment to pick up new image
+    print_step "Restarting deployment..."
+    kubectl rollout restart deployment/$APP_NAME -n $NAMESPACE
+
+    print_step "Waiting for deployment to be ready..."
+    if kubectl rollout status deployment/$APP_NAME -n $NAMESPACE --timeout=120s; then
+        print_success "$APP_NAME rebuilt and deployed with fresh dependencies!"
+    else
+        print_error "Deployment failed. Checking logs..."
+        kubectl logs -n $NAMESPACE -l app=$APP_NAME --tail=20
+        exit 1
+    fi
+}
+
 cmd_clean_all() {
     print_header
 
@@ -589,6 +641,7 @@ ${BLUE}Infrastructure Commands:${NC}
 
 ${BLUE}Deployment Commands:${NC}
   ${YELLOW}deploy${NC}             Build, load image, and deploy agent to K8s
+  ${YELLOW}rebuild${NC}            Rebuild with --no-cache and redeploy (fresh dependencies)
   ${YELLOW}full-deploy${NC}        ${GREEN}ONE-CLICK: cluster + infra + deploy + forward_all${NC}
 
 ${BLUE}Testing & Monitoring:${NC}
@@ -667,6 +720,9 @@ case "${1:-help}" in
         ;;
     deploy)
         cmd_deploy
+        ;;
+    rebuild)
+        cmd_rebuild
         ;;
     full-deploy)
         cmd_full_deploy
