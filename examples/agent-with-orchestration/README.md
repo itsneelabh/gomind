@@ -196,14 +196,47 @@ The orchestrator's **schema-based type coercion** (Layer 2) automatically conver
 
 This eliminates type mismatch errors that would otherwise cause tool invocations to fail.
 
+## Prerequisites
+
+Before running this example, ensure you have:
+
+- **Docker**: Required for building and running containers
+- **Kind**: Kubernetes in Docker for local cluster ([install guide](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
+- **Go 1.25+**: For local development
+- **AI Provider API Key**: OpenAI, Anthropic, Groq, or compatible provider
+
+### Configure Environment
+
+1. **Copy the example environment file**:
+   ```bash
+   cd examples/agent-with-orchestration
+   cp .env.example .env
+   ```
+
+2. **Add your AI provider API key** to `.env`:
+   ```bash
+   # Edit .env and set your API key
+   OPENAI_API_KEY=sk-your-key-here
+   # Or for other providers:
+   # ANTHROPIC_API_KEY=your-key
+   # GROQ_API_KEY=your-key
+   ```
+
+### Deploy Required Tools
+
+The orchestrator discovers tools via Redis. Deploy at least some tools first:
+```bash
+# Deploy weather and geocoding tools (minimum for travel workflows)
+./examples/weather-tool-v2/setup.sh deploy
+./examples/geocoding-tool/setup.sh deploy
+
+# Optional: Deploy more tools for richer orchestration
+./examples/currency-tool/setup.sh deploy
+./examples/country-info-tool/setup.sh deploy
+./examples/news-tool/setup.sh deploy
+```
+
 ## Quick Start
-
-### Prerequisites
-
-- Go 1.23+
-- Redis (local, Docker, or K8s)
-- AI API key (OpenAI, Anthropic, Groq, etc.)
-- Travel tools deployed (geocoding, weather-v2, currency, country-info, news)
 
 ### Local Development
 

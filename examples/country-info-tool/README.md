@@ -32,10 +32,27 @@ curl -X POST http://localhost:8098/api/capabilities/get_country_info \
 }
 ```
 
+## Prerequisites
+
+Before running this tool, ensure you have:
+
+- **Docker**: Required for building and running containers
+- **Kind**: Kubernetes in Docker for local cluster ([install guide](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
+- **Go 1.25+**: For local development
+- **Redis**: For service discovery (deployed automatically by setup.sh)
+
+### Configure Environment
+
+```bash
+cd examples/country-info-tool
+cp .env.example .env
+# Edit .env if needed (defaults work for local development)
+```
+
 ## Quick Start
 
 ```bash
-cp .env.example .env
+# Ensure .env is configured per Prerequisites
 ./setup.sh run
 ```
 

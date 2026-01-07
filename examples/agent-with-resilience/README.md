@@ -14,6 +14,29 @@ Building on the foundation of `agent-example`, this example adds:
 | **Graceful Degradation** | Returns partial results when some tools fail |
 | **Health Monitoring** | Circuit breaker states exposed via `/health` endpoint |
 
+## Prerequisites
+
+Before running this example, ensure you have:
+
+- **Docker**: Required for building and running containers
+- **Kind**: Kubernetes in Docker for local cluster ([install guide](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
+- **Go 1.25+**: For local development
+- **AI Provider API Key** (optional): OpenAI, Anthropic, or compatible provider for AI features
+
+### Configure Environment
+
+1. **Copy the example environment file**:
+   ```bash
+   cd examples/agent-with-resilience
+   cp .env.example .env
+   ```
+
+2. **Add your AI provider API key** to `.env` (optional):
+   ```bash
+   # Edit .env and set your API key for AI features
+   OPENAI_API_KEY=sk-your-key-here
+   ```
+
 ## Quick Start
 
 ### Recommended: Run Everything Locally
@@ -60,17 +83,16 @@ This means you can:
 - Use `./setup.sh forward` first, then `run-all` reuses the K8s services
 - Mix local and K8s deployments seamlessly
 
-### Manual Setup
+### Manual Setup (Without setup.sh)
+
+If you prefer manual setup (ensure `.env` is configured per Prerequisites):
 
 ```bash
 # 1. Start Redis (if not running)
 docker run -d --name gomind-redis -p 6379:6379 redis:7-alpine
 
-# 2. Set environment variables
-export REDIS_URL="redis://localhost:6379"
-export OPENAI_API_KEY="sk-..."  # Optional for AI features
-
-# 3. Build and run
+# 2. Build and run
+cd examples/agent-with-resilience
 go build -o research-agent-resilience .
 ./research-agent-resilience
 ```

@@ -66,11 +66,37 @@ This example extends the basic [agent-example](../agent-example) with:
 | `agent.ai.tokens.prompt` | Counter | Prompt tokens used | provider |
 | `agent.ai.tokens.completion` | Counter | Completion tokens used | provider |
 
+## Prerequisites
+
+Before running this example, ensure you have:
+
+- **Docker**: Required for building and running containers
+- **Kind**: Kubernetes in Docker for local cluster ([install guide](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
+- **Go 1.25+**: For local development
+- **AI Provider API Key**: OpenAI, Anthropic, or compatible provider
+
+### Configure Environment
+
+1. **Copy the example environment file**:
+   ```bash
+   cd examples/agent-with-telemetry
+   cp .env.example .env
+   ```
+
+2. **Add your AI provider API key** to `.env`:
+   ```bash
+   # Edit .env and set your API key
+   OPENAI_API_KEY=sk-your-key-here
+   # Or for other providers:
+   # ANTHROPIC_API_KEY=your-key
+   # GROQ_API_KEY=your-key
+   ```
+
 ## Quick Start
 
-### One-Click Local Setup (Easiest!)
+### One-Click Local Setup
 
-For local development with Kind, use the automated setup script:
+Once prerequisites are installed and `.env` is configured, use the automated setup script:
 
 ```bash
 cd examples/agent-with-telemetry
@@ -90,38 +116,19 @@ This script will:
 - Prometheus: http://localhost:9090
 - Jaeger: http://localhost:16686
 
-### Manual Setup
+### Local Development (Without Kubernetes)
 
-#### Prerequisites
+If you prefer to run without Kubernetes (ensure `.env` is configured per Prerequisites):
 
-- Go 1.25+
-- Kubernetes cluster with GoMind monitoring stack
-  - **Setup:** Run `cd examples/k8-deployment && ./setup-infrastructure.sh`
-  - See [k8-deployment](../k8-deployment) for details
-- Redis (deployed by infrastructure script)
-- OpenAI API key (or compatible provider)
-
-#### Local Development
-
-1. **Clone and navigate to the example**:
+1. **Run the agent locally**:
    ```bash
    cd examples/agent-with-telemetry
-   ```
-
-2. **Copy and configure environment**:
-   ```bash
-   cp .env.example .env
-   # Edit .env and add your OPENAI_API_KEY
-   ```
-
-3. **Run the agent locally**:
-   ```bash
    # For local dev, telemetry will be disabled unless OTEL_EXPORTER_OTLP_ENDPOINT is set
    export APP_ENV=development
    go run .
    ```
 
-4. **Test the agent**:
+2. **Test the agent**:
    ```bash
    curl -X POST http://localhost:8092/api/capabilities/research_topic \
      -H "Content-Type: application/json" \

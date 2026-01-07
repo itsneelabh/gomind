@@ -9,15 +9,29 @@ A GoMind tool that provides news search capabilities using the [GNews.io](https:
 - **Configurable**: Control number of results
 - **Distributed Tracing**: Built-in trace context propagation
 
-## API Key Required
+## Prerequisites
 
-GNews.io requires a free API key:
+Before running this tool, ensure you have:
+
+- **Docker**: Required for building and running containers
+- **Kind**: Kubernetes in Docker for local cluster ([install guide](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
+- **Go 1.25+**: For local development
+- **Redis**: For service discovery (deployed automatically by setup.sh)
+- **GNews.io API Key**: Required for news data (free tier available)
+
+### Get Your GNews API Key
 
 1. Sign up at https://gnews.io/
 2. Get your API key from the dashboard
-3. Set `GNEWS_API_KEY` environment variable
+3. Free tier includes 100 requests/day
 
-**Free Tier:** 100 requests/day
+### Configure Environment
+
+```bash
+cd examples/news-tool
+cp .env.example .env
+# Edit .env and add your GNEWS_API_KEY
+```
 
 ## Capabilities
 
@@ -53,11 +67,7 @@ curl -X POST http://localhost:8099/api/capabilities/search_news \
 ## Quick Start
 
 ```bash
-# Set up environment
-cp .env.example .env
-# Edit .env and add your GNEWS_API_KEY
-
-# Run
+# Ensure .env is configured per Prerequisites
 ./setup.sh run
 ```
 

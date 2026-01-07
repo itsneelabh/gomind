@@ -91,23 +91,32 @@ Gets current weather conditions only (no forecast).
 }
 ```
 
+## Prerequisites
+
+Before running this tool, ensure you have:
+
+- **Docker**: Required for building and running containers
+- **Kind**: Kubernetes in Docker for local cluster ([install guide](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
+- **Go 1.25+**: For local development
+- **Redis**: For service discovery (deployed automatically by setup.sh)
+
+### Configure Environment
+
+```bash
+cd examples/weather-tool-v2
+cp .env.example .env
+# Edit .env if needed (defaults work for local development)
+```
+
 ## Quick Start
-
-### Prerequisites
-
-- Go 1.25+
-- Redis (for service discovery)
 
 ### Local Development
 
 ```bash
-# Copy environment template
-cp .env.example .env
-
 # Start Redis (if not running)
 docker run -d --name redis -p 6379:6379 redis:alpine
 
-# Build and run
+# Build and run (ensure .env is configured per Prerequisites)
 ./setup.sh run
 ```
 

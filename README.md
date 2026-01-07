@@ -104,10 +104,10 @@ GoMind is a comprehensive platform for building autonomous AI agent systems, des
 ✅ **GoMind**: Tools and agents with built-in resilience. Your components stay up even when external APIs go down.
 
 🔴 **Common Challenge**: "Install these 50 dependencies, hope they don't conflict."
-✅ **GoMind**: Single binary. No dependency hell. Compiles once, runs everywhere.
+✅ **GoMind**: Single binary. No dependency hell.
 
 🔴 **Common Challenge**: "To coordinate components, write complex orchestration code."
-✅ **GoMind**: Agents discover tools automatically. Describe workflows in English or YAML.
+✅ **GoMind**: AI dynamically generates execution plans from natural language. LLM analyzes your request, discovers available tools, and orchestrates them intelligently.
 
 🔴 **Common Challenge**: "When API calls fail, I need to manually handle retries and error correction."
 ✅ **GoMind**: **Semantic Retry** automatically computes corrected parameters using LLM analysis. When `amount: 0` fails, it computes `amount: 46828.5` from source data.
@@ -117,21 +117,21 @@ GoMind is a comprehensive platform for building autonomous AI agent systems, des
 
 ## What Makes GoMind Unique: Beyond Traditional Agent Frameworks
 
-While popular frameworks like LangChain, CrewAI, and AutoGen focus on orchestrating predefined agent workflows, GoMind provides something fundamentally different: **infrastructure for autonomous agent networks that can discover, communicate, and collaborate without centralized orchestration**.
+While popular frameworks like LangChain, CrewAI, and AutoGen require you to define agent workflows upfront, GoMind takes a different approach: **AI-driven dynamic orchestration with runtime capability discovery**.
 
-### The Key Differentiator: From Orchestrated Workflows to Autonomous Networks
+### The Key Differentiator: From Predefined Workflows to AI-Generated Execution Plans
 
 **Traditional Frameworks (LangChain, CrewAI, AutoGen):**
-- Agents require predefined orchestration patterns (supervisor, hierarchical, sequential)
-- Communication flows must be explicitly programmed
-- Agents are tightly coupled to their orchestration logic
-- Adding new agents requires updating the orchestration code
+- Workflows defined in code: chains, graphs, crews, or conversation patterns
+- Agent roles and responsibilities must be predetermined (researcher, writer, reviewer)
+- Adding new tools requires updating orchestration logic
+- Tool selection is explicit - you specify which tools an agent can use
 
 **GoMind's Approach:**
-- Agents autonomously discover and communicate with each other
-- No predefined orchestration required - agents form dynamic collaboration networks
-- New agents can join the network and immediately become discoverable
-- Communication patterns emerge from agent capabilities, not hardcoded flows
+- AI generates execution plans at runtime based on natural language requests
+- Tools register themselves with capabilities - no predefined roles needed
+- New tools automatically become available to existing orchestrators via Redis discovery
+- LLM dynamically selects tools based on discovered capabilities, not hardcoded references
 
 ### Architectural Innovation: Compile-Time Enforcement
 
@@ -331,35 +331,72 @@ The AI automatically coordinates **6 tools** and synthesizes a comprehensive res
 
 ### Real-World Example: The Power of Autonomous Discovery
 
-Consider building a data analysis system. Here's how it differs:
+Consider building a multi-agent system. Here's how the approaches differ:
 
-**Traditional Approach (Hardcoded Orchestration):**
+**LangGraph** ([docs](https://docs.langchain.com/oss/python/langgraph/workflows-agents)) - Define graphs with explicit nodes and edges:
 ```python
-# You must explicitly wire every connection
-orchestrator = Orchestrator()
-orchestrator.add_agent("data_fetcher", DataFetcherAgent())
-orchestrator.add_agent("analyzer", AnalyzerAgent())
-orchestrator.add_agent("reporter", ReporterAgent())
-orchestrator.define_flow([
-    ("data_fetcher", "analyzer"),
-    ("analyzer", "reporter")
-])
+from langgraph.graph import StateGraph, START, END
+
+# You must define every node and edge explicitly
+builder = StateGraph(GraphState)
+builder.add_node("data_fetcher", fetch_data)
+builder.add_node("analyzer", analyze_data)
+builder.add_node("reporter", generate_report)
+builder.add_edge(START, "data_fetcher")
+builder.add_edge("data_fetcher", "analyzer")
+builder.add_edge("analyzer", "reporter")
+builder.add_edge("reporter", END)
+graph = builder.compile()
 ```
 
-**GoMind Approach (Autonomous Discovery):**
+**CrewAI** ([docs](https://docs.crewai.com/en/concepts/agents)) - Define agents with explicit roles and task flows:
+```python
+from crewai import Agent, Task, Crew
+
+# Each agent's role must be predefined
+fetcher = Agent(role="Data Fetcher", goal="Fetch data from sources", backstory="...")
+analyzer = Agent(role="Data Analyst", goal="Analyze the fetched data", backstory="...")
+reporter = Agent(role="Reporter", goal="Generate reports", backstory="...")
+
+# Tasks must be explicitly assigned to agents
+task1 = Task(description="Fetch data", agent=fetcher)
+task2 = Task(description="Analyze data", agent=analyzer, context=[task1])
+task3 = Task(description="Generate report", agent=reporter, context=[task2])
+
+crew = Crew(agents=[fetcher, analyzer, reporter], tasks=[task1, task2, task3])
+```
+
+**AutoGen** ([docs](https://microsoft.github.io/autogen/0.2/docs/tutorial/conversation-patterns/)) - Define conversation patterns:
+```python
+from autogen.agentchat import run_group_chat
+from autogen.agentchat.group.patterns import AutoPattern
+
+# You must create agents and define how they interact
+auto_pattern = AutoPattern(
+    agents=[fetcher, analyzer, reporter],
+    initial_agent=fetcher,
+    group_manager_args={"name": "manager", "llm_config": llm_config},
+)
+response = run_group_chat(pattern=auto_pattern, messages="Analyze the data", max_rounds=20)
+```
+
+**GoMind Approach (AI-Driven Orchestration):**
 ```go
-// Agents discover each other by capabilities
-// Start a new analyzer agent - it automatically becomes discoverable
-analyzer := NewAnalyzerAgent()
-analyzer.AddCapability(core.Capability{Name: "analyze_data"})
-analyzer.Start(8080)  // That's it!
+// Create orchestrator - no explicit tool/agent wiring needed
+orchestrator := orchestration.CreateOrchestrator(config, deps)
 
-// Any agent can now find and use it
-dataAgents, _ := discovery.FindByCapability(ctx, "analyze_data")
-// Returns all agents capable of analyzing data, even ones added after startup
+// Process natural language request
+response, _ := orchestrator.ProcessRequest(ctx,
+    "What's the weather in Tokyo and convert 1000 USD to JPY?", nil)
+
+// The orchestrator automatically:
+//   1. Discovers available tools from Redis (weather-service, currency-tool, etc.)
+//   2. AI generates a DAG execution plan based on the request
+//   3. Executes steps in parallel/sequential order as needed
+//   4. Synthesizes results into a coherent response
 ```
 
-When you add a new specialized analyzer later, existing agents automatically discover and can use it - no orchestration updates needed.
+No explicit wiring. No predefined workflows. Add a new tool to Redis, and it's immediately available to all orchestrators.
 
 ### Dual-Mode Orchestration: Choose Your Approach
 
@@ -695,9 +732,9 @@ That's it! Your agent is running at `http://localhost:8080` with:
 - ✅ Graceful shutdown handling
 - ✅ Built-in error handling
 
-### Using the Framework (Production-Ready)
+### Using the Framework
 
-For production deployments, use the Framework wrapper that handles configuration, dependency injection, and lifecycle management. This example is based on [tool-example](https://github.com/itsneelabh/gomind/tree/main/examples/tool-example):
+For production deployments, we recommend using the Framework wrapper that handles configuration, dependency injection, and lifecycle management. This example is based on [tool-example](https://github.com/itsneelabh/gomind/tree/main/examples/tool-example):
 
 ```go
 package main
