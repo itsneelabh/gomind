@@ -196,6 +196,10 @@ func TestTaskWorkerPool_StartStop(t *testing.T) {
 }
 
 func TestTaskWorkerPool_ProcessTask(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping task worker pool process test in short mode (requires 300ms+ sleep)")
+	}
+
 	queue := newTestTaskQueue(10)
 	store := newTestTaskStore()
 	config := &TaskWorkerConfig{
@@ -262,6 +266,10 @@ func TestTaskWorkerPool_ProcessTask(t *testing.T) {
 }
 
 func TestTaskWorkerPool_HandlerError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping task worker pool handler error test in short mode (requires 300ms+ sleep)")
+	}
+
 	queue := newTestTaskQueue(10)
 	store := newTestTaskStore()
 	config := &TaskWorkerConfig{
@@ -306,6 +314,10 @@ func TestTaskWorkerPool_HandlerError(t *testing.T) {
 }
 
 func TestTaskWorkerPool_HandlerPanic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping task worker pool handler panic test in short mode (requires 300ms+ sleep)")
+	}
+
 	queue := newTestTaskQueue(10)
 	store := newTestTaskStore()
 	config := &TaskWorkerConfig{
@@ -347,6 +359,10 @@ func TestTaskWorkerPool_HandlerPanic(t *testing.T) {
 }
 
 func TestTaskWorkerPool_NoHandler(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping task worker pool no handler test in short mode (requires 300ms+ sleep)")
+	}
+
 	queue := newTestTaskQueue(10)
 	store := newTestTaskStore()
 	config := &TaskWorkerConfig{
@@ -437,6 +453,10 @@ func TestTaskWorkerPool_DoubleStart(t *testing.T) {
 }
 
 func TestProgressReporter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping progress reporter test in short mode (requires 300ms+ sleep)")
+	}
+
 	queue := newTestTaskQueue(10)
 	store := newTestTaskStore()
 	config := &TaskWorkerConfig{
