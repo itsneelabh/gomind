@@ -14,6 +14,10 @@ import (
 
 // TestCircuitBreakerStateTransitions tests state transitions
 func TestCircuitBreakerStateTransitions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping circuit breaker state transitions test in short mode (requires 250ms+ sleep)")
+	}
+
 	config := &CircuitBreakerConfig{
 		Name:             "test",
 		ErrorThreshold:   0.5,
@@ -167,6 +171,10 @@ func TestCircuitBreakerSlidingWindow(t *testing.T) {
 
 // TestCircuitBreakerHalfOpenState tests half-open state behavior
 func TestCircuitBreakerHalfOpenState(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping circuit breaker half-open state test in short mode (requires 250ms+ sleep)")
+	}
+
 	config := &CircuitBreakerConfig{
 		Name:             "test",
 		ErrorThreshold:   0.5,
@@ -441,6 +449,10 @@ func TestCircuitBreakerMetrics(t *testing.T) {
 
 // TestCircuitBreakerBackwardCompatibility tests legacy API
 func TestCircuitBreakerBackwardCompatibility(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping circuit breaker backward compatibility test in short mode (requires 300ms+ sleep)")
+	}
+
 	// Old API should still work
 	cb := NewCircuitBreakerLegacy(3, 100*time.Millisecond)
 
@@ -531,6 +543,10 @@ func TestCircuitBreakerVolumeThreshold(t *testing.T) {
 
 // TestSlidingWindowRotation tests bucket rotation over time
 func TestSlidingWindowRotation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping sliding window rotation test in short mode (requires 550ms+ sleep)")
+	}
+
 	// Short window for testing
 	window := NewSlidingWindow(200*time.Millisecond, 4, true)
 

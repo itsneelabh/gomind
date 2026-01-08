@@ -163,6 +163,10 @@ func TestCircuitBreakerLoggingIntegration(t *testing.T) {
 }
 
 func TestRetryExecutorLoggingIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping retry executor logging integration test in short mode (uses default retry delays)")
+	}
+
 	testLogger := &TestLogger{}
 
 	executor := NewRetryExecutor(nil)

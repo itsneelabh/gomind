@@ -684,8 +684,8 @@ func TestStateTransitionLogging(t *testing.T) {
 	config := DefaultConfig()
 	config.Name = "test-transitions"
 	config.Logger = logger
-	config.ErrorThreshold = 0.5  // 50% error rate
-	config.VolumeThreshold = 3   // Only need 3 requests to evaluate
+	config.ErrorThreshold = 0.5 // 50% error rate
+	config.VolumeThreshold = 3  // Only need 3 requests to evaluate
 	config.SleepWindow = 100 * time.Millisecond
 
 	cb, err := NewCircuitBreaker(config)

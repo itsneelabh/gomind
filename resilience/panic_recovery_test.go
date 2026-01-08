@@ -17,7 +17,7 @@ import (
 func TestCircuitBreakerPanicRecoveryBasic(t *testing.T) {
 	config := DefaultConfig()
 	config.Name = "panic-basic-test"
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -50,7 +50,7 @@ func TestCircuitBreakerPanicRecoveryBasic(t *testing.T) {
 func TestCircuitBreakerPanicTypes(t *testing.T) {
 	config := DefaultConfig()
 	config.Name = "panic-types-test"
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -109,7 +109,7 @@ func TestCircuitBreakerPanicTypes(t *testing.T) {
 func TestCircuitBreakerPanicNoDeadlock(t *testing.T) {
 	config := DefaultConfig()
 	config.Name = "panic-deadlock-test"
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -141,7 +141,7 @@ func TestCircuitBreakerPanicNoDeadlock(t *testing.T) {
 func TestCircuitBreakerPanicWithTimeout(t *testing.T) {
 	config := DefaultConfig()
 	config.Name = "panic-timeout-test"
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -177,7 +177,7 @@ func TestCircuitBreakerPanicWithTimeout(t *testing.T) {
 func TestCircuitBreakerPanicMetricsUpdate(t *testing.T) {
 	config := DefaultConfig()
 	config.Name = "panic-metrics-test"
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -201,7 +201,7 @@ func TestCircuitBreakerPanicMetricsUpdate(t *testing.T) {
 	updatedFailures := updatedMetrics["failure"].(uint64)
 
 	if updatedFailures != initialFailures+1 {
-		t.Errorf("Expected failures to increase by 1, got %d -> %d", 
+		t.Errorf("Expected failures to increase by 1, got %d -> %d",
 			initialFailures, updatedFailures)
 	}
 
@@ -216,9 +216,9 @@ func TestCircuitBreakerPanicMetricsUpdate(t *testing.T) {
 func TestCircuitBreakerPanicConcurrent(t *testing.T) {
 	config := DefaultConfig()
 	config.Name = "panic-concurrent-test"
-	config.ErrorThreshold = 0.9 // Very high threshold to avoid circuit opening
+	config.ErrorThreshold = 0.9   // Very high threshold to avoid circuit opening
 	config.VolumeThreshold = 1000 // High volume threshold
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -287,7 +287,7 @@ func TestCircuitBreakerPanicStateTransitions(t *testing.T) {
 	config.ErrorThreshold = 0.5
 	config.VolumeThreshold = 2
 	config.SleepWindow = 50 * time.Millisecond
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -337,7 +337,7 @@ func TestCircuitBreakerPanicInHalfOpen(t *testing.T) {
 	config.VolumeThreshold = 2
 	config.SleepWindow = 50 * time.Millisecond
 	config.HalfOpenRequests = 3
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -394,10 +394,10 @@ func TestCircuitBreakerPanicInHalfOpen(t *testing.T) {
 func TestCircuitBreakerPanicNoGoroutineLeak(t *testing.T) {
 	// Get initial goroutine count
 	initialGoroutines := runtime.NumGoroutine()
-	
+
 	config := DefaultConfig()
 	config.Name = "panic-leak-test"
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -417,7 +417,7 @@ func TestCircuitBreakerPanicNoGoroutineLeak(t *testing.T) {
 
 	// Check goroutine count
 	finalGoroutines := runtime.NumGoroutine()
-	
+
 	// Allow for some variance (test framework overhead)
 	if finalGoroutines > initialGoroutines+5 {
 		t.Errorf("Potential goroutine leak: started with %d, ended with %d goroutines",
@@ -429,7 +429,7 @@ func TestCircuitBreakerPanicNoGoroutineLeak(t *testing.T) {
 func TestCircuitBreakerPanicWithContext(t *testing.T) {
 	config := DefaultConfig()
 	config.Name = "panic-context-test"
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)
@@ -457,7 +457,7 @@ func TestCircuitBreakerPanicWithContext(t *testing.T) {
 
 	err = cb.Execute(ctx2, func() error {
 		time.Sleep(50 * time.Millisecond) // Will be cancelled
-		panic("panic after timeout")     // This should not execute
+		panic("panic after timeout")      // This should not execute
 	})
 
 	// Should get timeout, not panic (function was cancelled)
@@ -470,10 +470,10 @@ func TestCircuitBreakerPanicWithContext(t *testing.T) {
 func TestCircuitBreakerPanicRecoveryFromRecovery(t *testing.T) {
 	// This tests that our recovery code itself is panic-safe
 	// (This is a very edge case but good to verify)
-	
+
 	config := DefaultConfig()
 	config.Name = "panic-recovery-test"
-	
+
 	cb, err := NewCircuitBreaker(config)
 	if err != nil {
 		t.Fatalf("Failed to create circuit breaker: %v", err)

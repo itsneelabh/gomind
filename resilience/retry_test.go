@@ -75,7 +75,7 @@ func TestRetryMaxAttemptsExceeded(t *testing.T) {
 
 	attempts := 0
 	testErr := errors.New("persistent error")
-	
+
 	err := Retry(context.Background(), config, func() error {
 		attempts++
 		return testErr
@@ -271,6 +271,10 @@ func TestRetryJitter(t *testing.T) {
 
 // TestRetryNilConfig tests default config is used when nil
 func TestRetryNilConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping retry nil config test in short mode (uses default retry delays)")
+	}
+
 	attempts := 0
 	err := Retry(context.Background(), nil, func() error {
 		attempts++
@@ -302,7 +306,7 @@ func TestRetryContextDeadline(t *testing.T) {
 
 	attempts := 0
 	start := time.Now()
-	
+
 	err := Retry(ctx, config, func() error {
 		attempts++
 		return errors.New("error")
@@ -370,7 +374,7 @@ func TestRetryWithCircuitBreakerIntegration(t *testing.T) {
 		t.Error("Expected at least one attempt")
 	}
 
-	t.Logf("Integration test completed with %d attempts, final CB state: %s, error: %v", 
+	t.Logf("Integration test completed with %d attempts, final CB state: %s, error: %v",
 		attempts, cb.GetState(), err)
 }
 
@@ -426,17 +430,17 @@ func TestRetryConcurrentExecutions(t *testing.T) {
 			err := Retry(context.Background(), config, func() error {
 				localAttempts++
 				atomic.AddInt32(&totalAttempts, 1)
-				
+
 				// 50% success rate on second attempt
 				if localAttempts == 2 && id%2 == 0 {
 					return nil
 				}
-				
+
 				// 100% success on third attempt
 				if localAttempts == 3 {
 					return nil
 				}
-				
+
 				return errors.New("error")
 			})
 
@@ -502,7 +506,7 @@ func TestRetryNegativeDelay(t *testing.T) {
 
 	attempts := 0
 	start := time.Now()
-	
+
 	_ = Retry(context.Background(), config, func() error {
 		attempts++
 		return errors.New("error")

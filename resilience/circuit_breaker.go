@@ -204,7 +204,7 @@ func NewCircuitBreaker(config *CircuitBreakerConfig) (*CircuitBreaker, error) {
 	}
 
 	// Log validation start for debugging
-	if config.Logger != nil {  // config cannot be nil here - we just checked above
+	if config.Logger != nil { // config cannot be nil here - we just checked above
 		config.Logger.Debug("Validating circuit breaker configuration", map[string]interface{}{
 			"operation":        "circuit_breaker_validation",
 			"name":             config.Name,
@@ -217,7 +217,7 @@ func NewCircuitBreaker(config *CircuitBreakerConfig) (*CircuitBreaker, error) {
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		// Log validation failure
-		if config.Logger != nil {  // config is guaranteed non-nil here
+		if config.Logger != nil { // config is guaranteed non-nil here
 			config.Logger.Error("Circuit breaker configuration validation failed", map[string]interface{}{
 				"operation":  "circuit_breaker_validation_failed",
 				"name":       config.Name,
@@ -255,8 +255,8 @@ func NewCircuitBreaker(config *CircuitBreakerConfig) (*CircuitBreaker, error) {
 		config:     config,
 		generation: 0,
 		// Use new constructor to pass logger and name for time skew detection
-		window:     NewSlidingWindowWithLogger(config.WindowSize, config.BucketCount, true, config.Logger, config.Name),
-		listeners:  make([]func(string, CircuitState, CircuitState), 0),
+		window:    NewSlidingWindowWithLogger(config.WindowSize, config.BucketCount, true, config.Logger, config.Name),
+		listeners: make([]func(string, CircuitState, CircuitState), 0),
 	}
 
 	// Initialize atomic values
@@ -360,7 +360,7 @@ func (cb *CircuitBreaker) ExecuteWithTimeout(ctx context.Context, timeout time.D
 			if r := recover(); r != nil {
 				// Preserve stack trace for debugging
 				stack := debug.Stack()
-				
+
 				// Create descriptive error based on panic type
 				var panicErr error
 				switch v := r.(type) {
@@ -371,19 +371,19 @@ func (cb *CircuitBreaker) ExecuteWithTimeout(ctx context.Context, timeout time.D
 				default:
 					panicErr = fmt.Errorf("panic in circuit breaker: %v (%T)\nStack:\n%s", v, v, stack)
 				}
-				
+
 				// Log immediately for debugging
 				cb.config.Logger.Error("Circuit breaker caught panic", map[string]interface{}{
 					"name":  cb.config.Name,
 					"panic": fmt.Sprintf("%v", r),
 					"type":  fmt.Sprintf("%T", r),
 				})
-				
+
 				// Send error through channel - this ensures channel always receives a value
 				done <- panicErr
 			}
 		}()
-		
+
 		// Execute the function
 		done <- fn()
 	}()
@@ -397,12 +397,17 @@ func (cb *CircuitBreaker) ExecuteWithTimeout(ctx context.Context, timeout time.D
 		// Log execution completion for debugging
 		if cb.config.Logger != nil {
 			cb.config.Logger.Debug("Circuit breaker execution completed", map[string]interface{}{
-				"operation":     "circuit_breaker_complete",
-				"name":          cb.config.Name,
-				"success":       err == nil,
-				"duration_ms":   time.Since(startTime).Milliseconds(),
-				"token_id":      token.id,
-				"error":         func() string { if err != nil { return err.Error() }; return "" }(),
+				"operation":   "circuit_breaker_complete",
+				"name":        cb.config.Name,
+				"success":     err == nil,
+				"duration_ms": time.Since(startTime).Milliseconds(),
+				"token_id":    token.id,
+				"error": func() string {
+					if err != nil {
+						return err.Error()
+					}
+					return ""
+				}(),
 			})
 		}
 
@@ -415,11 +420,11 @@ func (cb *CircuitBreaker) ExecuteWithTimeout(ctx context.Context, timeout time.D
 		// Log context cancellation for debugging
 		if cb.config.Logger != nil {
 			cb.config.Logger.Debug("Circuit breaker execution cancelled", map[string]interface{}{
-				"operation":     "circuit_breaker_cancelled",
-				"name":          cb.config.Name,
-				"reason":        ctx.Err().Error(),
-				"duration_ms":   time.Since(startTime).Milliseconds(),
-				"token_id":      token.id,
+				"operation":   "circuit_breaker_cancelled",
+				"name":        cb.config.Name,
+				"reason":      ctx.Err().Error(),
+				"duration_ms": time.Since(startTime).Milliseconds(),
+				"token_id":    token.id,
 			})
 		}
 
@@ -446,13 +451,13 @@ func (cb *CircuitBreaker) startExecution() (ExecutionToken, bool) {
 	// Log state evaluation for debugging
 	if cb.config.Logger != nil {
 		cb.config.Logger.Debug("Evaluating circuit breaker execution", map[string]interface{}{
-			"operation":         "circuit_breaker_evaluate",
-			"name":              cb.config.Name,
-			"current_state":     currentState.String(),
-			"force_open":        cb.forceOpen.Load(),
-			"force_closed":      cb.forceClosed.Load(),
-			"error_rate":        cb.window.GetErrorRate(),
-			"total_requests":    cb.window.GetTotal(),
+			"operation":      "circuit_breaker_evaluate",
+			"name":           cb.config.Name,
+			"current_state":  currentState.String(),
+			"force_open":     cb.forceOpen.Load(),
+			"force_closed":   cb.forceClosed.Load(),
+			"error_rate":     cb.window.GetErrorRate(),
+			"total_requests": cb.window.GetTotal(),
 		})
 	}
 
@@ -594,12 +599,12 @@ func (cb *CircuitBreaker) completeExecution(token ExecutionToken, err error) {
 			}
 
 			cb.config.Logger.Debug("Error classification decision", map[string]interface{}{
-				"operation":        "error_classification",
-				"name":             cb.config.Name,
-				"error":            err.Error(),
-				"error_type":       fmt.Sprintf("%T", err),
-				"classification":   classification,
-				"reason":           reason,
+				"operation":         "error_classification",
+				"name":              cb.config.Name,
+				"error":             err.Error(),
+				"error_type":        fmt.Sprintf("%T", err),
+				"classification":    classification,
+				"reason":            reason,
 				"counts_as_failure": shouldCount,
 			})
 		}
@@ -730,10 +735,10 @@ func (cb *CircuitBreaker) evaluateState() {
 				// Log recovery
 				if cb.config.Logger != nil {
 					cb.config.Logger.Info("Circuit breaker recovering to closed state", map[string]interface{}{
-						"operation":     "circuit_breaker_recovery",
-						"name":          cb.config.Name,
-						"success_rate":  successRate,
-						"threshold":     cb.config.SuccessThreshold,
+						"operation":    "circuit_breaker_recovery",
+						"name":         cb.config.Name,
+						"success_rate": successRate,
+						"threshold":    cb.config.SuccessThreshold,
 					})
 				}
 				// Enough successes, close the circuit
@@ -743,10 +748,10 @@ func (cb *CircuitBreaker) evaluateState() {
 				// Log re-opening from half-open
 				if cb.config.Logger != nil {
 					cb.config.Logger.Info("Circuit breaker re-opening due to insufficient success rate", map[string]interface{}{
-						"operation":     "circuit_breaker_reopen",
-						"name":          cb.config.Name,
-						"success_rate":  successRate,
-						"threshold":     cb.config.SuccessThreshold,
+						"operation":           "circuit_breaker_reopen",
+						"name":                cb.config.Name,
+						"success_rate":        successRate,
+						"threshold":           cb.config.SuccessThreshold,
 						"new_sleep_window_ms": time.Duration(float64(cb.config.SleepWindow) * 1.5).Milliseconds(),
 					})
 				}
@@ -1011,7 +1016,7 @@ func (cb *CircuitBreaker) CleanupOrphanedRequests(maxAge time.Duration) int {
 
 	cleaned := 0
 	now := time.Now()
-	const maxTokensToLog = 100 // Limit tokens logged to prevent memory issues
+	const maxTokensToLog = 100  // Limit tokens logged to prevent memory issues
 	var orphanedTokens []uint64 // Track orphaned token IDs for debugging
 
 	cb.halfOpenTokens.Range(func(key, value interface{}) bool {
@@ -1189,15 +1194,15 @@ func (sw *SlidingWindow) rotateBuckets() {
 			}
 
 			sw.logger.Warn("Time skew detected in sliding window - resetting metrics", map[string]interface{}{
-				"operation":         "sliding_window_time_skew",
-				"name":              sw.name,
-				"elapsed_ns":        elapsed.Nanoseconds(),
-				"action":            "window_reset",
-				"lost_success":      success,
-				"lost_failure":      failure,
-				"lost_total":        success + failure,
-				"window_size_sec":   sw.windowSize.Seconds(),
-				"monotonic_mode":    sw.monotonic,
+				"operation":       "sliding_window_time_skew",
+				"name":            sw.name,
+				"elapsed_ns":      elapsed.Nanoseconds(),
+				"action":          "window_reset",
+				"lost_success":    success,
+				"lost_failure":    failure,
+				"lost_total":      success + failure,
+				"window_size_sec": sw.windowSize.Seconds(),
+				"monotonic_mode":  sw.monotonic,
 			})
 		}
 
