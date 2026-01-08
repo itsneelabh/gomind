@@ -95,14 +95,14 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func()
 
 	// Log retry operation start
 	if r.logger != nil {
-		r.logger.Info("Starting retry operation", map[string]interface{}{
-			"operation":      "retry_start",
+		r.logger.InfoWithContext(ctx, "Starting retry operation", map[string]interface{}{
+			"operation":       "retry_start",
 			"retry_operation": operation,
-			"max_attempts":   r.config.MaxAttempts,
-			"initial_delay":  r.config.InitialDelay.String(),
-			"max_delay":      r.config.MaxDelay.String(),
-			"backoff_factor": r.config.BackoffFactor,
-			"jitter_enabled": r.config.JitterEnabled,
+			"max_attempts":    r.config.MaxAttempts,
+			"initial_delay":   r.config.InitialDelay.String(),
+			"max_delay":       r.config.MaxDelay.String(),
+			"backoff_factor":  r.config.BackoffFactor,
+			"jitter_enabled":  r.config.JitterEnabled,
 		})
 	}
 
@@ -121,12 +121,12 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func()
 
 		// Log attempt start
 		if r.logger != nil {
-			r.logger.Debug("Starting retry attempt", map[string]interface{}{
-				"operation":      "retry_attempt_start",
+			r.logger.DebugWithContext(ctx, "Starting retry attempt", map[string]interface{}{
+				"operation":       "retry_attempt_start",
 				"retry_operation": operation,
-				"attempt":        attempt,
-				"max_attempts":   r.config.MaxAttempts,
-				"current_delay":  delay.String(),
+				"attempt":         attempt,
+				"max_attempts":    r.config.MaxAttempts,
+				"current_delay":   delay.String(),
 			})
 		}
 
@@ -135,7 +135,7 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func()
 		case <-ctx.Done():
 			// Log context cancellation
 			if r.logger != nil {
-				r.logger.Info("Retry operation cancelled by context", map[string]interface{}{
+				r.logger.InfoWithContext(ctx, "Retry operation cancelled by context", map[string]interface{}{
 					"operation":       "retry_cancelled",
 					"retry_operation": operation,
 					"attempt":         attempt,
@@ -163,12 +163,12 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func()
 
 			// Log success
 			if r.logger != nil {
-				r.logger.Info("Retry operation succeeded", map[string]interface{}{
-					"operation":        "retry_success",
-					"retry_operation":  operation,
-					"successful_attempt": attempt,
-					"total_attempts":   attempt,
-					"total_duration_ms": time.Since(startTime).Milliseconds(),
+				r.logger.InfoWithContext(ctx, "Retry operation succeeded", map[string]interface{}{
+					"operation":           "retry_success",
+					"retry_operation":     operation,
+					"successful_attempt":  attempt,
+					"total_attempts":      attempt,
+					"total_duration_ms":   time.Since(startTime).Milliseconds(),
 					"attempt_duration_ms": time.Since(attemptStart).Milliseconds(),
 				})
 			}
@@ -183,21 +183,21 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func()
 			}
 
 			logData := map[string]interface{}{
-				"operation":        "retry_attempt_failed",
-				"retry_operation":  operation,
-				"attempt":          attempt,
-				"max_attempts":     r.config.MaxAttempts,
-				"error":            err.Error(),
-				"error_type":       fmt.Sprintf("%T", err),
-				"will_retry":       attempt < r.config.MaxAttempts,
+				"operation":           "retry_attempt_failed",
+				"retry_operation":     operation,
+				"attempt":             attempt,
+				"max_attempts":        r.config.MaxAttempts,
+				"error":               err.Error(),
+				"error_type":          fmt.Sprintf("%T", err),
+				"will_retry":          attempt < r.config.MaxAttempts,
 				"attempt_duration_ms": time.Since(attemptStart).Milliseconds(),
 			}
 
 			if r.logger != nil {
 				if logLevel == "Warn" {
-					r.logger.Warn("Retry attempt failed (final)", logData)
+					r.logger.WarnWithContext(ctx, "Retry attempt failed (final)", logData)
 				} else {
-					r.logger.Debug("Retry attempt failed, will retry", logData)
+					r.logger.DebugWithContext(ctx, "Retry attempt failed, will retry", logData)
 				}
 			}
 		}
@@ -232,7 +232,7 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func()
 
 		// Log backoff
 		if r.logger != nil {
-			r.logger.Debug("Applying retry backoff", map[string]interface{}{
+			r.logger.DebugWithContext(ctx, "Applying retry backoff", map[string]interface{}{
 				"operation":         "retry_backoff",
 				"retry_operation":   operation,
 				"attempt":           attempt,
@@ -251,7 +251,7 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func()
 			timer.Stop()
 			// Log context cancellation during backoff
 			if r.logger != nil {
-				r.logger.Info("Retry operation cancelled during backoff", map[string]interface{}{
+				r.logger.InfoWithContext(ctx, "Retry operation cancelled during backoff", map[string]interface{}{
 					"operation":       "retry_cancelled_backoff",
 					"retry_operation": operation,
 					"attempt":         attempt,
@@ -298,7 +298,7 @@ func (r *RetryExecutor) Execute(ctx context.Context, operation string, fn func()
 			logData["final_error_type"] = "no_error"
 		}
 
-		r.logger.Error("Retry operation failed after all attempts", logData)
+		r.logger.ErrorWithContext(ctx, "Retry operation failed after all attempts", logData)
 	}
 
 	return fmt.Errorf("max retry attempts (%d) exceeded for %v: %w", r.config.MaxAttempts, lastErr, core.ErrMaxRetriesExceeded)

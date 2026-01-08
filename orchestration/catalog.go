@@ -118,7 +118,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	c.mu.RUnlock()
 
 	if c.logger != nil {
-		c.logger.Info("Starting catalog refresh", map[string]interface{}{
+		c.logger.InfoWithContext(ctx, "Starting catalog refresh", map[string]interface{}{
 			"operation":      "catalog_refresh_start",
 			"current_agents": currentAgentCount,
 		})
@@ -129,7 +129,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	services, err := c.getAllServices(ctx)
 	if err != nil {
 		if c.logger != nil {
-			c.logger.Error("Failed to get services from discovery", map[string]interface{}{
+			c.logger.ErrorWithContext(ctx, "Failed to get services from discovery", map[string]interface{}{
 				"operation":   "discovery_query",
 				"error":       err.Error(),
 				"duration_ms": time.Since(refreshStart).Milliseconds(),
@@ -139,7 +139,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	}
 
 	if c.logger != nil {
-		c.logger.Debug("Services discovered successfully", map[string]interface{}{
+		c.logger.DebugWithContext(ctx, "Services discovered successfully", map[string]interface{}{
 			"operation":      "discovery_query",
 			"services_found": len(services),
 			"query_time_ms":  time.Since(refreshStart).Milliseconds(),
@@ -156,7 +156,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 		agentFetchStart := time.Now()
 
 		if c.logger != nil {
-			c.logger.Debug("Fetching agent capabilities", map[string]interface{}{
+			c.logger.DebugWithContext(ctx, "Fetching agent capabilities", map[string]interface{}{
 				"operation":    "fetch_agent_info",
 				"service_id":   service.ID,
 				"service_name": service.Name,
@@ -168,7 +168,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 		if err != nil {
 			failedFetches++
 			if c.logger != nil {
-				c.logger.Warn("Failed to fetch agent capabilities", map[string]interface{}{
+				c.logger.WarnWithContext(ctx, "Failed to fetch agent capabilities", map[string]interface{}{
 					"operation":     "fetch_agent_info",
 					"service_id":    service.ID,
 					"service_name":  service.Name,
@@ -184,7 +184,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 		newAgents[service.ID] = agentInfo
 
 		if c.logger != nil {
-			c.logger.Debug("Agent capabilities fetched successfully", map[string]interface{}{
+			c.logger.DebugWithContext(ctx, "Agent capabilities fetched successfully", map[string]interface{}{
 				"operation":          "fetch_agent_info",
 				"service_id":         service.ID,
 				"service_name":       service.Name,
@@ -200,7 +200,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	}
 
 	if c.logger != nil {
-		c.logger.Debug("Capability index built", map[string]interface{}{
+		c.logger.DebugWithContext(ctx, "Capability index built", map[string]interface{}{
 			"operation":           "build_capability_index",
 			"unique_capabilities": len(newIndex),
 			"agents_indexed":      len(newAgents),
@@ -214,7 +214,7 @@ func (c *AgentCatalog) Refresh(ctx context.Context) error {
 	c.mu.Unlock()
 
 	if c.logger != nil {
-		c.logger.Info("Catalog refresh completed", map[string]interface{}{
+		c.logger.InfoWithContext(ctx, "Catalog refresh completed", map[string]interface{}{
 			"operation":          "catalog_refresh_complete",
 			"success":            true,
 			"total_duration_ms":  time.Since(refreshStart).Milliseconds(),
@@ -238,7 +238,7 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 	url := fmt.Sprintf("http://%s:%d/api/capabilities", service.Address, service.Port)
 
 	if c.logger != nil {
-		c.logger.Debug("Making HTTP request for capabilities", map[string]interface{}{
+		c.logger.DebugWithContext(ctx, "Making HTTP request for capabilities", map[string]interface{}{
 			"operation":    "http_request_start",
 			"service_id":   service.ID,
 			"service_name": service.Name,
@@ -256,7 +256,7 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		if c.logger != nil {
-			c.logger.Warn("HTTP request failed, using fallback capabilities", map[string]interface{}{
+			c.logger.WarnWithContext(ctx, "HTTP request failed, using fallback capabilities", map[string]interface{}{
 				"operation":       "http_request_fallback",
 				"service_id":      service.ID,
 				"error":           err.Error(),
@@ -280,7 +280,7 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 		}()
 
 		if c.logger != nil {
-			c.logger.Debug("HTTP response received", map[string]interface{}{
+			c.logger.DebugWithContext(ctx, "HTTP response received", map[string]interface{}{
 				"operation":       "http_response",
 				"service_id":      service.ID,
 				"status_code":     resp.StatusCode,
@@ -291,7 +291,7 @@ func (c *AgentCatalog) fetchAgentInfo(ctx context.Context, service *core.Service
 
 		if err := json.NewDecoder(resp.Body).Decode(&capabilities); err != nil {
 			if c.logger != nil {
-				c.logger.Warn("JSON decode failed, using fallback capabilities", map[string]interface{}{
+				c.logger.WarnWithContext(ctx, "JSON decode failed, using fallback capabilities", map[string]interface{}{
 					"operation":  "json_decode_fallback",
 					"service_id": service.ID,
 					"error":      err.Error(),

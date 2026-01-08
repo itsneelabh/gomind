@@ -154,7 +154,7 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 	start := time.Now()
 
 	if r.logger != nil {
-		r.logger.Info("Registering service", map[string]interface{}{
+		r.logger.InfoWithContext(ctx, "Registering service", map[string]interface{}{
 			"service_id":         info.ID,
 			"service_name":       info.Name,
 			"service_type":       info.Type,
@@ -186,7 +186,7 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 		}
 
 		if r.logger != nil {
-			r.logger.Error("Failed to marshal service info", map[string]interface{}{
+			r.logger.ErrorWithContext(ctx, "Failed to marshal service info", map[string]interface{}{
 				"error":        err,
 				"error_type":   fmt.Sprintf("%T", err),
 				"service_id":   info.ID,
@@ -231,7 +231,7 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 		}
 
 		if r.logger != nil {
-			r.logger.Error("Failed to register service atomically", map[string]interface{}{
+			r.logger.ErrorWithContext(ctx, "Failed to register service atomically", map[string]interface{}{
 				"error":        err,
 				"error_type":   fmt.Sprintf("%T", err),
 				"service_id":   info.ID,
@@ -256,7 +256,7 @@ func (r *RedisRegistry) Register(ctx context.Context, info *ServiceInfo) error {
 	}
 
 	if r.logger != nil {
-		r.logger.Info("Service registered successfully", map[string]interface{}{
+		r.logger.InfoWithContext(ctx, "Service registered successfully", map[string]interface{}{
 			"service_id":         info.ID,
 			"service_name":       info.Name,
 			"service_type":       info.Type,
@@ -272,7 +272,7 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 	start := time.Now()
 
 	if r.logger != nil {
-		r.logger.Debug("Updating service health", map[string]interface{}{
+		r.logger.DebugWithContext(ctx, "Updating service health", map[string]interface{}{
 			"service_id": serviceID,
 			"status":     status,
 		})
@@ -293,7 +293,7 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 			}
 
 			if r.logger != nil {
-				r.logger.Warn("Service not found for health update", map[string]interface{}{
+				r.logger.WarnWithContext(ctx, "Service not found for health update", map[string]interface{}{
 					"service_id": serviceID,
 					"key":        key,
 				})
@@ -311,7 +311,7 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 		}
 
 		if r.logger != nil {
-			r.logger.Error("Failed to get service for health update", map[string]interface{}{
+			r.logger.ErrorWithContext(ctx, "Failed to get service for health update", map[string]interface{}{
 				"error":      err,
 				"error_type": fmt.Sprintf("%T", err),
 				"service_id": serviceID,
@@ -333,7 +333,7 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 		}
 
 		if r.logger != nil {
-			r.logger.Error("Failed to unmarshal service data for health update", map[string]interface{}{
+			r.logger.ErrorWithContext(ctx, "Failed to unmarshal service data for health update", map[string]interface{}{
 				"error":      err,
 				"error_type": fmt.Sprintf("%T", err),
 				"service_id": serviceID,
@@ -362,7 +362,7 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 		}
 
 		if r.logger != nil {
-			r.logger.Error("Failed to marshal health data", map[string]interface{}{
+			r.logger.ErrorWithContext(ctx, "Failed to marshal health data", map[string]interface{}{
 				"error":      err,
 				"error_type": fmt.Sprintf("%T", err),
 				"service_id": serviceID,
@@ -384,7 +384,7 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 		}
 
 		if r.logger != nil {
-			r.logger.Error("Failed to store health update", map[string]interface{}{
+			r.logger.ErrorWithContext(ctx, "Failed to store health update", map[string]interface{}{
 				"error":      err,
 				"error_type": fmt.Sprintf("%T", err),
 				"service_id": serviceID,
@@ -421,7 +421,7 @@ func (r *RedisRegistry) UpdateHealth(ctx context.Context, serviceID string, stat
 	}
 
 	if r.logger != nil {
-		r.logger.Debug("Service health updated", map[string]interface{}{
+		r.logger.DebugWithContext(ctx, "Service health updated", map[string]interface{}{
 			"service_id":      serviceID,
 			"previous_status": previousHealth,
 			"new_status":      status,
@@ -438,7 +438,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 	start := time.Now()
 
 	if r.logger != nil {
-		r.logger.Info("Unregistering service", map[string]interface{}{
+		r.logger.InfoWithContext(ctx, "Unregistering service", map[string]interface{}{
 			"service_id": serviceID,
 		})
 	}
@@ -451,7 +451,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 		var info ServiceInfo
 		if err := json.Unmarshal([]byte(data), &info); err == nil {
 			if r.logger != nil {
-				r.logger.Debug("Removing service from indexes", map[string]interface{}{
+				r.logger.DebugWithContext(ctx, "Removing service from indexes", map[string]interface{}{
 					"service_id":         serviceID,
 					"service_name":       info.Name,
 					"service_type":       info.Type,
@@ -463,7 +463,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 			for _, capability := range info.Capabilities {
 				capKey := fmt.Sprintf("%s:capabilities:%s", r.namespace, capability.Name)
 				if err := r.client.SRem(ctx, capKey, serviceID).Err(); err != nil && r.logger != nil {
-					r.logger.Warn("Failed to remove from capability index", map[string]interface{}{
+					r.logger.WarnWithContext(ctx, "Failed to remove from capability index", map[string]interface{}{
 						"capability":     capability.Name,
 						"capability_key": capKey,
 						"service_id":     serviceID,
@@ -475,7 +475,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 			// Remove from name index
 			nameKey := fmt.Sprintf("%s:names:%s", r.namespace, info.Name)
 			if err := r.client.SRem(ctx, nameKey, serviceID).Err(); err != nil && r.logger != nil {
-				r.logger.Warn("Failed to remove from name index", map[string]interface{}{
+				r.logger.WarnWithContext(ctx, "Failed to remove from name index", map[string]interface{}{
 					"name_key":   nameKey,
 					"service_id": serviceID,
 					"error":      err,
@@ -485,7 +485,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 			// Remove from type index
 			typeKey := fmt.Sprintf("%s:types:%s", r.namespace, info.Type)
 			if err := r.client.SRem(ctx, typeKey, serviceID).Err(); err != nil && r.logger != nil {
-				r.logger.Warn("Failed to remove from type index", map[string]interface{}{
+				r.logger.WarnWithContext(ctx, "Failed to remove from type index", map[string]interface{}{
 					"type_key":   typeKey,
 					"service_id": serviceID,
 					"error":      err,
@@ -494,7 +494,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 			}
 		} else {
 			if r.logger != nil {
-				r.logger.Warn("Failed to unmarshal service data for unregistration", map[string]interface{}{
+				r.logger.WarnWithContext(ctx, "Failed to unmarshal service data for unregistration", map[string]interface{}{
 					"error":      err,
 					"error_type": fmt.Sprintf("%T", err),
 					"service_id": serviceID,
@@ -504,7 +504,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 			}
 		}
 	} else if err != redis.Nil && r.logger != nil {
-		r.logger.Warn("Failed to get service data for unregistration", map[string]interface{}{
+		r.logger.WarnWithContext(ctx, "Failed to get service data for unregistration", map[string]interface{}{
 			"error":      err,
 			"error_type": fmt.Sprintf("%T", err),
 			"service_id": serviceID,
@@ -527,7 +527,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 		}
 
 		if r.logger != nil {
-			r.logger.Error("Failed to delete service key", map[string]interface{}{
+			r.logger.ErrorWithContext(ctx, "Failed to delete service key", map[string]interface{}{
 				"error":      err,
 				"error_type": fmt.Sprintf("%T", err),
 				"service_id": serviceID,
@@ -555,7 +555,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 	}
 
 	if r.logger != nil {
-		r.logger.Info("Service unregistered successfully", map[string]interface{}{
+		r.logger.InfoWithContext(ctx, "Service unregistered successfully", map[string]interface{}{
 			"service_id": serviceID,
 			"key":        key,
 		})
@@ -569,7 +569,7 @@ func (r *RedisRegistry) Unregister(ctx context.Context, serviceID string) error 
 // before the service keys. Called during heartbeat to keep index sets alive.
 func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceInfo) {
 	if r.logger != nil {
-		r.logger.Debug("Refreshing index set TTLs", map[string]interface{}{
+		r.logger.DebugWithContext(ctx, "Refreshing index set TTLs", map[string]interface{}{
 			"service_id":         info.ID,
 			"service_name":       info.Name,
 			"service_type":       info.Type,
@@ -583,7 +583,7 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 		capKey := fmt.Sprintf("%s:capabilities:%s", r.namespace, capability.Name)
 		if err := r.client.Expire(ctx, capKey, r.ttl*2).Err(); err != nil {
 			if r.logger != nil {
-				r.logger.Debug("Failed to refresh capability index TTL", map[string]interface{}{
+				r.logger.DebugWithContext(ctx, "Failed to refresh capability index TTL", map[string]interface{}{
 					"capability":     capability.Name,
 					"capability_key": capKey,
 					"error":          err,
@@ -598,7 +598,7 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 	nameKey := fmt.Sprintf("%s:names:%s", r.namespace, info.Name)
 	if err := r.client.Expire(ctx, nameKey, r.ttl*2).Err(); err != nil {
 		if r.logger != nil {
-			r.logger.Debug("Failed to refresh name index TTL", map[string]interface{}{
+			r.logger.DebugWithContext(ctx, "Failed to refresh name index TTL", map[string]interface{}{
 				"name":       info.Name,
 				"name_key":   nameKey,
 				"error":      err,
@@ -611,7 +611,7 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 	typeKey := fmt.Sprintf("%s:types:%s", r.namespace, info.Type)
 	if err := r.client.Expire(ctx, typeKey, r.ttl*2).Err(); err != nil {
 		if r.logger != nil {
-			r.logger.Debug("Failed to refresh type index TTL", map[string]interface{}{
+			r.logger.DebugWithContext(ctx, "Failed to refresh type index TTL", map[string]interface{}{
 				"type":       info.Type,
 				"type_key":   typeKey,
 				"error":      err,
@@ -621,7 +621,7 @@ func (r *RedisRegistry) refreshIndexSetTTLs(ctx context.Context, info *ServiceIn
 	}
 
 	if r.logger != nil {
-		r.logger.Debug("Index set TTL refresh completed", map[string]interface{}{
+		r.logger.DebugWithContext(ctx, "Index set TTL refresh completed", map[string]interface{}{
 			"service_id":   info.ID,
 			"service_name": info.Name,
 			"type":         info.Type,
@@ -746,7 +746,7 @@ func (r *RedisRegistry) maintainRegistration(ctx context.Context, serviceID stri
 
 			if regErr := r.Register(ctx, serviceInfo); regErr != nil {
 				if r.logger != nil {
-					r.logger.Error("Failed to re-register service during recovery", map[string]interface{}{
+					r.logger.ErrorWithContext(ctx, "Failed to re-register service during recovery", map[string]interface{}{
 						"service_id":                serviceID,
 						"error":                     regErr,
 						"will_retry_next_heartbeat": true,
@@ -759,7 +759,7 @@ func (r *RedisRegistry) maintainRegistration(ctx context.Context, serviceID stri
 					if !lastSuccessTime.IsZero() {
 						downtime = time.Since(lastSuccessTime)
 					}
-					r.logger.Info("Successfully re-registered service after Redis recovery", map[string]interface{}{
+					r.logger.InfoWithContext(ctx, "Successfully re-registered service after Redis recovery", map[string]interface{}{
 						"service_id":        serviceID,
 						"downtime_seconds":  int(downtime.Seconds()),
 						"missed_heartbeats": int(downtime.Seconds() / (r.ttl.Seconds() / 2)),
@@ -775,7 +775,7 @@ func (r *RedisRegistry) maintainRegistration(ctx context.Context, serviceID stri
 			}
 		}
 	} else if err != nil && r.logger != nil {
-		r.logger.Error("Failed to send heartbeat", map[string]interface{}{
+		r.logger.ErrorWithContext(ctx, "Failed to send heartbeat", map[string]interface{}{
 			"service_id":     serviceID,
 			"error":          err.Error(),
 			"total_failures": failureCount,
@@ -907,7 +907,7 @@ func (r *RedisRegistry) StopHeartbeat(ctx context.Context, serviceID string) {
 		delete(r.heartbeats, serviceID)
 
 		if r.logger != nil {
-			r.logger.Info("Stopped heartbeat", map[string]interface{}{
+			r.logger.InfoWithContext(ctx, "Stopped heartbeat", map[string]interface{}{
 				"service_id": serviceID,
 			})
 		}
@@ -1062,7 +1062,7 @@ func registryRetryManager(
 	defer ticker.Stop()
 
 	if logger != nil {
-		logger.Info("Background Redis retry started", map[string]interface{}{
+		logger.InfoWithContext(ctx, "Background Redis retry started", map[string]interface{}{
 			"service_id":     state.serviceInfo.ID,
 			"retry_interval": state.currentInterval,
 		})
@@ -1073,7 +1073,7 @@ func registryRetryManager(
 		select {
 		case <-ctx.Done():
 			if logger != nil {
-				logger.Info("Redis retry manager shutting down", map[string]interface{}{
+				logger.InfoWithContext(ctx, "Redis retry manager shutting down", map[string]interface{}{
 					"service_id": state.serviceInfo.ID,
 				})
 			}
@@ -1083,7 +1083,7 @@ func registryRetryManager(
 			attempt++
 
 			if logger != nil {
-				logger.Debug("Attempting Redis reconnection", map[string]interface{}{
+				logger.DebugWithContext(ctx, "Attempting Redis reconnection", map[string]interface{}{
 					"service_id": state.serviceInfo.ID,
 					"attempt":    attempt,
 				})
@@ -1097,7 +1097,7 @@ func registryRetryManager(
 				discovery, discoveryErr := NewRedisDiscovery(redisURL)
 				if discoveryErr != nil {
 					if logger != nil {
-						logger.Warn("Redis reconnection failed", map[string]interface{}{
+						logger.WarnWithContext(ctx, "Redis reconnection failed", map[string]interface{}{
 							"service_id": state.serviceInfo.ID,
 							"attempt":    attempt,
 							"error":      discoveryErr.Error(),
@@ -1119,7 +1119,7 @@ func registryRetryManager(
 				regErr := discovery.Register(ctx, state.serviceInfo)
 				if regErr != nil {
 					if logger != nil {
-						logger.Error("Failed to register after reconnection", map[string]interface{}{
+						logger.ErrorWithContext(ctx, "Failed to register after reconnection", map[string]interface{}{
 							"service_id": state.serviceInfo.ID,
 							"error":      regErr.Error(),
 						})
@@ -1131,7 +1131,7 @@ func registryRetryManager(
 				discovery.StartHeartbeat(ctx, state.serviceInfo.ID)
 
 				if logger != nil {
-					logger.Info("Successfully registered after background retry", map[string]interface{}{
+					logger.InfoWithContext(ctx, "Successfully registered after background retry", map[string]interface{}{
 						"service_id": state.serviceInfo.ID,
 						"attempt":    attempt,
 					})
@@ -1141,7 +1141,7 @@ func registryRetryManager(
 				if state.onSuccess != nil {
 					if err := state.onSuccess(discovery); err != nil {
 						if logger != nil {
-							logger.Error("Failed to update registry reference", map[string]interface{}{
+							logger.ErrorWithContext(ctx, "Failed to update registry reference", map[string]interface{}{
 								"service_id": state.serviceInfo.ID,
 								"error":      err.Error(),
 							})
@@ -1156,7 +1156,7 @@ func registryRetryManager(
 				registry, registryErr := NewRedisRegistry(redisURL)
 				if registryErr != nil {
 					if logger != nil {
-						logger.Warn("Redis reconnection failed", map[string]interface{}{
+						logger.WarnWithContext(ctx, "Redis reconnection failed", map[string]interface{}{
 							"service_id": state.serviceInfo.ID,
 							"attempt":    attempt,
 							"error":      registryErr.Error(),
@@ -1178,7 +1178,7 @@ func registryRetryManager(
 				regErr := registry.Register(ctx, state.serviceInfo)
 				if regErr != nil {
 					if logger != nil {
-						logger.Error("Failed to register after reconnection", map[string]interface{}{
+						logger.ErrorWithContext(ctx, "Failed to register after reconnection", map[string]interface{}{
 							"service_id": state.serviceInfo.ID,
 							"error":      regErr.Error(),
 						})
@@ -1190,7 +1190,7 @@ func registryRetryManager(
 				registry.StartHeartbeat(ctx, state.serviceInfo.ID)
 
 				if logger != nil {
-					logger.Info("Successfully registered after background retry", map[string]interface{}{
+					logger.InfoWithContext(ctx, "Successfully registered after background retry", map[string]interface{}{
 						"service_id": state.serviceInfo.ID,
 						"attempt":    attempt,
 					})
@@ -1200,7 +1200,7 @@ func registryRetryManager(
 				if state.onSuccess != nil {
 					if err := state.onSuccess(registry); err != nil {
 						if logger != nil {
-							logger.Error("Failed to update registry reference", map[string]interface{}{
+							logger.ErrorWithContext(ctx, "Failed to update registry reference", map[string]interface{}{
 								"service_id": state.serviceInfo.ID,
 								"error":      err.Error(),
 							})

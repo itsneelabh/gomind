@@ -28,6 +28,13 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
+// Flush implements http.Flusher to support SSE streaming.
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 // LoggingMiddleware logs HTTP requests and responses with structured logging.
 // In development mode (devMode=true), it logs all requests.
 // In production mode (devMode=false), it only logs non-2xx responses and slow requests (>1s).
@@ -76,13 +83,13 @@ func LoggingMiddleware(logger Logger, devMode bool) func(http.Handler) http.Hand
 
 				// Log at appropriate level
 				if wrapped.statusCode >= 500 {
-					logger.Error("HTTP request error", logData)
+					logger.ErrorWithContext(r.Context(), "HTTP request error", logData)
 				} else if wrapped.statusCode >= 400 {
-					logger.Warn("HTTP request client error", logData)
+					logger.WarnWithContext(r.Context(), "HTTP request client error", logData)
 				} else if duration > time.Second {
-					logger.Warn("HTTP request slow", logData)
+					logger.WarnWithContext(r.Context(), "HTTP request slow", logData)
 				} else {
-					logger.Info("HTTP request", logData)
+					logger.InfoWithContext(r.Context(), "HTTP request", logData)
 				}
 			}
 		})

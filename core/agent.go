@@ -913,7 +913,7 @@ func RecoveryMiddleware(logger Logger) func(http.Handler) http.Handler {
 					// Log the panic with stack trace using structured logging
 					stackTrace := debug.Stack()
 					if logger != nil {
-						logger.Error("HTTP handler panic recovered", map[string]interface{}{
+						logger.ErrorWithContext(r.Context(), "HTTP handler panic recovered", map[string]interface{}{
 							"panic":      err,
 							"error_type": fmt.Sprintf("%T", err),
 							"path":       r.URL.Path,

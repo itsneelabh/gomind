@@ -179,7 +179,7 @@ func (t *TemplatePromptBuilder) BuildPlanningPrompt(ctx context.Context, input P
 		}
 
 		if t.logger != nil {
-			t.logger.Warn("Template execution failed, using fallback", map[string]interface{}{
+			t.logger.WarnWithContext(ctx, "Template execution failed, using fallback", map[string]interface{}{
 				"error":         err.Error(),
 				"template_file": t.config.TemplateFile,
 			})
@@ -219,7 +219,7 @@ func (t *TemplatePromptBuilder) BuildPlanningPrompt(ctx context.Context, input P
 	}
 
 	if t.logger != nil {
-		t.logger.Debug("Built planning prompt from template", map[string]interface{}{
+		t.logger.DebugWithContext(ctx, "Built planning prompt from template", map[string]interface{}{
 			"builder_type":  "template",
 			"template_file": t.config.TemplateFile,
 			"domain":        t.config.Domain,

@@ -193,9 +193,6 @@ func (e *WorkflowEngine) ParseWorkflowYAML(yamlData []byte) (*WorkflowDefinition
 
 // ExecuteWorkflow executes a workflow definition
 func (e *WorkflowEngine) ExecuteWorkflow(ctx context.Context, workflow *WorkflowDefinition, inputs map[string]interface{}) (*WorkflowExecution, error) {
-	// Get trace context for log correlation
-	tc := telemetry.GetTraceContext(ctx)
-
 	// Create execution instance
 	execution := &WorkflowExecution{
 		ID:         uuid.New().String(),
@@ -221,12 +218,10 @@ func (e *WorkflowEngine) ExecuteWorkflow(ctx context.Context, workflow *Workflow
 		attribute.Int("step_count", len(workflow.Steps)),
 	)
 
-	e.logger.Info("Starting workflow execution", map[string]interface{}{
+	e.logger.InfoWithContext(ctx, "Starting workflow execution", map[string]interface{}{
 		"execution_id":  execution.ID,
 		"workflow_name": workflow.Name,
 		"step_count":    len(workflow.Steps),
-		"trace_id":      tc.TraceID,
-		"span_id":       tc.SpanID,
 	})
 
 	// Build DAG from workflow definition
@@ -268,13 +263,11 @@ func (e *WorkflowEngine) ExecuteWorkflow(ctx context.Context, workflow *Workflow
 
 		if updateErr := e.stateStore.UpdateExecution(ctx, execution); updateErr != nil {
 			// Log error but continue with original error
-			e.logger.Error("Failed to update execution state on error", map[string]interface{}{
+			e.logger.ErrorWithContext(ctx, "Failed to update execution state on error", map[string]interface{}{
 				"execution_id": execution.ID,
 				"workflow_id":  execution.WorkflowID,
 				"error":        updateErr.Error(),
 				"original_err": err.Error(),
-				"trace_id":     tc.TraceID,
-				"span_id":      tc.SpanID,
 			})
 		}
 		return execution, err
@@ -296,23 +289,19 @@ func (e *WorkflowEngine) ExecuteWorkflow(ctx context.Context, workflow *Workflow
 		attribute.Int64("duration_ms", duration.Milliseconds()),
 	)
 
-	e.logger.Info("Workflow execution completed", map[string]interface{}{
+	e.logger.InfoWithContext(ctx, "Workflow execution completed", map[string]interface{}{
 		"execution_id":  execution.ID,
 		"workflow_name": workflow.Name,
 		"duration_ms":   duration.Milliseconds(),
-		"trace_id":      tc.TraceID,
-		"span_id":       tc.SpanID,
 	})
 
 	// Save final state
 	if err := e.stateStore.UpdateExecution(ctx, execution); err != nil {
 		// Log error but continue
-		e.logger.Error("Failed to update final execution state", map[string]interface{}{
+		e.logger.ErrorWithContext(ctx, "Failed to update final execution state", map[string]interface{}{
 			"execution_id": execution.ID,
 			"workflow_id":  execution.WorkflowID,
 			"error":        err.Error(),
-			"trace_id":     tc.TraceID,
-			"span_id":      tc.SpanID,
 		})
 	}
 
@@ -528,7 +517,7 @@ func (e *WorkflowEngine) executeDAG(ctx context.Context, execution *WorkflowExec
 			// Update state only if step exists
 			if err := e.stateStore.UpdateStepExecution(ctx, execution.ID, stepExec); err != nil {
 				// Log error but don't fail the step
-				e.logger.Error("Failed to update step state", map[string]interface{}{
+				e.logger.ErrorWithContext(ctx, "Failed to update step state", map[string]interface{}{
 					"execution_id": execution.ID,
 					"step_id":      stepExec.StepID,
 					"error":        err.Error(),
@@ -566,20 +555,15 @@ func (e *WorkflowEngine) executeStep(ctx context.Context, task *WorkflowTask) *T
 	stepDef := task.StepDef
 	stepExec := task.Execution.Steps[task.StepID]
 
-	// Get trace context for log correlation
-	tc := telemetry.GetTraceContext(ctx)
-
 	// Add span event for step execution start
 	telemetry.AddSpanEvent(ctx, "workflow_step_started",
 		attribute.String("step_id", task.StepID),
 		attribute.String("workflow_id", task.Execution.ID),
 	)
 
-	e.logger.Debug("Starting workflow step execution", map[string]interface{}{
+	e.logger.DebugWithContext(ctx, "Starting workflow step execution", map[string]interface{}{
 		"step_id":     task.StepID,
 		"workflow_id": task.Execution.ID,
-		"trace_id":    tc.TraceID,
-		"span_id":     tc.SpanID,
 	})
 
 	// Resolve inputs with variable substitution
@@ -666,13 +650,11 @@ func (e *WorkflowEngine) executeStep(ctx context.Context, task *WorkflowTask) *T
 			attribute.String("error", err.Error()),
 			attribute.Int("attempts", stepExec.Attempts),
 		)
-		e.logger.Error("Workflow step failed", map[string]interface{}{
+		e.logger.ErrorWithContext(ctx, "Workflow step failed", map[string]interface{}{
 			"step_id":     task.StepID,
 			"workflow_id": task.Execution.ID,
 			"error":       err.Error(),
 			"attempts":    stepExec.Attempts,
-			"trace_id":    tc.TraceID,
-			"span_id":     tc.SpanID,
 		})
 		return &TaskResult{
 			StepID: task.StepID,
@@ -687,13 +669,11 @@ func (e *WorkflowEngine) executeStep(ctx context.Context, task *WorkflowTask) *T
 		attribute.Int("attempts", stepExec.Attempts),
 	)
 
-	e.logger.Debug("Workflow step completed", map[string]interface{}{
+	e.logger.DebugWithContext(ctx, "Workflow step completed", map[string]interface{}{
 		"step_id":     task.StepID,
 		"workflow_id": task.Execution.ID,
 		"agent_used":  stepExec.AgentUsed,
 		"attempts":    stepExec.Attempts,
-		"trace_id":    tc.TraceID,
-		"span_id":     tc.SpanID,
 	})
 
 	return &TaskResult{

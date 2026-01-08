@@ -276,7 +276,7 @@ func (r *RedisClient) Pipeline() redis.Pipeliner {
 // HealthCheck verifies Redis connectivity
 func (r *RedisClient) HealthCheck(ctx context.Context) error {
 	if r.logger != nil {
-		r.logger.Debug("Performing Redis health check", map[string]interface{}{
+		r.logger.DebugWithContext(ctx, "Performing Redis health check", map[string]interface{}{
 			"db":        r.dbID,
 			"namespace": r.namespace,
 		})
@@ -285,7 +285,7 @@ func (r *RedisClient) HealthCheck(ctx context.Context) error {
 	err := r.client.Ping(ctx).Err()
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Error("Redis health check failed", map[string]interface{}{
+			r.logger.ErrorWithContext(ctx, "Redis health check failed", map[string]interface{}{
 				"error":      err,
 				"error_type": fmt.Sprintf("%T", err),
 				"db":         r.dbID,
@@ -295,7 +295,7 @@ func (r *RedisClient) HealthCheck(ctx context.Context) error {
 		}
 	} else {
 		if r.logger != nil {
-			r.logger.Debug("Redis health check passed", map[string]interface{}{
+			r.logger.DebugWithContext(ctx, "Redis health check passed", map[string]interface{}{
 				"db":        r.dbID,
 				"namespace": r.namespace,
 			})

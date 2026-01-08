@@ -88,7 +88,7 @@ func NewAITool(name string, apiKey string, opts ...AIToolOption) (*AITool, error
 // ProcessWithAI processes input using AI (but cannot discover other components)
 func (t *AITool) ProcessWithAI(ctx context.Context, input string) (string, error) {
 	if t.logger != nil {
-		t.logger.Debug("Processing with AI", map[string]interface{}{
+		t.logger.DebugWithContext(ctx, "Processing with AI", map[string]interface{}{
 			"operation":    "ai_tool_process",
 			"tool_name":    t.BaseTool.Name,
 			"input_length": len(input),
@@ -102,7 +102,7 @@ func (t *AITool) ProcessWithAI(ctx context.Context, input string) (string, error
 	})
 	if err != nil {
 		if t.logger != nil {
-			t.logger.Error("AI processing failed", map[string]interface{}{
+			t.logger.ErrorWithContext(ctx, "AI processing failed", map[string]interface{}{
 				"operation": "ai_tool_process",
 				"tool_name": t.BaseTool.Name,
 				"error":     err.Error(),
@@ -112,7 +112,7 @@ func (t *AITool) ProcessWithAI(ctx context.Context, input string) (string, error
 	}
 
 	if t.logger != nil {
-		t.logger.Debug("AI processing completed", map[string]interface{}{
+		t.logger.DebugWithContext(ctx, "AI processing completed", map[string]interface{}{
 			"operation":     "ai_tool_process",
 			"tool_name":     t.BaseTool.Name,
 			"output_length": len(response.Content),
@@ -143,7 +143,7 @@ func (t *AITool) RegisterAICapability(name, description, prompt string) {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				if t.logger != nil {
-					t.logger.Error("Failed to read request body", map[string]interface{}{
+					t.logger.ErrorWithContext(r.Context(), "Failed to read request body", map[string]interface{}{
 						"operation":       "ai_capability_invoke",
 						"capability_name": name,
 						"error":           err.Error(),

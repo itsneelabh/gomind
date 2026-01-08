@@ -316,7 +316,7 @@ Response (raw JSON only, no formatting):`,
 
 	// Structured logging (logger may also be nil - fail-safe)
 	if d.logger != nil {
-		d.logger.Debug("Built planning prompt", map[string]interface{}{
+		d.logger.DebugWithContext(ctx, "Built planning prompt", map[string]interface{}{
 			"builder_type":        "default",
 			"type_rules_count":    len(d.typeRules),
 			"custom_instructions": len(d.config.CustomInstructions),

@@ -308,8 +308,8 @@ func (b *BaseClient) LogRequest(provider, model, prompt string) {
 	})
 }
 
-// LogResponse logs API responses
-func (b *BaseClient) LogResponse(provider, model string, tokens core.TokenUsage, duration time.Duration) {
+// LogResponse logs API responses with trace correlation
+func (b *BaseClient) LogResponse(ctx context.Context, provider, model string, tokens core.TokenUsage, duration time.Duration) {
 	// Record AI request metrics using unified telemetry
 	telemetry.RecordAIRequest(telemetry.ModuleAI, provider,
 		float64(duration.Milliseconds()), "success")
@@ -322,7 +322,7 @@ func (b *BaseClient) LogResponse(provider, model string, tokens core.TokenUsage,
 		telemetry.RecordAITokens(telemetry.ModuleAI, provider, "output", int64(tokens.CompletionTokens))
 	}
 
-	b.Logger.Info("AI response received", map[string]interface{}{
+	b.Logger.InfoWithContext(ctx, "AI response received", map[string]interface{}{
 		"operation":         "ai_response",
 		"provider":          provider,
 		"model":             model,
@@ -338,11 +338,11 @@ func (b *BaseClient) LogResponse(provider, model string, tokens core.TokenUsage,
 // LogResponseContent logs the full response content at DEBUG level
 func (b *BaseClient) LogResponseContent(provider, model, content string) {
 	b.Logger.Debug("AI response content", map[string]interface{}{
-		"operation":        "ai_response_content",
-		"provider":         provider,
-		"model":            model,
-		"response":         content,
-		"response_length":  len(content),
+		"operation":       "ai_response_content",
+		"provider":        provider,
+		"model":           model,
+		"response":        content,
+		"response_length": len(content),
 	})
 }
 

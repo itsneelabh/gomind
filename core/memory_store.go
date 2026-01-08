@@ -46,7 +46,7 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 	defer m.mu.RUnlock()
 
 	if m.logger != nil {
-		m.logger.Debug("Cache lookup", map[string]interface{}{
+		m.logger.DebugWithContext(ctx, "Cache lookup", map[string]interface{}{
 			"operation": "cache_get",
 			"key":       key,
 		})
@@ -61,7 +61,7 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 		}
 
 		if m.logger != nil {
-			m.logger.Debug("Cache miss", map[string]interface{}{
+			m.logger.DebugWithContext(ctx, "Cache miss", map[string]interface{}{
 				"operation": "cache_get",
 				"key":       key,
 				"result":    "miss",
@@ -79,7 +79,7 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 		}
 
 		if m.logger != nil {
-			m.logger.Debug("Cache entry expired", map[string]interface{}{
+			m.logger.DebugWithContext(ctx, "Cache entry expired", map[string]interface{}{
 				"operation":  "cache_get",
 				"key":        key,
 				"result":     "expired",
@@ -96,7 +96,7 @@ func (m *MemoryStore) Get(ctx context.Context, key string) (string, error) {
 	}
 
 	if m.logger != nil {
-		m.logger.Debug("Cache hit", map[string]interface{}{
+		m.logger.DebugWithContext(ctx, "Cache hit", map[string]interface{}{
 			"operation": "cache_get",
 			"key":       key,
 			"result":    "hit",
@@ -122,7 +122,7 @@ func (m *MemoryStore) Set(ctx context.Context, key string, value string, ttl tim
 			logFields["ttl"] = ttl.String()
 			logFields["expires_at"] = time.Now().Add(ttl).Format(time.RFC3339)
 		}
-		m.logger.Debug("Cache set", logFields)
+		m.logger.DebugWithContext(ctx, "Cache set", logFields)
 	}
 
 	entry := memoryEntry{
@@ -161,7 +161,7 @@ func (m *MemoryStore) Delete(ctx context.Context, key string) error {
 	}
 
 	if m.logger != nil {
-		m.logger.Debug("Cache delete", map[string]interface{}{
+		m.logger.DebugWithContext(ctx, "Cache delete", map[string]interface{}{
 			"operation": "cache_delete",
 			"key":       key,
 			"existed":   existed,
@@ -174,7 +174,7 @@ func (m *MemoryStore) Delete(ctx context.Context, key string) error {
 // Exists checks if a key exists in memory
 func (m *MemoryStore) Exists(ctx context.Context, key string) (bool, error) {
 	if m.logger != nil {
-		m.logger.Debug("Cache existence check", map[string]interface{}{
+		m.logger.DebugWithContext(ctx, "Cache existence check", map[string]interface{}{
 			"operation": "cache_exists",
 			"key":       key,
 		})
@@ -186,7 +186,7 @@ func (m *MemoryStore) Exists(ctx context.Context, key string) (bool, error) {
 	entry, exists := m.store[key]
 	if !exists {
 		if m.logger != nil {
-			m.logger.Debug("Cache existence result", map[string]interface{}{
+			m.logger.DebugWithContext(ctx, "Cache existence result", map[string]interface{}{
 				"operation": "cache_exists",
 				"key":       key,
 				"result":    "not_found",
@@ -199,7 +199,7 @@ func (m *MemoryStore) Exists(ctx context.Context, key string) (bool, error) {
 	// Check if expired
 	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
 		if m.logger != nil {
-			m.logger.Debug("Cache existence result", map[string]interface{}{
+			m.logger.DebugWithContext(ctx, "Cache existence result", map[string]interface{}{
 				"operation":  "cache_exists",
 				"key":        key,
 				"result":     "expired",
@@ -211,7 +211,7 @@ func (m *MemoryStore) Exists(ctx context.Context, key string) (bool, error) {
 	}
 
 	if m.logger != nil {
-		m.logger.Debug("Cache existence result", map[string]interface{}{
+		m.logger.DebugWithContext(ctx, "Cache existence result", map[string]interface{}{
 			"operation": "cache_exists",
 			"key":       key,
 			"result":    "found",
