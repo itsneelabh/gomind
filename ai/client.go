@@ -66,9 +66,9 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 	if !exists {
 		if config.Logger != nil {
 			config.Logger.Error("AI provider not registered", map[string]interface{}{
-				"operation":            "ai_provider_lookup",
-				"requested_provider":   config.Provider,
-				"available_providers":  ListProviders(),
+				"operation":           "ai_provider_lookup",
+				"requested_provider":  config.Provider,
+				"available_providers": ListProviders(),
 				"import_hint":         fmt.Sprintf("Import _ \"github.com/itsneelabh/gomind/ai/providers/%s\"", config.Provider),
 			})
 		}
@@ -79,10 +79,10 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 	client := factory.Create(config)
 	if config.Logger != nil {
 		config.Logger.Info("AI client created successfully", map[string]interface{}{
-			"operation":    "ai_client_creation",
-			"provider":     config.Provider,
-			"client_type":  fmt.Sprintf("%T", client),
-			"status":       "success",
+			"operation":   "ai_client_creation",
+			"provider":    config.Provider,
+			"client_type": fmt.Sprintf("%T", client),
+			"status":      "success",
 		})
 	}
 

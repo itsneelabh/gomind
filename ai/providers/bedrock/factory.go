@@ -38,7 +38,7 @@ func (f *Factory) Priority() int {
 // Create creates a new AWS Bedrock client
 func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 	ctx := context.Background()
-	
+
 	// Get region from config or environment
 	region := config.Extra["region"]
 	if region == nil || region == "" {
@@ -50,11 +50,11 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 			}
 		}
 	}
-	
+
 	// Create AWS configuration
 	var awsCfg aws.Config
 	var err error
-	
+
 	// Check for explicit credentials in config
 	if config.Extra["aws_access_key_id"] != nil && config.Extra["aws_secret_access_key"] != nil {
 		accessKey := config.Extra["aws_access_key_id"].(string)
@@ -63,7 +63,7 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		if config.Extra["aws_session_token"] != nil {
 			sessionToken = config.Extra["aws_session_token"].(string)
 		}
-		
+
 		// Create static credentials provider
 		credProvider := credentials.NewStaticCredentialsProvider(accessKey, secretKey, sessionToken)
 		awsCfg, err = CreateAWSConfig(ctx, region.(string), credProvider)
@@ -71,13 +71,13 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		// Use default credential chain (IAM role, env vars, ~/.aws/credentials, etc.)
 		awsCfg, err = CreateAWSConfig(ctx, region.(string))
 	}
-	
+
 	if err != nil {
 		// Return a client that will error on first use
 		// This allows the provider to be registered even if AWS isn't configured
 		return &errorClient{err: err}
 	}
-	
+
 	// Get logger from config with proper component wrapping
 	logger := config.Logger
 	if logger == nil {
@@ -106,55 +106,55 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 	if config.Timeout > 0 {
 		client.BaseClient.HTTPClient.Timeout = config.Timeout
 	}
-	
+
 	// Apply retry configuration
 	if config.MaxRetries > 0 {
 		client.BaseClient.MaxRetries = config.MaxRetries
 	}
-	
+
 	// Apply model defaults
 	if config.Model != "" {
 		client.BaseClient.DefaultModel = config.Model
 	}
-	
+
 	// Apply temperature default
 	if config.Temperature > 0 {
 		client.BaseClient.DefaultTemperature = config.Temperature
 	}
-	
+
 	// Apply max tokens default
 	if config.MaxTokens > 0 {
 		client.BaseClient.DefaultMaxTokens = config.MaxTokens
 	}
-	
+
 	return client
 }
 
 // DetectEnvironment checks if AWS Bedrock is configured
 func (f *Factory) DetectEnvironment() (priority int, available bool) {
 	// Check for AWS credentials in various forms
-	
+
 	// 1. Check for explicit AWS credentials
 	if os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "" {
 		return f.Priority(), true
 	}
-	
+
 	// 2. Check for AWS profile
 	if os.Getenv("AWS_PROFILE") != "" {
 		return f.Priority(), true
 	}
-	
+
 	// 3. Check if running on AWS (EC2/ECS/Lambda) by looking for instance metadata
 	// This is a simplified check - in production you might want to actually try to access the metadata service
 	if os.Getenv("AWS_EXECUTION_ENV") != "" || os.Getenv("AWS_LAMBDA_FUNCTION_NAME") != "" {
 		return f.Priority() + 10, true // Higher priority when running on AWS
 	}
-	
+
 	// 4. Check for ECS task role
 	if os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" {
 		return f.Priority() + 10, true
 	}
-	
+
 	// 5. Check if ~/.aws/credentials exists
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
@@ -162,7 +162,7 @@ func (f *Factory) DetectEnvironment() (priority int, available bool) {
 			return f.Priority(), true
 		}
 	}
-	
+
 	return 0, false
 }
 

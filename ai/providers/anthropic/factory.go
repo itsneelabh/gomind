@@ -54,13 +54,13 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 	}
 
 	logger.Info("Anthropic provider initialized", map[string]interface{}{
-		"operation":    "ai_provider_init",
-		"provider":     "anthropic",
-		"base_url":     baseURL,
-		"has_api_key":  apiKey != "",
-		"timeout":      config.Timeout.String(),
-		"max_retries":  config.MaxRetries,
-		"model":        config.Model,
+		"operation":   "ai_provider_init",
+		"provider":    "anthropic",
+		"base_url":    baseURL,
+		"has_api_key": apiKey != "",
+		"timeout":     config.Timeout.String(),
+		"max_retries": config.MaxRetries,
+		"model":       config.Model,
 	})
 
 	// Create the client with full configuration

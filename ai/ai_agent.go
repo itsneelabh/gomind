@@ -44,12 +44,12 @@ func NewAIAgent(name string, apiKey string) (*AIAgent, error) {
 
 	if agent.Logger != nil {
 		agent.Logger.Info("AI agent created successfully", map[string]interface{}{
-			"operation":        "ai_agent_creation",
-			"agent_name":       name,
-			"agent_id":         agent.ID,
-			"ai_client_type":   fmt.Sprintf("%T", aiClient),
-			"capabilities":     len(agent.Capabilities),
-			"status":           "success",
+			"operation":      "ai_agent_creation",
+			"agent_name":     name,
+			"agent_id":       agent.ID,
+			"ai_client_type": fmt.Sprintf("%T", aiClient),
+			"capabilities":   len(agent.Capabilities),
+			"status":         "success",
 		})
 	}
 
@@ -742,7 +742,6 @@ Create a step-by-step plan for which components to use and in what order.
 Be specific about which capabilities to invoke and what data to pass between them.`,
 		componentList, intent, userQuery)
 }
-
 
 // truncateString truncates a string to maxLength with ellipsis if needed
 func truncateString(s string, maxLength int) string {

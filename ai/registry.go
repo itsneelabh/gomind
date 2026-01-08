@@ -132,8 +132,8 @@ func detectBestProvider(logger core.Logger) (string, error) {
 
 	if logger != nil {
 		logger.Info("Starting AI provider environment detection", map[string]interface{}{
-			"operation":             "ai_provider_detection",
-			"registered_providers":  len(registry.providers),
+			"operation":            "ai_provider_detection",
+			"registered_providers": len(registry.providers),
 		})
 	}
 

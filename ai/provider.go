@@ -247,7 +247,7 @@ func WithProviderAlias(alias string) AIOption {
 						"http://localhost:11434/v1",
 					)
 
-				// Add more providers as needed
+					// Add more providers as needed
 				}
 			}
 		}
