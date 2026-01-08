@@ -780,7 +780,7 @@ The stripping is designed to be safe for JSON:
 
 ## Layer 4: Semantic Retry (Complementary Design)
 
-This document describes the first three layers of parameter resolution that operate **before** step execution. There is a complementary fourth layer documented in **[SEMANTIC_RETRY_DESIGN.md](./SEMANTIC_RETRY_DESIGN.md)** that operates **after** execution fails.
+This document describes the first three layers of parameter resolution that operate **before** step execution. There is a complementary fourth layer documented in **[SEMANTIC_RETRY_DESIGN.md](./notes/SEMANTIC_RETRY_DESIGN.md)** that operates **after** execution fails.
 
 ### The Four-Layer Architecture
 
@@ -826,7 +826,9 @@ The gap between Layer 2 and Layer 3:
 |-------|-------------|---------------|----------------------------|
 | Layer 2 (Micro-Resolution) | ✅ Yes | ❌ No | ⚠️ Sometimes (before knowing what's needed) |
 | Layer 3 (Error Analyzer) | ❌ No | ✅ Yes | ❌ No (can diagnose but not fix) |
-| **Layer 4 (Contextual Re-Resolution)** | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Layer 4 (Contextual Re-Resolution)** | ✅ Yes (or user query for independent steps) | ✅ Yes | ✅ Yes |
+
+**Independent Steps Support:** Layer 4 now activates for steps without dependencies (first steps, parallel steps). Even without source data from previous steps, the LLM can use the user's original query and error context to suggest corrections. For example, if `get_country_info("France")` returns 404, Layer 4 can suggest trying `"france"` (lowercase) or `"FR"` (ISO code).
 
 **Example scenario:**
 1. User: "Convert 100 USD to Japanese Yen"
@@ -843,15 +845,27 @@ The gap between Layer 2 and Layer 3:
 | Document | Scope | Layers Covered |
 |----------|-------|----------------|
 | **This document** (INTELLIGENT_PARAMETER_BINDING.md) | Pre-execution resolution | Layers 1, 2, 3 |
-| **[SEMANTIC_RETRY_DESIGN.md](./SEMANTIC_RETRY_DESIGN.md)** | Post-execution recovery | Layer 4 |
+| **[SEMANTIC_RETRY_DESIGN.md](./notes/SEMANTIC_RETRY_DESIGN.md)** | Post-execution recovery | Layer 4 |
+| **[SEMANTIC_RETRY_ENHANCEMENT.md](./notes/SEMANTIC_RETRY_ENHANCEMENT.md)** | Independent steps support | Layer 4 enhancement |
 
 Together, these documents describe the complete intelligent parameter binding system in gomind.
+
+### Configuration
+
+Layer 4 behavior can be configured via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOMIND_SEMANTIC_RETRY_ENABLED` | `true` | Enable Layer 4 semantic retry |
+| `GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS` | `2` | Maximum semantic retry attempts per step |
+| `GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS` | `true` | Enable for steps without dependencies |
 
 ---
 
 ## Related Documentation
 
-- [SEMANTIC_RETRY_DESIGN.md](./SEMANTIC_RETRY_DESIGN.md) - Layer 4: Post-execution semantic retry
+- [SEMANTIC_RETRY_DESIGN.md](./notes/SEMANTIC_RETRY_DESIGN.md) - Layer 4: Post-execution semantic retry
+- [SEMANTIC_RETRY_ENHANCEMENT.md](./notes/SEMANTIC_RETRY_ENHANCEMENT.md) - Independent steps support for Layer 4
 - [INTELLIGENT_ERROR_HANDLING.md](../docs/INTELLIGENT_ERROR_HANDLING.md) - Retry and correction patterns
 - [ENVIRONMENT_VARIABLES_GUIDE.md](../docs/ENVIRONMENT_VARIABLES_GUIDE.md) - All configuration options
 - [examples/agent-with-orchestration/](../examples/agent-with-orchestration/) - Working example
