@@ -210,8 +210,8 @@ func TestNewAIToolErrorScenarios(t *testing.T) {
 // TestNewIntelligentAgentBackwardCompatibility tests the backward compatibility function
 func TestNewIntelligentAgentBackwardCompatibility(t *testing.T) {
 	tests := []struct {
-		name    string
-		id      string
+		name     string
+		id       string
 		validate func(*testing.T, *IntelligentAgent)
 	}{
 		{
@@ -317,7 +317,7 @@ func TestAIAgentGenerateResponse(t *testing.T) {
 				}
 				return &AIAgent{
 					BaseAgent: core.NewBaseAgent("test"),
-					AI:        nil, // AI field is nil
+					AI:        nil,        // AI field is nil
 					aiClient:  mockClient, // Should fallback to this
 				}
 			},

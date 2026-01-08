@@ -53,81 +53,81 @@ func TestPhase1_DetectEnvironmentNoMutation(t *testing.T) {
 // Tier 3: Hardcoded defaults (lowest)
 func TestPhase1_ConfigurationPrecedence(t *testing.T) {
 	tests := []struct {
-		name             string
-		providerAlias    string
-		explicitAPIKey   string
-		explicitBaseURL  string
-		envAPIKey        string
-		envBaseURL       string
-		expectedAPIKey   string
-		expectedBaseURL  string
-		description      string
+		name            string
+		providerAlias   string
+		explicitAPIKey  string
+		explicitBaseURL string
+		envAPIKey       string
+		envBaseURL      string
+		expectedAPIKey  string
+		expectedBaseURL string
+		description     string
 	}{
 		{
-			name:             "Tier 1 wins: Explicit overrides everything",
-			providerAlias:    "openai.deepseek",
-			explicitAPIKey:   "explicit-key",
-			explicitBaseURL:  "https://explicit.url",
-			envAPIKey:        "env-key",
-			envBaseURL:       "https://env.url",
-			expectedAPIKey:   "explicit-key",
-			expectedBaseURL:  "https://explicit.url",
-			description:      "Explicit config should override env vars and defaults",
+			name:            "Tier 1 wins: Explicit overrides everything",
+			providerAlias:   "openai.deepseek",
+			explicitAPIKey:  "explicit-key",
+			explicitBaseURL: "https://explicit.url",
+			envAPIKey:       "env-key",
+			envBaseURL:      "https://env.url",
+			expectedAPIKey:  "explicit-key",
+			expectedBaseURL: "https://explicit.url",
+			description:     "Explicit config should override env vars and defaults",
 		},
 		{
-			name:             "Tier 2 wins: Env overrides defaults",
-			providerAlias:    "openai.deepseek",
-			explicitAPIKey:   "",
-			explicitBaseURL:  "",
-			envAPIKey:        "env-key",
-			envBaseURL:       "https://env.url",
-			expectedAPIKey:   "env-key",
-			expectedBaseURL:  "https://env.url",
-			description:      "Env vars should override hardcoded defaults",
+			name:            "Tier 2 wins: Env overrides defaults",
+			providerAlias:   "openai.deepseek",
+			explicitAPIKey:  "",
+			explicitBaseURL: "",
+			envAPIKey:       "env-key",
+			envBaseURL:      "https://env.url",
+			expectedAPIKey:  "env-key",
+			expectedBaseURL: "https://env.url",
+			description:     "Env vars should override hardcoded defaults",
 		},
 		{
-			name:             "Tier 3: Defaults when no explicit or env",
-			providerAlias:    "openai.deepseek",
-			explicitAPIKey:   "",
-			explicitBaseURL:  "",
-			envAPIKey:        "",
-			envBaseURL:       "",
-			expectedAPIKey:   "",
-			expectedBaseURL:  "https://api.deepseek.com",
-			description:      "Should fall back to hardcoded defaults",
+			name:            "Tier 3: Defaults when no explicit or env",
+			providerAlias:   "openai.deepseek",
+			explicitAPIKey:  "",
+			explicitBaseURL: "",
+			envAPIKey:       "",
+			envBaseURL:      "",
+			expectedAPIKey:  "",
+			expectedBaseURL: "https://api.deepseek.com",
+			description:     "Should fall back to hardcoded defaults",
 		},
 		{
-			name:             "Mixed: Explicit API key, env URL",
-			providerAlias:    "openai.groq",
-			explicitAPIKey:   "explicit-key",
-			explicitBaseURL:  "",
-			envAPIKey:        "env-key",
-			envBaseURL:       "https://env.url",
-			expectedAPIKey:   "explicit-key",
-			expectedBaseURL:  "https://env.url",
-			description:      "Each field independently follows precedence",
+			name:            "Mixed: Explicit API key, env URL",
+			providerAlias:   "openai.groq",
+			explicitAPIKey:  "explicit-key",
+			explicitBaseURL: "",
+			envAPIKey:       "env-key",
+			envBaseURL:      "https://env.url",
+			expectedAPIKey:  "explicit-key",
+			expectedBaseURL: "https://env.url",
+			description:     "Each field independently follows precedence",
 		},
 		{
-			name:             "Mixed: Env API key, explicit URL",
-			providerAlias:    "openai.groq",
-			explicitAPIKey:   "",
-			explicitBaseURL:  "https://explicit.url",
-			envAPIKey:        "env-key",
-			envBaseURL:       "https://env.url",
-			expectedAPIKey:   "env-key",
-			expectedBaseURL:  "https://explicit.url",
-			description:      "Each field independently follows precedence",
+			name:            "Mixed: Env API key, explicit URL",
+			providerAlias:   "openai.groq",
+			explicitAPIKey:  "",
+			explicitBaseURL: "https://explicit.url",
+			envAPIKey:       "env-key",
+			envBaseURL:      "https://env.url",
+			expectedAPIKey:  "env-key",
+			expectedBaseURL: "https://explicit.url",
+			description:     "Each field independently follows precedence",
 		},
 		{
-			name:             "Runtime URL override use case",
-			providerAlias:    "openai.deepseek",
-			explicitAPIKey:   "",
-			explicitBaseURL:  "",
-			envAPIKey:        "env-key",
-			envBaseURL:       "https://eu-central.deepseek.com",
-			expectedAPIKey:   "env-key",
-			expectedBaseURL:  "https://eu-central.deepseek.com",
-			description:      "Supports runtime URL changes via env vars",
+			name:            "Runtime URL override use case",
+			providerAlias:   "openai.deepseek",
+			explicitAPIKey:  "",
+			explicitBaseURL: "",
+			envAPIKey:       "env-key",
+			envBaseURL:      "https://eu-central.deepseek.com",
+			expectedAPIKey:  "env-key",
+			expectedBaseURL: "https://eu-central.deepseek.com",
+			description:     "Supports runtime URL changes via env vars",
 		},
 	}
 
@@ -443,9 +443,9 @@ func TestPhase2_MultiProviderCoexistence(t *testing.T) {
 
 	// Create three different clients simultaneously
 	configs := []struct {
-		alias            string
-		expectedAPIKey   string
-		expectedBaseURL  string
+		alias           string
+		expectedAPIKey  string
+		expectedBaseURL string
 	}{
 		{"openai", "sk-openai-test", "https://api.openai.com/v1"},
 		{"openai.deepseek", "sk-deepseek-test", "https://api.deepseek.com"},

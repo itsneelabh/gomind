@@ -87,7 +87,6 @@ func TestPhase3_NoProvidersAvailableFails(t *testing.T) {
 	}
 }
 
-
 // TestPhase3_ErrorClassification verifies isClientError function
 //
 // IMPORTANT: In a provider chain, auth errors SHOULD trigger failover because
@@ -237,7 +236,6 @@ func TestPhase3_ChainOptions(t *testing.T) {
 	})
 }
 
-
 // ================================
 // Mock Implementations for Testing
 // ================================
@@ -281,10 +279,10 @@ func (l *testLogger) ErrorWithContext(ctx context.Context, msg string, fields ma
 
 // chainMockAIClient for testing failover behavior (renamed to avoid conflicts)
 type chainMockAIClient struct {
-	name        string
-	shouldFail  bool
-	failWith    error
-	callCount   int
+	name       string
+	shouldFail bool
+	failWith   error
+	callCount  int
 }
 
 func (m *chainMockAIClient) GenerateResponse(ctx context.Context, prompt string, opts *core.AIOptions) (*core.AIResponse, error) {

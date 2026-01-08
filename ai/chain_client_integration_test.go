@@ -33,12 +33,12 @@ func TestPhase3_ChainClientCreation(t *testing.T) {
 	os.Setenv("DEEPSEEK_API_KEY", "sk-deepseek-test")
 
 	tests := []struct {
-		name            string
-		opts            []ChainOption
-		expectError     bool
-		errorContains   string
-		expectedCount   int
-		description     string
+		name          string
+		opts          []ChainOption
+		expectError   bool
+		errorContains string
+		expectedCount int
+		description   string
 	}{
 		{
 			name: "Valid chain with multiple providers",

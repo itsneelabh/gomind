@@ -428,8 +428,8 @@ func TestClient_ResponseParsing(t *testing.T) {
 			name: "error response from API",
 			response: `{
 				"error": {
-					"message": "Rate limit exceeded",
-					"type": "rate_limit_error"
+					"message": "Invalid request",
+					"type": "invalid_request_error"
 				}
 			}`,
 			wantError: true,
@@ -440,7 +440,9 @@ func TestClient_ResponseParsing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(tt.response, "error") {
-					w.WriteHeader(http.StatusTooManyRequests)
+					// Use 400 Bad Request (non-retryable) for unit tests
+					// Retry behavior with 429 is tested in integration tests
+					w.WriteHeader(http.StatusBadRequest)
 				} else {
 					w.WriteHeader(http.StatusOK)
 				}

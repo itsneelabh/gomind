@@ -40,7 +40,8 @@ func (m *mockLogger) InfoWithContext(ctx context.Context, msg string, fields map
 	m.infoCalls = append(m.infoCalls, fields)
 }
 
-func (m *mockLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {}
+func (m *mockLogger) WarnWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
+}
 
 func (m *mockLogger) ErrorWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
 	m.errorCalls = append(m.errorCalls, fields)
@@ -355,7 +356,7 @@ func TestBaseClient_Logging(t *testing.T) {
 		CompletionTokens: 20,
 		TotalTokens:      30,
 	}
-	client.LogResponse("test-provider", "test-model", usage, 100*time.Millisecond)
+	client.LogResponse(context.Background(), "test-provider", "test-model", usage, 100*time.Millisecond)
 
 	if len(logger.infoCalls) != 2 {
 		t.Errorf("expected 2 info calls, got %d", len(logger.infoCalls))

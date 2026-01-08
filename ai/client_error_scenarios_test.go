@@ -287,11 +287,11 @@ func TestClientOptionsAppliedInOrder(t *testing.T) {
 	// Apply options in specific order - later options should override earlier ones
 	client, err := NewClient(
 		WithProvider("test"),
-		WithTemperature(0.5),    // First temperature
-		WithMaxTokens(100),      // First max tokens
-		WithTemperature(0.8),    // Should override first temperature
-		WithAPIKey("key1"),      // First API key
-		WithAPIKey("key2"),      // Should override first API key
+		WithTemperature(0.5), // First temperature
+		WithMaxTokens(100),   // First max tokens
+		WithTemperature(0.8), // Should override first temperature
+		WithAPIKey("key1"),   // First API key
+		WithAPIKey("key2"),   // Should override first API key
 	)
 
 	if err != nil {

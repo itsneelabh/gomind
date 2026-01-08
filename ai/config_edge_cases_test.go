@@ -111,7 +111,7 @@ func TestConfigurationEdgeCases(t *testing.T) {
 			},
 			validate: func(t *testing.T, config *AIConfig) {
 				if config.Provider != "" || config.APIKey != "" ||
-				   config.BaseURL != "" || config.Model != "" {
+					config.BaseURL != "" || config.Model != "" {
 					t.Error("Expected empty string values to be preserved")
 				}
 			},
@@ -292,8 +292,8 @@ func TestHeadersConfiguration(t *testing.T) {
 			name: "multiple headers in one call",
 			options: []AIOption{
 				WithHeaders(map[string]string{
-					"User-Agent":    "gomind/1.0",
-					"Content-Type":  "application/json",
+					"User-Agent":      "gomind/1.0",
+					"Content-Type":    "application/json",
 					"X-Custom-Header": "custom-value",
 				}),
 			},
@@ -334,8 +334,8 @@ func TestHeadersConfiguration(t *testing.T) {
 
 				expected := map[string]string{
 					"Header1": "overwritten", // Overwritten by second call
-					"Header2": "value2",       // Preserved from first call
-					"Header3": "value3",       // Added by second call
+					"Header2": "value2",      // Preserved from first call
+					"Header3": "value3",      // Added by second call
 				}
 
 				for key, expectedValue := range expected {

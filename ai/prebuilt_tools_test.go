@@ -14,14 +14,14 @@ import (
 // TestNewTranslationTool tests the pre-built translation tool
 func TestNewTranslationTool(t *testing.T) {
 	tests := []struct {
-		name            string
-		apiKey          string
-		expectError     bool
-		errorMsg        string
-		validateTool    func(*testing.T, *AITool)
-		testCapability  bool
-		inputText       string
-		expectedOutput  string
+		name           string
+		apiKey         string
+		expectError    bool
+		errorMsg       string
+		validateTool   func(*testing.T, *AITool)
+		testCapability bool
+		inputText      string
+		expectedOutput string
 	}{
 		{
 			name:        "successful creation with valid API key",

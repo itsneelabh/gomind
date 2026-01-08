@@ -287,9 +287,9 @@ func TestRegisterAICapabilityMultiple(t *testing.T) {
 
 	// Test each capability endpoint
 	capabilities := map[string]string{
-		"translate":  "/ai/translate",
-		"summarize":  "/ai/summarize",
-		"analyze":    "/ai/analyze",
+		"translate": "/ai/translate",
+		"summarize": "/ai/summarize",
+		"analyze":   "/ai/analyze",
 	}
 
 	for name, expectedEndpoint := range capabilities {

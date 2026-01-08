@@ -119,18 +119,18 @@ func TestProcessWithAI(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		request         string
-		tools           []*core.ServiceInfo
-		agents          []*core.ServiceInfo
-		expectError     bool
+		name             string
+		request          string
+		tools            []*core.ServiceInfo
+		agents           []*core.ServiceInfo
+		expectError      bool
 		validateResponse func(*testing.T, *core.AIResponse)
 	}{
 		{
-			name:    "successful processing with tools and agents",
-			request: "Calculate 5 + 3 and get weather for Seattle",
-			tools:   tools,
-			agents:  agents,
+			name:        "successful processing with tools and agents",
+			request:     "Calculate 5 + 3 and get weather for Seattle",
+			tools:       tools,
+			agents:      agents,
 			expectError: false,
 			validateResponse: func(t *testing.T, resp *core.AIResponse) {
 				if resp == nil {
@@ -149,10 +149,10 @@ func TestProcessWithAI(t *testing.T) {
 			},
 		},
 		{
-			name:    "processing with only tools",
-			request: "Add 10 and 20",
-			tools:   tools,
-			agents:  []*core.ServiceInfo{}, // No agents
+			name:        "processing with only tools",
+			request:     "Add 10 and 20",
+			tools:       tools,
+			agents:      []*core.ServiceInfo{}, // No agents
 			expectError: false,
 			validateResponse: func(t *testing.T, resp *core.AIResponse) {
 				if resp == nil {
@@ -164,11 +164,11 @@ func TestProcessWithAI(t *testing.T) {
 			},
 		},
 		{
-			name:    "processing with no available services",
-			request: "Help me with something",
-			tools:   []*core.ServiceInfo{}, // No tools
-			agents:  []*core.ServiceInfo{}, // No agents
-			expectError: false, // Should still work, just with limited context
+			name:        "processing with no available services",
+			request:     "Help me with something",
+			tools:       []*core.ServiceInfo{}, // No tools
+			agents:      []*core.ServiceInfo{}, // No agents
+			expectError: false,                 // Should still work, just with limited context
 			validateResponse: func(t *testing.T, resp *core.AIResponse) {
 				if resp == nil {
 					t.Fatal("Expected non-nil response")
@@ -204,15 +204,15 @@ func TestProcessWithAI(t *testing.T) {
 func TestDiscoverAndOrchestrate(t *testing.T) {
 	tools := []*core.ServiceInfo{
 		{
-			ID:   "data-processor",
-			Name: "data-processing-tool",
-			Type: core.ComponentTypeTool,
+			ID:          "data-processor",
+			Name:        "data-processing-tool",
+			Type:        core.ComponentTypeTool,
 			Description: "Processes and transforms data",
 			Capabilities: []core.Capability{
 				{
-					Name: "transform_data",
+					Name:        "transform_data",
 					Description: "Transform data format",
-					InputTypes: []string{"object"},
+					InputTypes:  []string{"object"},
 					OutputTypes: []string{"object"},
 				},
 			},
@@ -220,18 +220,18 @@ func TestDiscoverAndOrchestrate(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		userQuery    string
-		tools        []*core.ServiceInfo
-		agents       []*core.ServiceInfo
-		expectError  bool
+		name           string
+		userQuery      string
+		tools          []*core.ServiceInfo
+		agents         []*core.ServiceInfo
+		expectError    bool
 		validateResult func(*testing.T, string)
 	}{
 		{
-			name:      "successful orchestration",
-			userQuery: "Process this data and generate a report",
-			tools:     tools,
-			agents:    []*core.ServiceInfo{},
+			name:        "successful orchestration",
+			userQuery:   "Process this data and generate a report",
+			tools:       tools,
+			agents:      []*core.ServiceInfo{},
 			expectError: false,
 			validateResult: func(t *testing.T, result string) {
 				if result == "" {
@@ -244,10 +244,10 @@ func TestDiscoverAndOrchestrate(t *testing.T) {
 			},
 		},
 		{
-			name:      "orchestration with no available tools",
-			userQuery: "Help me with my task",
-			tools:     []*core.ServiceInfo{},
-			agents:    []*core.ServiceInfo{},
+			name:        "orchestration with no available tools",
+			userQuery:   "Help me with my task",
+			tools:       []*core.ServiceInfo{},
+			agents:      []*core.ServiceInfo{},
 			expectError: false, // Should still attempt orchestration
 			validateResult: func(t *testing.T, result string) {
 				if result == "" {
@@ -285,9 +285,9 @@ func TestBuildContextPrompt(t *testing.T) {
 
 	tools := []*core.ServiceInfo{
 		{
-			ID:   "calculator",
-			Name: "calculator-tool",
-			Type: core.ComponentTypeTool,
+			ID:          "calculator",
+			Name:        "calculator-tool",
+			Type:        core.ComponentTypeTool,
 			Description: "Mathematical calculations",
 			Capabilities: []core.Capability{
 				{
@@ -304,9 +304,9 @@ func TestBuildContextPrompt(t *testing.T) {
 
 	agents := []*core.ServiceInfo{
 		{
-			ID:   "coordinator",
-			Name: "coordination-agent",
-			Type: core.ComponentTypeAgent,
+			ID:          "coordinator",
+			Name:        "coordination-agent",
+			Type:        core.ComponentTypeAgent,
 			Description: "Coordinates multiple services",
 			Capabilities: []core.Capability{
 				{
@@ -318,11 +318,11 @@ func TestBuildContextPrompt(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		tools           []*core.ServiceInfo
-		agents          []*core.ServiceInfo
-		request         string
-		validatePrompt  func(*testing.T, string)
+		name           string
+		tools          []*core.ServiceInfo
+		agents         []*core.ServiceInfo
+		request        string
+		validatePrompt func(*testing.T, string)
 	}{
 		{
 			name:    "prompt with tools and agents",
