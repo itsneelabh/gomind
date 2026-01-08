@@ -10,3 +10,11 @@ import (
 type AIClient interface {
 	GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error)
 }
+
+// Re-export streaming types for convenience
+// Consumers can import from ai module instead of directly from core
+type (
+	StreamChunk       = core.StreamChunk
+	StreamCallback    = core.StreamCallback
+	StreamingAIClient = core.StreamingAIClient
+)

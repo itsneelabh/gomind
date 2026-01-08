@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/itsneelabh/gomind/ai"
 	"github.com/itsneelabh/gomind/core"
@@ -57,6 +58,10 @@ type Client struct {
 	CallCount     int
 	LastPrompt    string
 	LastOptions   *core.AIOptions
+
+	// Streaming configuration
+	ChunkSize   int           // Size of each chunk when streaming (default: 10)
+	StreamDelay time.Duration // Delay between chunks (default: 0)
 }
 
 // NewClient creates a new mock client
@@ -110,6 +115,144 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 			TotalTokens:      (len(prompt) + len(response)) / 4,
 		},
 	}, nil
+}
+
+// StreamResponse returns a mock streaming response for testing
+func (c *Client) StreamResponse(ctx context.Context, prompt string, options *core.AIOptions, callback core.StreamCallback) (*core.AIResponse, error) {
+	c.CallCount++
+	c.LastPrompt = prompt
+	c.LastOptions = options
+
+	// Check for context cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	// Return configured error if set
+	if c.Error != nil {
+		return nil, c.Error
+	}
+
+	// Return next response from list
+	if c.ResponseIndex >= len(c.Responses) {
+		return nil, errors.New("no more mock responses")
+	}
+
+	response := c.Responses[c.ResponseIndex]
+	c.ResponseIndex++
+
+	// Use options if provided, otherwise use defaults
+	model := "mock-model"
+	if options != nil && options.Model != "" {
+		model = options.Model
+	} else if c.Config != nil && c.Config.Model != "" {
+		model = c.Config.Model
+	}
+
+	// Determine chunk size
+	chunkSize := c.ChunkSize
+	if chunkSize <= 0 {
+		chunkSize = 10 // Default chunk size
+	}
+
+	// Stream the response in chunks
+	chunkIndex := 0
+	for i := 0; i < len(response); i += chunkSize {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			// Return partial response
+			if i > 0 {
+				return &core.AIResponse{
+					Content: response[:i],
+					Model:   model,
+					Usage: core.TokenUsage{
+						PromptTokens:     len(prompt) / 4,
+						CompletionTokens: i / 4,
+						TotalTokens:      (len(prompt) + i) / 4,
+					},
+				}, core.ErrStreamPartiallyCompleted
+			}
+			return nil, ctx.Err()
+		default:
+		}
+
+		// Calculate chunk end
+		end := i + chunkSize
+		if end > len(response) {
+			end = len(response)
+		}
+
+		// Create and send chunk
+		chunk := core.StreamChunk{
+			Content: response[i:end],
+			Delta:   true,
+			Index:   chunkIndex,
+			Model:   model,
+		}
+		chunkIndex++
+
+		if err := callback(chunk); err != nil {
+			// Callback requested stop - return what we have
+			return &core.AIResponse{
+				Content: response[:end],
+				Model:   model,
+				Usage: core.TokenUsage{
+					PromptTokens:     len(prompt) / 4,
+					CompletionTokens: end / 4,
+					TotalTokens:      (len(prompt) + end) / 4,
+				},
+			}, nil
+		}
+
+		// Apply delay between chunks if configured
+		if c.StreamDelay > 0 {
+			select {
+			case <-time.After(c.StreamDelay):
+			case <-ctx.Done():
+				return &core.AIResponse{
+					Content: response[:end],
+					Model:   model,
+					Usage: core.TokenUsage{
+						PromptTokens:     len(prompt) / 4,
+						CompletionTokens: end / 4,
+						TotalTokens:      (len(prompt) + end) / 4,
+					},
+				}, core.ErrStreamPartiallyCompleted
+			}
+		}
+	}
+
+	// Send final chunk with finish reason
+	finalChunk := core.StreamChunk{
+		Delta:        false,
+		Index:        chunkIndex,
+		FinishReason: "stop",
+		Model:        model,
+		Usage: &core.TokenUsage{
+			PromptTokens:     len(prompt) / 4,
+			CompletionTokens: len(response) / 4,
+			TotalTokens:      (len(prompt) + len(response)) / 4,
+		},
+	}
+	_ = callback(finalChunk)
+
+	return &core.AIResponse{
+		Content: response,
+		Model:   model,
+		Usage: core.TokenUsage{
+			PromptTokens:     len(prompt) / 4,
+			CompletionTokens: len(response) / 4,
+			TotalTokens:      (len(prompt) + len(response)) / 4,
+		},
+	}, nil
+}
+
+// SupportsStreaming returns true as the mock provider supports streaming
+func (c *Client) SupportsStreaming() bool {
+	return true
 }
 
 // SetResponses sets the responses to return

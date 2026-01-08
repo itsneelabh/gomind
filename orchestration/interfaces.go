@@ -66,6 +66,22 @@ type OrchestratorResponse struct {
 	Confidence      float64                `json:"confidence"`
 }
 
+// StreamingOrchestratorResponse extends OrchestratorResponse for streaming scenarios
+// It includes additional fields to track streaming-specific state and progress
+type StreamingOrchestratorResponse struct {
+	OrchestratorResponse
+
+	// Streaming-specific fields
+	ChunksDelivered int  `json:"chunks_delivered"` // Number of chunks successfully delivered
+	StreamCompleted bool `json:"stream_completed"` // Whether streaming finished successfully
+	PartialContent  bool `json:"partial_content"`  // True if response was truncated due to error/cancellation
+
+	// Enhanced tracking fields
+	StepResults  []StepResult     `json:"step_results,omitempty"`  // Detailed results from each execution step
+	Usage        *core.TokenUsage `json:"usage,omitempty"`         // Token usage from AI synthesis
+	FinishReason string           `json:"finish_reason,omitempty"` // Why streaming stopped (e.g., "stop", "length", "cancelled")
+}
+
 // Executor handles the execution of routing plans
 type Executor interface {
 	// Execute runs a routing plan and collects agent responses
@@ -184,6 +200,23 @@ type OrchestratorMetrics struct {
 //	}
 type StepCompleteCallback func(stepIndex, totalSteps int, step RoutingStep, result StepResult)
 
+// stepCallbackKey is the context key for per-request step callbacks
+type stepCallbackKey struct{}
+
+// WithStepCallback returns a new context with the step callback attached.
+// This allows per-request callbacks without modifying the orchestrator config.
+func WithStepCallback(ctx context.Context, callback StepCompleteCallback) context.Context {
+	return context.WithValue(ctx, stepCallbackKey{}, callback)
+}
+
+// GetStepCallback retrieves the step callback from context, if present.
+func GetStepCallback(ctx context.Context) StepCompleteCallback {
+	if cb, ok := ctx.Value(stepCallbackKey{}).(StepCompleteCallback); ok {
+		return cb
+	}
+	return nil
+}
+
 // ExecutionOptions configures execution behavior
 type ExecutionOptions struct {
 	MaxConcurrency   int           `json:"max_concurrency"`
@@ -273,6 +306,12 @@ type SemanticRetryConfig struct {
 	// HTTP status codes that trigger semantic retry in addition to ErrorAnalyzer
 	// Default: [400, 422] - validation errors that might be fixable with different params
 	TriggerStatusCodes []int `json:"trigger_status_codes,omitempty"`
+
+	// EnableForIndependentSteps controls whether Layer 4 runs for steps without
+	// dependencies (no DependsOn entries). When true, semantic retry activates
+	// even when source data from previous steps is empty.
+	// Default: true | Env: GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS
+	EnableForIndependentSteps bool `json:"enable_for_independent_steps"`
 }
 
 // DefaultConfig returns default orchestrator configuration with intelligent defaults
@@ -329,9 +368,10 @@ func DefaultConfig() *OrchestratorConfig {
 
 	// Layer 4: Semantic Retry defaults
 	config.SemanticRetry = SemanticRetryConfig{
-		Enabled:            true,
-		MaxAttempts:        2,
-		TriggerStatusCodes: []int{400, 422},
+		Enabled:                   true,
+		MaxAttempts:               2,
+		TriggerStatusCodes:        []int{400, 422},
+		EnableForIndependentSteps: true, // Default: enabled for steps without dependencies
 	}
 
 	// Semantic Retry configuration from environment
@@ -342,6 +382,9 @@ func DefaultConfig() *OrchestratorConfig {
 		if val, err := strconv.Atoi(maxAttempts); err == nil && val >= 0 {
 			config.SemanticRetry.MaxAttempts = val
 		}
+	}
+	if independentSteps := os.Getenv("GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS"); independentSteps != "" {
+		config.SemanticRetry.EnableForIndependentSteps = strings.ToLower(independentSteps) == "true"
 	}
 
 	return config

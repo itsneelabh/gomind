@@ -113,6 +113,7 @@ func NewAIOrchestrator(config *OrchestratorConfig, discovery core.Discovery, aiC
 		reResolver := NewContextualReResolver(aiClient, nil) // Logger will be set later via SetLogger
 		o.executor.SetContextualReResolver(reResolver)
 		o.executor.SetMaxSemanticRetries(config.SemanticRetry.MaxAttempts)
+		o.executor.SetSemanticRetryForIndependentSteps(config.SemanticRetry.EnableForIndependentSteps)
 	}
 
 	// Wire step completion callback for async progress reporting (v1 addition)
@@ -371,6 +372,10 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	startTime := time.Now()
 	requestID := generateRequestID()
 
+	// Add request_id to context baggage so downstream components (AI client, etc.)
+	// can access it via telemetry.GetBaggage() and include it in their logs
+	ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
 	if o.logger != nil {
 		o.logger.InfoWithContext(ctx, "Starting request processing", map[string]interface{}{
 			"operation":      "process_request",
@@ -532,6 +537,248 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	}
 
 	return response, nil
+}
+
+// ProcessRequestStreaming processes a request with streaming response
+// This enables real-time token-by-token delivery for chat-based applications.
+//
+// The streaming flow:
+// 1. Generate execution plan (same as ProcessRequest)
+// 2. Execute plan steps (same as ProcessRequest)
+// 3. Stream the synthesis response token-by-token via callback
+//
+// Parameters:
+//   - ctx: Context for cancellation and tracing
+//   - request: Natural language request
+//   - metadata: Additional request metadata
+//   - callback: Function called for each streaming chunk
+//
+// Returns:
+//   - StreamingOrchestratorResponse with final state and metrics
+//   - error if processing fails before streaming starts
+func (o *AIOrchestrator) ProcessRequestStreaming(
+	ctx context.Context,
+	request string,
+	metadata map[string]interface{},
+	callback core.StreamCallback,
+) (*StreamingOrchestratorResponse, error) {
+	startTime := time.Now()
+	requestID := fmt.Sprintf("orch-%d", time.Now().UnixNano())
+
+	// Add request_id to context baggage so downstream components (AI client, etc.)
+	// can access it via telemetry.GetBaggage() and include it in their logs
+	ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
+	// Start tracing span (nil-safe per FRAMEWORK_DESIGN_PRINCIPLES.md)
+	var span core.Span
+	if o.telemetry != nil {
+		ctx, span = o.telemetry.StartSpan(ctx, "orchestrator.process_request_streaming")
+		defer span.End()
+	} else {
+		span = &core.NoOpSpan{}
+	}
+
+	span.SetAttribute("request_id", requestID)
+	span.SetAttribute("streaming", true)
+
+	// Check if AI client supports streaming
+	streamingClient, ok := o.aiClient.(core.StreamingAIClient)
+	if !ok || !streamingClient.SupportsStreaming() {
+		// Fall back to non-streaming and simulate streaming
+		if o.logger != nil {
+			o.logger.WarnWithContext(ctx, "AI client does not support streaming, using simulated streaming", map[string]interface{}{
+				"operation":  "streaming_fallback",
+				"request_id": requestID,
+			})
+		}
+
+		// Use regular ProcessRequest and chunk the response
+		response, err := o.ProcessRequest(ctx, request, metadata)
+		if err != nil {
+			return nil, err
+		}
+
+		// Simulate streaming by chunking the response
+		chunkSize := 50
+		chunkIndex := 0
+		for i := 0; i < len(response.Response); i += chunkSize {
+			end := i + chunkSize
+			if end > len(response.Response) {
+				end = len(response.Response)
+			}
+
+			chunk := core.StreamChunk{
+				Content: response.Response[i:end],
+				Delta:   true,
+				Index:   chunkIndex,
+			}
+			chunkIndex++
+
+			if err := callback(chunk); err != nil {
+				// Callback requested stop
+				return &StreamingOrchestratorResponse{
+					OrchestratorResponse: OrchestratorResponse{
+						RequestID:       requestID,
+						OriginalRequest: request,
+						Response:        response.Response[:end],
+						RoutingMode:     o.config.RoutingMode,
+						ExecutionTime:   time.Since(startTime),
+						AgentsInvolved:  response.AgentsInvolved,
+						Metadata:        response.Metadata,
+						Confidence:      response.Confidence,
+					},
+					ChunksDelivered: chunkIndex,
+					StreamCompleted: false,
+					PartialContent:  true,
+					FinishReason:    "cancelled",
+				}, nil
+			}
+		}
+
+		// Send final chunk
+		finalChunk := core.StreamChunk{
+			Delta:        false,
+			Index:        chunkIndex,
+			FinishReason: "stop",
+		}
+		_ = callback(finalChunk)
+
+		return &StreamingOrchestratorResponse{
+			OrchestratorResponse: *response,
+			ChunksDelivered:      chunkIndex,
+			StreamCompleted:      true,
+			PartialContent:       false,
+			FinishReason:         "stop",
+		}, nil
+	}
+
+	// Generate execution plan
+	plan, err := o.generateExecutionPlan(ctx, request, requestID)
+	if err != nil {
+		if o.logger != nil {
+			o.logger.ErrorWithContext(ctx, "Plan generation failed", map[string]interface{}{
+				"operation":  "streaming_plan_error",
+				"request_id": requestID,
+				"error":      err.Error(),
+			})
+		}
+		return nil, fmt.Errorf("failed to generate execution plan: %w", err)
+	}
+
+	// Execute the plan
+	result, err := o.executor.Execute(ctx, plan)
+	if err != nil {
+		if o.logger != nil {
+			o.logger.ErrorWithContext(ctx, "Plan execution failed", map[string]interface{}{
+				"operation":  "streaming_execution_error",
+				"request_id": requestID,
+				"error":      err.Error(),
+			})
+		}
+		return nil, fmt.Errorf("failed to execute plan: %w", err)
+	}
+
+	// Build synthesis prompt
+	synthesisPrompt := o.buildSynthesisPrompt(request, result)
+
+	// Collect agents involved before streaming
+	agentsInvolved := make([]string, 0, len(result.Steps))
+	for _, step := range result.Steps {
+		agentsInvolved = append(agentsInvolved, step.AgentName)
+	}
+
+	// Stream the synthesis response
+	var fullContent strings.Builder
+	chunkIndex := 0
+	var finishReason string
+	streamCallback := func(chunk core.StreamChunk) error {
+		if chunk.Content != "" {
+			fullContent.WriteString(chunk.Content)
+		}
+		// Capture finish reason from final chunk
+		if chunk.FinishReason != "" {
+			finishReason = chunk.FinishReason
+		}
+		chunkIndex++
+		return callback(chunk)
+	}
+
+	aiResponse, err := streamingClient.StreamResponse(ctx, synthesisPrompt, &core.AIOptions{
+		Temperature:  0.7,
+		MaxTokens:    2000,
+		SystemPrompt: "You are a helpful assistant synthesizing responses from multiple agents.",
+	}, streamCallback)
+
+	// Handle streaming errors
+	if err != nil {
+		if err == core.ErrStreamPartiallyCompleted {
+			return &StreamingOrchestratorResponse{
+				OrchestratorResponse: OrchestratorResponse{
+					RequestID:       requestID,
+					OriginalRequest: request,
+					Response:        fullContent.String(),
+					RoutingMode:     o.config.RoutingMode,
+					ExecutionTime:   time.Since(startTime),
+					AgentsInvolved:  agentsInvolved,
+					Errors:          []string{"stream partially completed"},
+					Confidence:      0.7,
+				},
+				ChunksDelivered: chunkIndex,
+				StreamCompleted: false,
+				PartialContent:  true,
+				StepResults:     result.Steps,
+				FinishReason:    "cancelled",
+			}, nil
+		}
+
+		return nil, fmt.Errorf("synthesis streaming failed: %w", err)
+	}
+
+	// Build final response with all enhanced fields
+	response := &StreamingOrchestratorResponse{
+		OrchestratorResponse: OrchestratorResponse{
+			RequestID:       requestID,
+			OriginalRequest: request,
+			Response:        aiResponse.Content,
+			RoutingMode:     o.config.RoutingMode,
+			ExecutionTime:   time.Since(startTime),
+			AgentsInvolved:  agentsInvolved,
+			Confidence:      0.9,
+		},
+		ChunksDelivered: chunkIndex,
+		StreamCompleted: true,
+		PartialContent:  false,
+		StepResults:     result.Steps,
+		Usage:           &aiResponse.Usage,
+		FinishReason:    finishReason,
+	}
+
+	if o.logger != nil {
+		o.logger.InfoWithContext(ctx, "Streaming request completed", map[string]interface{}{
+			"operation":        "streaming_complete",
+			"request_id":       requestID,
+			"chunks_delivered": chunkIndex,
+			"response_length":  len(aiResponse.Content),
+			"duration_ms":      time.Since(startTime).Milliseconds(),
+		})
+	}
+
+	return response, nil
+}
+
+// buildSynthesisPrompt creates the prompt for synthesizing agent responses
+func (o *AIOrchestrator) buildSynthesisPrompt(request string, result *ExecutionResult) string {
+	var sb strings.Builder
+	sb.WriteString("User Request: ")
+	sb.WriteString(request)
+	sb.WriteString("\n\nAgent Responses:\n")
+
+	for _, step := range result.Steps {
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", step.AgentName, step.Response))
+	}
+
+	sb.WriteString("\nPlease synthesize these responses into a coherent, helpful answer for the user.")
+	return sb.String()
 }
 
 // generateExecutionPlan uses LLM to create an execution plan

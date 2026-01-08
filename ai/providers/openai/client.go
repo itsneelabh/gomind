@@ -1,12 +1,14 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/itsneelabh/gomind/ai/providers"
@@ -226,8 +228,296 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	span.SetAttribute("ai.response_length", len(result.Content))
 
 	// Log response
-	c.LogResponse("openai", result.Model, result.Usage, time.Since(startTime))
+	c.LogResponse(ctx, "openai", result.Model, result.Usage, time.Since(startTime))
 	c.LogResponseContent("openai", result.Model, result.Content)
 
 	return result, nil
+}
+
+// StreamResponse implements streaming for OpenAI API using Server-Sent Events
+func (c *Client) StreamResponse(ctx context.Context, prompt string, options *core.AIOptions, callback core.StreamCallback) (*core.AIResponse, error) {
+	// Start distributed tracing span
+	ctx, span := c.StartSpan(ctx, "ai.stream_response")
+	defer span.End()
+
+	// Set initial span attributes
+	span.SetAttribute("ai.provider", "openai")
+	span.SetAttribute("ai.streaming", true)
+	span.SetAttribute("ai.prompt_length", len(prompt))
+
+	if c.apiKey == "" {
+		if c.Logger != nil {
+			c.Logger.Error("OpenAI streaming request failed - API key not configured", map[string]interface{}{
+				"operation": "ai_stream_error",
+				"provider":  "openai",
+				"error":     "api_key_missing",
+			})
+		}
+		span.RecordError(fmt.Errorf("API key not configured"))
+		return nil, fmt.Errorf("OpenAI API key not configured")
+	}
+
+	// Apply defaults
+	options = c.ApplyDefaults(options)
+
+	// Resolve model alias at request time
+	options.Model = ResolveModel(c.providerAlias, options.Model)
+
+	// Add model to span attributes after defaults are applied
+	span.SetAttribute("ai.model", options.Model)
+
+	// Log request
+	c.LogRequest("openai", options.Model, prompt)
+	startTime := time.Now()
+
+	// Build messages
+	messages := []map[string]string{}
+
+	if options.SystemPrompt != "" {
+		messages = append(messages, map[string]string{
+			"role":    "system",
+			"content": options.SystemPrompt,
+		})
+	}
+
+	messages = append(messages, map[string]string{
+		"role":    "user",
+		"content": prompt,
+	})
+
+	// Build request body with streaming enabled
+	reqBody := map[string]interface{}{
+		"model":       options.Model,
+		"messages":    messages,
+		"temperature": options.Temperature,
+		"max_tokens":  options.MaxTokens,
+		"stream":      true,
+		"stream_options": map[string]interface{}{
+			"include_usage": true, // Request usage info in final chunk
+		},
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("OpenAI streaming request failed - marshal error", map[string]interface{}{
+				"operation": "ai_stream_error",
+				"provider":  "openai",
+				"error":     err.Error(),
+				"phase":     "request_preparation",
+			})
+		}
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewBuffer(jsonData))
+	if err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("OpenAI streaming request failed - create request error", map[string]interface{}{
+				"operation": "ai_stream_error",
+				"provider":  "openai",
+				"error":     err.Error(),
+				"phase":     "request_creation",
+			})
+		}
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "text/event-stream")
+
+	// Execute request (no retry for streaming - connection establishment only)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		if c.Logger != nil {
+			c.Logger.Error("OpenAI streaming request failed - send error", map[string]interface{}{
+				"operation": "ai_stream_error",
+				"provider":  "openai",
+				"error":     err.Error(),
+				"phase":     "request_execution",
+			})
+		}
+		span.RecordError(err)
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	// Handle non-streaming error responses
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		if c.Logger != nil {
+			c.Logger.Error("OpenAI streaming request failed - API error", map[string]interface{}{
+				"operation":   "ai_stream_error",
+				"provider":    "openai",
+				"status_code": resp.StatusCode,
+				"phase":       "api_response",
+			})
+		}
+		apiErr := c.HandleError(resp.StatusCode, body, "OpenAI")
+		span.RecordError(apiErr)
+		span.SetAttribute("http.status_code", resp.StatusCode)
+		return nil, apiErr
+	}
+
+	// Parse SSE stream
+	reader := bufio.NewReader(resp.Body)
+	var fullContent strings.Builder
+	var model string
+	var usage core.TokenUsage
+	chunkIndex := 0
+	var finishReason string
+
+	for {
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			// Return partial result with what we have
+			if fullContent.Len() > 0 {
+				return &core.AIResponse{
+					Content: fullContent.String(),
+					Model:   model,
+					Usage:   usage,
+				}, core.ErrStreamPartiallyCompleted
+			}
+			return nil, ctx.Err()
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			// Partial completion - return what we have
+			if fullContent.Len() > 0 {
+				span.SetAttribute("ai.stream_partial", true)
+				return &core.AIResponse{
+					Content: fullContent.String(),
+					Model:   model,
+					Usage:   usage,
+				}, core.ErrStreamPartiallyCompleted
+			}
+			span.RecordError(err)
+			return nil, fmt.Errorf("error reading stream: %w", err)
+		}
+
+		line = strings.TrimSpace(line)
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+
+		// Check for stream end
+		if line == "data: [DONE]" {
+			break
+		}
+
+		// Parse SSE data line
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+
+		var streamResp StreamResponse
+		if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
+			// Log but continue - some chunks may be malformed
+			if c.Logger != nil {
+				c.Logger.Debug("OpenAI stream - failed to parse chunk", map[string]interface{}{
+					"operation": "ai_stream_parse",
+					"provider":  "openai",
+					"error":     err.Error(),
+				})
+			}
+			continue
+		}
+
+		// Capture model from first chunk
+		if model == "" && streamResp.Model != "" {
+			model = streamResp.Model
+		}
+
+		// Capture usage from final chunk (if stream_options.include_usage was set)
+		if streamResp.Usage != nil {
+			usage = core.TokenUsage{
+				PromptTokens:     streamResp.Usage.PromptTokens,
+				CompletionTokens: streamResp.Usage.CompletionTokens,
+				TotalTokens:      streamResp.Usage.TotalTokens,
+			}
+		}
+
+		// Process choices
+		for _, choice := range streamResp.Choices {
+			if choice.Delta.Content != "" {
+				fullContent.WriteString(choice.Delta.Content)
+
+				// Create chunk and call callback
+				chunk := core.StreamChunk{
+					Content: choice.Delta.Content,
+					Delta:   true,
+					Index:   chunkIndex,
+					Model:   model,
+				}
+				chunkIndex++
+
+				if err := callback(chunk); err != nil {
+					// Callback requested stop
+					span.SetAttribute("ai.stream_stopped_by_callback", true)
+					return &core.AIResponse{
+						Content: fullContent.String(),
+						Model:   model,
+						Usage:   usage,
+					}, nil
+				}
+			}
+
+			// Capture finish reason
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
+		}
+	}
+
+	// Send final chunk with finish reason
+	if finishReason != "" {
+		finalChunk := core.StreamChunk{
+			Delta:        false,
+			Index:        chunkIndex,
+			FinishReason: finishReason,
+			Model:        model,
+			Usage:        &usage,
+		}
+		_ = callback(finalChunk) // Ignore error on final chunk
+	}
+
+	result := &core.AIResponse{
+		Content: fullContent.String(),
+		Model:   model,
+		Usage:   usage,
+	}
+
+	// Add token usage to span for cost tracking
+	span.SetAttribute("ai.prompt_tokens", result.Usage.PromptTokens)
+	span.SetAttribute("ai.completion_tokens", result.Usage.CompletionTokens)
+	span.SetAttribute("ai.total_tokens", result.Usage.TotalTokens)
+	span.SetAttribute("ai.response_length", len(result.Content))
+	span.SetAttribute("ai.chunks_sent", chunkIndex)
+
+	// Log response
+	c.LogResponse(ctx, "openai", result.Model, result.Usage, time.Since(startTime))
+	c.LogResponseContent("openai", result.Model, result.Content)
+
+	return result, nil
+}
+
+// SupportsStreaming returns true as OpenAI supports native streaming
+func (c *Client) SupportsStreaming() bool {
+	return true
 }

@@ -214,12 +214,12 @@ func (c *ChainClient) GenerateResponse(ctx context.Context, prompt string, optio
 		// Log provider attempt with trace correlation
 		if c.logger != nil {
 			c.logger.DebugWithContext(ctx, "Trying provider in chain", map[string]interface{}{
-				"operation":       "ai_chain_attempt",
-				"provider_index":  i,
-				"provider_alias":  providerAlias,
-				"original_model":  originalModel,
-				"remaining":       len(c.providers) - i - 1,
-				"failed_so_far":   failedProviders,
+				"operation":      "ai_chain_attempt",
+				"provider_index": i,
+				"provider_alias": providerAlias,
+				"original_model": originalModel,
+				"remaining":      len(c.providers) - i - 1,
+				"failed_so_far":  failedProviders,
 			})
 		}
 
@@ -266,11 +266,11 @@ func (c *ChainClient) GenerateResponse(ctx context.Context, prompt string, optio
 			} else {
 				if c.logger != nil {
 					c.logger.InfoWithContext(ctx, "Chain request succeeded on primary provider", map[string]interface{}{
-						"operation":      "ai_chain_success",
-						"provider":       providerAlias,
-						"duration_ms":    attemptDuration.Milliseconds(),
-						"prompt_tokens":  resp.Usage.PromptTokens,
-						"output_tokens":  resp.Usage.CompletionTokens,
+						"operation":     "ai_chain_success",
+						"provider":      providerAlias,
+						"duration_ms":   attemptDuration.Milliseconds(),
+						"prompt_tokens": resp.Usage.PromptTokens,
+						"output_tokens": resp.Usage.CompletionTokens,
 					})
 				}
 			}
@@ -349,15 +349,174 @@ func (c *ChainClient) GenerateResponse(ctx context.Context, prompt string, optio
 
 	if c.logger != nil {
 		c.logger.ErrorWithContext(ctx, "All chain providers exhausted", map[string]interface{}{
-			"operation":        "ai_chain_exhausted",
-			"providers_tried":  len(c.providers),
-			"failed_providers": failedProviders,
-			"final_error":      lastErr.Error(),
+			"operation":         "ai_chain_exhausted",
+			"providers_tried":   len(c.providers),
+			"failed_providers":  failedProviders,
+			"final_error":       lastErr.Error(),
 			"total_duration_ms": time.Since(startTime).Milliseconds(),
 		})
 	}
 
 	return nil, fmt.Errorf("all %d providers failed, last error: %w", len(c.providers), lastErr)
+}
+
+// StreamResponse generates a streaming response with automatic failover
+// IMPORTANT: Streaming has different failover semantics than synchronous calls:
+// - Once streaming starts successfully, we commit to that provider
+// - Failover only happens if the connection fails before streaming starts
+// - If streaming is interrupted mid-stream, we return partial content with ErrStreamPartiallyCompleted
+func (c *ChainClient) StreamResponse(ctx context.Context, prompt string, options *core.AIOptions, callback core.StreamCallback) (*core.AIResponse, error) {
+	// Start distributed tracing span (nil-safe per FRAMEWORK_DESIGN_PRINCIPLES.md)
+	var span core.Span = &core.NoOpSpan{}
+	if c.telemetry != nil {
+		ctx, span = c.telemetry.StartSpan(ctx, "ai.chain.stream_response")
+	}
+	defer span.End()
+
+	startTime := time.Now()
+	var lastErr error
+	failedProviders := []string{}
+
+	span.SetAttribute("ai.chain.total_providers", len(c.providers))
+	span.SetAttribute("ai.prompt_length", len(prompt))
+	span.SetAttribute("ai.streaming", true)
+
+	for i, provider := range c.providers {
+		alias := c.providerAliases[i]
+
+		// Check if provider supports streaming
+		streamingProvider, ok := provider.(core.StreamingAIClient)
+		if !ok || !streamingProvider.SupportsStreaming() {
+			// Provider doesn't support streaming, try next
+			if c.logger != nil {
+				c.logger.DebugWithContext(ctx, "Provider does not support streaming, skipping", map[string]interface{}{
+					"operation": "ai_chain_skip",
+					"provider":  alias,
+					"reason":    "streaming_not_supported",
+				})
+			}
+			failedProviders = append(failedProviders, alias)
+			lastErr = fmt.Errorf("provider %s does not support streaming", alias)
+			continue
+		}
+
+		// Clone options to prevent mutation bleeding
+		optsCopy := cloneAIOptions(options)
+
+		if c.logger != nil {
+			c.logger.DebugWithContext(ctx, "Attempting streaming provider", map[string]interface{}{
+				"operation":       "ai_chain_stream_attempt",
+				"provider":        alias,
+				"provider_index":  i + 1,
+				"total_providers": len(c.providers),
+			})
+		}
+
+		// Attempt streaming with this provider
+		response, err := streamingProvider.StreamResponse(ctx, prompt, optsCopy, callback)
+		if err == nil {
+			// Success
+			telemetry.Counter("ai.chain.stream.success",
+				"module", telemetry.ModuleAI,
+				"provider", alias,
+				"attempt", fmt.Sprintf("%d", i+1),
+			)
+			telemetry.Histogram("ai.chain.stream.duration_ms",
+				float64(time.Since(startTime).Milliseconds()),
+				"module", telemetry.ModuleAI,
+				"provider", alias,
+			)
+
+			span.SetAttribute("ai.chain.status", "success")
+			span.SetAttribute("ai.chain.provider", alias)
+			span.SetAttribute("ai.chain.attempt", i+1)
+
+			if c.logger != nil {
+				c.logger.InfoWithContext(ctx, "Chain streaming succeeded", map[string]interface{}{
+					"operation":     "ai_chain_stream_success",
+					"provider":      alias,
+					"attempt":       i + 1,
+					"duration_ms":   time.Since(startTime).Milliseconds(),
+					"response_size": len(response.Content),
+				})
+			}
+
+			return response, nil
+		}
+
+		// Check for partial completion (streaming started but interrupted)
+		if err == core.ErrStreamPartiallyCompleted {
+			// Streaming started but was interrupted - return partial result
+			telemetry.Counter("ai.chain.stream.partial",
+				"module", telemetry.ModuleAI,
+				"provider", alias,
+			)
+
+			span.SetAttribute("ai.chain.status", "partial")
+			span.SetAttribute("ai.chain.provider", alias)
+
+			if c.logger != nil {
+				c.logger.WarnWithContext(ctx, "Streaming partially completed", map[string]interface{}{
+					"operation":     "ai_chain_stream_partial",
+					"provider":      alias,
+					"response_size": len(response.Content),
+				})
+			}
+
+			// Return partial response - don't failover as streaming already started
+			return response, err
+		}
+
+		// Provider failed before streaming started - try next
+		telemetry.Counter("ai.chain.stream.failure",
+			"module", telemetry.ModuleAI,
+			"provider", alias,
+		)
+
+		lastErr = err
+		failedProviders = append(failedProviders, alias)
+
+		if c.logger != nil {
+			c.logger.WarnWithContext(ctx, "Provider streaming failed, trying next", map[string]interface{}{
+				"operation":       "ai_chain_stream_failover",
+				"failed_provider": alias,
+				"attempt":         i + 1,
+				"error":           err.Error(),
+				"remaining":       len(c.providers) - i - 1,
+			})
+		}
+	}
+
+	// All providers exhausted
+	telemetry.Counter("ai.chain.stream.exhausted",
+		"module", telemetry.ModuleAI,
+		"providers_tried", fmt.Sprintf("%d", len(c.providers)),
+	)
+
+	span.SetAttribute("ai.chain.status", "exhausted")
+	span.SetAttribute("ai.chain.failed_providers", strings.Join(failedProviders, ","))
+	span.RecordError(lastErr)
+
+	if c.logger != nil {
+		c.logger.ErrorWithContext(ctx, "All chain providers exhausted for streaming", map[string]interface{}{
+			"operation":        "ai_chain_stream_exhausted",
+			"providers_tried":  len(c.providers),
+			"failed_providers": failedProviders,
+			"final_error":      lastErr.Error(),
+		})
+	}
+
+	return nil, fmt.Errorf("all %d providers failed for streaming, last error: %w", len(c.providers), lastErr)
+}
+
+// SupportsStreaming returns true if at least one provider supports streaming
+func (c *ChainClient) SupportsStreaming() bool {
+	for _, provider := range c.providers {
+		if streamingProvider, ok := provider.(core.StreamingAIClient); ok && streamingProvider.SupportsStreaming() {
+			return true
+		}
+	}
+	return false
 }
 
 // cloneAIOptions creates a shallow copy of AIOptions to prevent mutation bleeding across providers.

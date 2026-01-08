@@ -56,6 +56,45 @@ type ErrorResponse struct {
 	} `json:"error"`
 }
 
+// StreamEvent represents a streaming event from Anthropic API
+type StreamEvent struct {
+	Type         string              `json:"type"`
+	Message      *StreamMessage      `json:"message,omitempty"`
+	Index        int                 `json:"index,omitempty"`
+	ContentBlock *StreamContentBlock `json:"content_block,omitempty"`
+	Delta        *StreamDelta        `json:"delta,omitempty"`
+	Usage        *StreamUsage        `json:"usage,omitempty"`
+}
+
+// StreamMessage contains message metadata in message_start event
+type StreamMessage struct {
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	Role         string `json:"role"`
+	Model        string `json:"model"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	StopSequence string `json:"stop_sequence,omitempty"`
+	Usage        *Usage `json:"usage,omitempty"`
+}
+
+// StreamContentBlock contains content block info
+type StreamContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// StreamDelta contains the incremental content
+type StreamDelta struct {
+	Type       string `json:"type,omitempty"`
+	Text       string `json:"text,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
+}
+
+// StreamUsage contains token usage in streaming responses
+type StreamUsage struct {
+	OutputTokens int `json:"output_tokens"`
+}
+
 // modelAliases maps portable names to Anthropic model IDs.
 // These aliases enable portable model names across providers when using Chain Client.
 // Updated December 2025 with Claude 4.5 family models.

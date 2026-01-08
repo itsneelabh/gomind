@@ -86,6 +86,31 @@ type TokenUsage struct {
 	TotalTokens      int
 }
 
+// StreamChunk represents a single chunk in a streaming response
+type StreamChunk struct {
+	Content      string                 `json:"content,omitempty"`
+	Delta        bool                   `json:"delta"`
+	Index        int                    `json:"index"`
+	FinishReason string                 `json:"finish_reason,omitempty"`
+	Model        string                 `json:"model,omitempty"`
+	Usage        *TokenUsage            `json:"usage,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// StreamCallback is called for each chunk in a streaming response.
+// Return an error to stop the stream early.
+type StreamCallback func(chunk StreamChunk) error
+
+// StreamingAIClient extends AIClient with streaming support
+type StreamingAIClient interface {
+	AIClient
+	// StreamResponse generates a streaming response, calling callback for each chunk.
+	// Returns the complete AIResponse after streaming finishes (for usage tracking).
+	StreamResponse(ctx context.Context, prompt string, options *AIOptions, callback StreamCallback) (*AIResponse, error)
+	// SupportsStreaming returns true if this client supports streaming responses.
+	SupportsStreaming() bool
+}
+
 // Registry interface for tools (registration only)
 type Registry interface {
 	Register(ctx context.Context, info *ServiceInfo) error

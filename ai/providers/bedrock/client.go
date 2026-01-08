@@ -28,12 +28,12 @@ type Client struct {
 func NewClient(cfg aws.Config, region string, logger core.Logger) *Client {
 	// Create Bedrock Runtime client
 	bedrockClient := bedrockruntime.NewFromConfig(cfg)
-	
+
 	// Create base client with defaults
 	base := providers.NewBaseClient(30*time.Second, logger)
 	base.DefaultModel = ModelClaude3Sonnet // Default to Claude Sonnet
 	base.DefaultMaxTokens = 1000
-	
+
 	return &Client{
 		BaseClient:    base,
 		bedrockClient: bedrockClient,
@@ -61,7 +61,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	// Log request
 	c.LogRequest("bedrock", options.Model, prompt)
 	startTime := time.Now()
-	
+
 	// Build messages for Converse API
 	messages := []types.Message{
 		{
@@ -73,13 +73,13 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 			},
 		},
 	}
-	
+
 	// Build the Converse input
 	input := &bedrockruntime.ConverseInput{
 		ModelId:  aws.String(options.Model),
 		Messages: messages,
 	}
-	
+
 	// Add system prompt if provided
 	if options.SystemPrompt != "" {
 		input.System = []types.SystemContentBlock{
@@ -88,25 +88,25 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 			},
 		}
 	}
-	
+
 	// Add inference configuration
 	inferenceConfig := &types.InferenceConfiguration{}
 	configSet := false
-	
+
 	if options.MaxTokens > 0 {
 		inferenceConfig.MaxTokens = aws.Int32(int32(options.MaxTokens))
 		configSet = true
 	}
-	
+
 	if options.Temperature > 0 {
 		inferenceConfig.Temperature = aws.Float32(options.Temperature)
 		configSet = true
 	}
-	
+
 	if configSet {
 		input.InferenceConfig = inferenceConfig
 	}
-	
+
 	// Make the request to AWS Bedrock
 	output, err := c.bedrockClient.Converse(ctx, input)
 	if err != nil {
@@ -201,16 +201,14 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	}
 
 	// Log response
-	c.LogResponse("bedrock", result.Model, result.Usage, time.Since(startTime))
+	c.LogResponse(ctx, "bedrock", result.Model, result.Usage, time.Since(startTime))
 	c.LogResponseContent("bedrock", result.Model, result.Content)
 
 	return result, nil
 }
 
 // StreamResponse generates a streaming response using AWS Bedrock's ConverseStream API
-func (c *Client) StreamResponse(ctx context.Context, prompt string, options *core.AIOptions, stream chan<- string) error {
-	defer close(stream)
-
+func (c *Client) StreamResponse(ctx context.Context, prompt string, options *core.AIOptions, callback core.StreamCallback) (*core.AIResponse, error) {
 	// Start distributed tracing span for streaming
 	ctx, span := c.StartSpan(ctx, "ai.stream_response")
 	defer span.End()
@@ -236,7 +234,8 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			"prompt_length": len(prompt),
 		})
 	}
-	
+	startTime := time.Now()
+
 	// Build messages for ConverseStream API
 	messages := []types.Message{
 		{
@@ -248,13 +247,13 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			},
 		},
 	}
-	
+
 	// Build the ConverseStream input
 	input := &bedrockruntime.ConverseStreamInput{
 		ModelId:  aws.String(options.Model),
 		Messages: messages,
 	}
-	
+
 	// Add system prompt if provided
 	if options.SystemPrompt != "" {
 		input.System = []types.SystemContentBlock{
@@ -263,7 +262,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			},
 		}
 	}
-	
+
 	// Add inference configuration
 	inferenceConfig := &types.InferenceConfiguration{}
 	if options.MaxTokens > 0 {
@@ -273,7 +272,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 		inferenceConfig.Temperature = aws.Float32(options.Temperature)
 	}
 	input.InferenceConfig = inferenceConfig
-	
+
 	// Start the stream
 	output, err := c.bedrockClient.ConverseStream(ctx, input)
 	if err != nil {
@@ -286,12 +285,17 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			})
 		}
 		span.RecordError(err)
-		return fmt.Errorf("bedrock stream error: %w", err)
+		return nil, fmt.Errorf("bedrock stream error: %w", err)
 	}
 
 	// Process the stream
 	eventStream := output.GetStream()
 	defer eventStream.Close()
+
+	var fullContent string
+	var usage core.TokenUsage
+	chunkIndex := 0
+	var finishReason string
 
 	for {
 		event, ok := <-eventStream.Events()
@@ -304,32 +308,66 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			if v.Value.Delta != nil {
 				switch d := v.Value.Delta.(type) {
 				case *types.ContentBlockDeltaMemberText:
-					select {
-					case stream <- d.Value:
-					case <-ctx.Done():
-						if c.Logger != nil {
-							c.Logger.Warn("Bedrock stream cancelled by context", map[string]interface{}{
-								"operation": "ai_stream_cancelled",
-								"provider":  "bedrock",
-								"error":     ctx.Err().Error(),
-							})
-						}
-						span.RecordError(ctx.Err())
-						span.SetAttribute("ai.stream_cancelled", true)
-						return ctx.Err()
+					fullContent += d.Value
+
+					// Create chunk and call callback
+					chunk := core.StreamChunk{
+						Content: d.Value,
+						Delta:   true,
+						Index:   chunkIndex,
+						Model:   options.Model,
+					}
+					chunkIndex++
+
+					if err := callback(chunk); err != nil {
+						// Callback requested stop
+						span.SetAttribute("ai.stream_stopped_by_callback", true)
+						return &core.AIResponse{
+							Content: fullContent,
+							Model:   options.Model,
+							Usage:   usage,
+						}, nil
 					}
 				}
 			}
+
+		case *types.ConverseStreamOutputMemberMetadata:
+			// Capture usage from metadata
+			if v.Value.Usage != nil {
+				usage = core.TokenUsage{
+					PromptTokens:     int(aws.ToInt32(v.Value.Usage.InputTokens)),
+					CompletionTokens: int(aws.ToInt32(v.Value.Usage.OutputTokens)),
+					TotalTokens:      int(aws.ToInt32(v.Value.Usage.TotalTokens)),
+				}
+			}
+
 		case *types.ConverseStreamOutputMemberMessageStop:
-			// Stream ended normally
+			// Stream ended normally - capture stop reason
+			finishReason = string(v.Value.StopReason)
 			if c.Logger != nil {
 				c.Logger.Debug("Bedrock stream completed", map[string]interface{}{
-					"operation": "ai_stream_complete",
-					"provider":  "bedrock",
+					"operation":   "ai_stream_complete",
+					"provider":    "bedrock",
+					"stop_reason": finishReason,
 				})
 			}
 			span.SetAttribute("ai.stream_completed", true)
-			return nil
+		}
+
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			if fullContent != "" {
+				span.SetAttribute("ai.stream_partial", true)
+				return &core.AIResponse{
+					Content: fullContent,
+					Model:   options.Model,
+					Usage:   usage,
+				}, core.ErrStreamPartiallyCompleted
+			}
+			span.RecordError(ctx.Err())
+			return nil, ctx.Err()
+		default:
 		}
 	}
 
@@ -343,11 +381,54 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 				"phase":     "stream_processing",
 			})
 		}
+		// Return partial content if available
+		if fullContent != "" {
+			span.SetAttribute("ai.stream_partial", true)
+			return &core.AIResponse{
+				Content: fullContent,
+				Model:   options.Model,
+				Usage:   usage,
+			}, core.ErrStreamPartiallyCompleted
+		}
 		span.RecordError(err)
-		return fmt.Errorf("bedrock stream error: %w", err)
+		return nil, fmt.Errorf("bedrock stream error: %w", err)
 	}
 
-	return nil
+	// Send final chunk with finish reason
+	if finishReason != "" {
+		finalChunk := core.StreamChunk{
+			Delta:        false,
+			Index:        chunkIndex,
+			FinishReason: finishReason,
+			Model:        options.Model,
+			Usage:        &usage,
+		}
+		_ = callback(finalChunk)
+	}
+
+	result := &core.AIResponse{
+		Content: fullContent,
+		Model:   options.Model,
+		Usage:   usage,
+	}
+
+	// Add token usage to span
+	span.SetAttribute("ai.prompt_tokens", result.Usage.PromptTokens)
+	span.SetAttribute("ai.completion_tokens", result.Usage.CompletionTokens)
+	span.SetAttribute("ai.total_tokens", result.Usage.TotalTokens)
+	span.SetAttribute("ai.response_length", len(result.Content))
+	span.SetAttribute("ai.chunks_sent", chunkIndex)
+
+	// Log response
+	c.LogResponse(ctx, "bedrock", result.Model, result.Usage, time.Since(startTime))
+	c.LogResponseContent("bedrock", result.Model, result.Content)
+
+	return result, nil
+}
+
+// SupportsStreaming returns true as Bedrock supports native streaming
+func (c *Client) SupportsStreaming() bool {
+	return true
 }
 
 // InvokeModel provides direct access to specific model APIs (for advanced use cases)
@@ -457,17 +538,17 @@ func CreateAWSConfig(ctx context.Context, region string, credentials ...aws.Cred
 	opts := []func(*config.LoadOptions) error{
 		config.WithRegion(region),
 	}
-	
+
 	// Add explicit credentials if provided
 	if len(credentials) > 0 && credentials[0] != nil {
 		opts = append(opts, config.WithCredentialsProvider(credentials[0]))
 	}
-	
+
 	// Load the configuration
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return aws.Config{}, fmt.Errorf("failed to load AWS config: %w", err)
 	}
-	
+
 	return cfg, nil
 }

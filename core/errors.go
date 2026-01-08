@@ -47,6 +47,9 @@ var (
 
 	// AI operation errors
 	ErrAIOperationFailed = errors.New("AI operation failed")
+
+	// Streaming errors
+	ErrStreamPartiallyCompleted = errors.New("stream partially completed before interruption")
 )
 
 // IsRetryable checks if an error is retryable.

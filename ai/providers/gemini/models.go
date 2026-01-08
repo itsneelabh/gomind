@@ -82,6 +82,20 @@ type ErrorResponse struct {
 	} `json:"error"`
 }
 
+// StreamChunk represents a streaming response chunk from Gemini API
+// Gemini streams complete GeminiResponse objects for each chunk
+type StreamChunk struct {
+	Candidates    []StreamCandidate `json:"candidates,omitempty"`
+	UsageMetadata *UsageMetadata    `json:"usageMetadata,omitempty"`
+}
+
+// StreamCandidate represents a candidate in streaming response
+type StreamCandidate struct {
+	Content      Content `json:"content"`
+	FinishReason string  `json:"finishReason,omitempty"`
+	Index        int     `json:"index"`
+}
+
 // modelAliases maps portable names to Gemini model IDs.
 // These aliases enable portable model names across providers when using Chain Client.
 // Updated December 2025 with Gemini 2.5 and 3 family models.

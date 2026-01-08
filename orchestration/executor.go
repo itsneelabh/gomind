@@ -77,8 +77,9 @@ type SmartExecutor struct {
 	// Layer 4: Contextual Re-Resolution for Semantic Retry
 	// When ErrorAnalyzer says "cannot fix" but source data exists,
 	// this component can compute derived values using full context.
-	contextualReResolver *ContextualReResolver
-	maxSemanticRetries   int // Default: 2
+	contextualReResolver             *ContextualReResolver
+	maxSemanticRetries               int  // Default: 2
+	semanticRetryForIndependentSteps bool // Default: true - enable Layer 4 for steps without dependencies
 
 	// Step completion callback for async progress reporting (v1 addition)
 	// Called after each step completes to enable per-tool progress reporting.
@@ -215,12 +216,45 @@ func (e *SmartExecutor) SetMaxSemanticRetries(max int) {
 	e.maxSemanticRetries = max
 }
 
+// SetSemanticRetryForIndependentSteps enables/disables semantic retry for steps
+// without dependencies. When true (default), Layer 4 runs even when source data
+// from previous steps is empty. Controlled by GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS.
+func (e *SmartExecutor) SetSemanticRetryForIndependentSteps(enabled bool) {
+	e.semanticRetryForIndependentSteps = enabled
+}
+
 // SetOnStepComplete sets the callback for step completion notifications.
 // Used by async task handlers to receive per-step progress updates.
 // The callback is invoked after each step completes (success or failure).
 // See notes/ASYNC_TASK_DESIGN.md Phase 6 for usage details.
 func (e *SmartExecutor) SetOnStepComplete(cb StepCompleteCallback) {
 	e.onStepComplete = cb
+}
+
+// safeInvokeStepCallback invokes a step callback with panic protection.
+// If the callback panics, the panic is recovered and logged, preventing
+// user callback errors from crashing the executor goroutine.
+func (e *SmartExecutor) safeInvokeStepCallback(cb StepCompleteCallback, stepIndex, totalSteps int, step RoutingStep, result StepResult) {
+	if cb == nil {
+		return
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			if e.logger != nil {
+				e.logger.Error("Step callback panicked", map[string]interface{}{
+					"operation":   "step_callback",
+					"step_id":     step.StepID,
+					"step_index":  stepIndex,
+					"total_steps": totalSteps,
+					"panic":       fmt.Sprintf("%v", r),
+				})
+			}
+			// Continue execution - don't let callback panic affect the executor
+		}
+	}()
+
+	cb(stepIndex, totalSteps, step, result)
 }
 
 // collectSourceDataFromDependencies converts step results to a flat source data map.
@@ -241,7 +275,7 @@ func (e *SmartExecutor) collectSourceDataFromDependencies(ctx context.Context, d
 		var parsed map[string]interface{}
 		if err := json.Unmarshal([]byte(result.Response), &parsed); err != nil {
 			if e.logger != nil {
-				e.logger.Warn("Failed to parse step response for source data", map[string]interface{}{
+				e.logger.WarnWithContext(ctx, "Failed to parse step response for source data", map[string]interface{}{
 					"step_id": result.StepID,
 					"error":   err.Error(),
 				})
@@ -265,9 +299,6 @@ func (e *SmartExecutor) collectSourceDataFromDependencies(ctx context.Context, d
 func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
 	startTime := time.Now()
 
-	// Get trace context for log correlation
-	tc := telemetry.GetTraceContext(ctx)
-
 	// Add span event for plan execution start
 	telemetry.AddSpanEvent(ctx, "plan_execution_started",
 		attribute.String("plan_id", plan.PlanID),
@@ -275,13 +306,11 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 	)
 
 	if e.logger != nil {
-		e.logger.Debug("Starting plan execution", map[string]interface{}{
+		e.logger.DebugWithContext(ctx, "Starting plan execution", map[string]interface{}{
 			"operation":       "execute_plan",
 			"plan_id":         plan.PlanID,
 			"step_count":      len(plan.Steps),
 			"max_concurrency": e.maxConcurrency,
-			"trace_id":        tc.TraceID,
-			"span_id":         tc.SpanID,
 		})
 	}
 
@@ -333,9 +362,18 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 					}
 					stepResults[step.StepID] = &skippedResult
 					result.Steps = append(result.Steps, skippedResult)
+					skippedStepIndex := len(result.Steps) - 1
 					executed[step.StepID] = true
 					result.Success = false
 					hasSkipped = true
+
+					// Invoke step completion callbacks for skipped steps too.
+					// This ensures UI receives step events for all steps,
+					// keeping the progress panel count consistent with AgentsInvolved.
+					e.safeInvokeStepCallback(e.onStepComplete, skippedStepIndex, len(plan.Steps), step, skippedResult)
+					if ctxCallback := GetStepCallback(ctx); ctxCallback != nil {
+						e.safeInvokeStepCallback(ctxCallback, skippedStepIndex, len(plan.Steps), step, skippedResult)
+					}
 				}
 			}
 
@@ -353,7 +391,7 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 			for i, step := range readySteps {
 				stepIDs[i] = step.StepID
 			}
-			e.logger.Debug("Executing steps in parallel", map[string]interface{}{
+			e.logger.DebugWithContext(ctx, "Executing steps in parallel", map[string]interface{}{
 				"operation":      "parallel_execution",
 				"plan_id":        plan.PlanID,
 				"ready_steps":    stepIDs,
@@ -414,8 +452,17 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 						result.Steps = append(result.Steps, panicResult)
 						executed[s.StepID] = true
 						result.Success = false
+						panicStepIndex := len(result.Steps) - 1 // Capture index while holding lock
 
 						resultsMutex.Unlock() // Unlock immediately, no defer
+
+						// Invoke step completion callbacks for panicked steps too.
+						// This ensures UI receives step events even for failed steps,
+						// keeping the progress panel count consistent with AgentsInvolved.
+						e.safeInvokeStepCallback(e.onStepComplete, panicStepIndex, len(plan.Steps), s, panicResult)
+						if ctxCallback := GetStepCallback(ctx); ctxCallback != nil {
+							e.safeInvokeStepCallback(ctxCallback, panicStepIndex, len(plan.Steps), s, panicResult)
+						}
 					}
 					wg.Done()
 				}()
@@ -438,11 +485,16 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 				}
 				resultsMutex.Unlock()
 
-				// Invoke step completion callback (outside lock to avoid blocking)
+				// Invoke step completion callbacks (outside lock to avoid blocking)
 				// This enables async task handlers to report per-tool progress.
 				// See notes/ASYNC_TASK_DESIGN.md Phase 6 for details.
-				if e.onStepComplete != nil {
-					e.onStepComplete(stepIndex, len(plan.Steps), s, stepResult)
+				// Check both executor-level and context-level callbacks
+				// Callbacks are wrapped with panic protection to prevent user callback
+				// panics from crashing the executor goroutine.
+				e.safeInvokeStepCallback(e.onStepComplete, stepIndex, len(plan.Steps), s, stepResult)
+				// Also check for per-request callback from context
+				if ctxCallback := GetStepCallback(ctx); ctxCallback != nil {
+					e.safeInvokeStepCallback(ctxCallback, stepIndex, len(plan.Steps), s, stepResult)
 				}
 			}(step)
 		}
@@ -453,7 +505,7 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 		completedSteps := len(executed)
 		totalSteps := len(plan.Steps)
 		if e.logger != nil {
-			e.logger.Debug("Execution batch completed", map[string]interface{}{
+			e.logger.DebugWithContext(ctx, "Execution batch completed", map[string]interface{}{
 				"operation":        "batch_complete",
 				"plan_id":          plan.PlanID,
 				"completed_steps":  completedSteps,
@@ -489,15 +541,13 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 	)
 
 	if e.logger != nil {
-		e.logger.Info("Plan execution finished", map[string]interface{}{
+		e.logger.InfoWithContext(ctx, "Plan execution finished", map[string]interface{}{
 			"operation":    "execute_plan_complete",
 			"plan_id":      plan.PlanID,
 			"success":      result.Success,
 			"failed_steps": failedSteps,
 			"total_steps":  len(plan.Steps),
 			"duration_ms":  result.TotalDuration.Milliseconds(),
-			"trace_id":     tc.TraceID,
-			"span_id":      tc.SpanID,
 		})
 	}
 
@@ -577,7 +627,7 @@ func (e *SmartExecutor) buildStepContext(ctx context.Context, step RoutingStep, 
 			if err := json.Unmarshal([]byte(result.Response), &parsed); err != nil {
 				// Log parsing failure - this could indicate a non-JSON response from a tool
 				if e.logger != nil {
-					e.logger.Warn("Failed to parse dependency response as JSON for template interpolation", map[string]interface{}{
+					e.logger.WarnWithContext(ctx, "Failed to parse dependency response as JSON for template interpolation", map[string]interface{}{
 						"step_id":      step.StepID,
 						"dependency":   depID,
 						"error":        err.Error(),
@@ -617,7 +667,7 @@ func (e *SmartExecutor) collectDependencyResults(ctx context.Context, dependsOn 
 				responseJSON, err := json.Marshal(responseData)
 				if err != nil {
 					if e.logger != nil {
-						e.logger.Warn("Failed to marshal dependency response", map[string]interface{}{
+						e.logger.WarnWithContext(ctx, "Failed to marshal dependency response", map[string]interface{}{
 							"dependency": depID,
 							"error":      err.Error(),
 						})
@@ -1134,9 +1184,6 @@ func normalizeFieldPath(fieldPath string) (string, bool) {
 func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepResult {
 	startTime := time.Now()
 
-	// Get trace context for log correlation
-	tc := telemetry.GetTraceContext(ctx)
-
 	// Add span event for step execution start
 	telemetry.AddSpanEvent(ctx, "step_execution_started",
 		attribute.String("step_id", step.StepID),
@@ -1144,12 +1191,10 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	)
 
 	if e.logger != nil {
-		e.logger.Debug("Starting step execution", map[string]interface{}{
+		e.logger.DebugWithContext(ctx, "Starting step execution", map[string]interface{}{
 			"operation":  "step_execution_start",
 			"step_id":    step.StepID,
 			"agent_name": step.AgentName,
-			"trace_id":   tc.TraceID,
-			"span_id":    tc.SpanID,
 		})
 	}
 
@@ -1168,12 +1213,10 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		err := fmt.Errorf("agent %s not found in catalog", step.AgentName)
 		telemetry.RecordSpanError(ctx, err)
 		if e.logger != nil {
-			e.logger.Error("Agent not found in catalog", map[string]interface{}{
+			e.logger.ErrorWithContext(ctx, "Agent not found in catalog", map[string]interface{}{
 				"operation":  "agent_discovery",
 				"step_id":    step.StepID,
 				"agent_name": step.AgentName,
-				"trace_id":   tc.TraceID,
-				"span_id":    tc.SpanID,
 			})
 		}
 		result.Success = false
@@ -1184,7 +1227,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	}
 
 	if e.logger != nil {
-		e.logger.Debug("Agent discovered successfully", map[string]interface{}{
+		e.logger.DebugWithContext(ctx, "Agent discovered successfully", map[string]interface{}{
 			"operation":     "agent_discovery",
 			"step_id":       step.StepID,
 			"agent_name":    step.AgentName,
@@ -1214,7 +1257,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 	// Also log via framework logger for structured output
 	if e.logger != nil {
-		e.logger.Info("Hybrid resolution check", map[string]interface{}{
+		e.logger.InfoWithContext(ctx, "Hybrid resolution check", map[string]interface{}{
 			"step_id":               step.StepID,
 			"depends_on_count":      len(step.DependsOn),
 			"use_hybrid_resolution": e.useHybridResolution,
@@ -1227,7 +1270,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		// Get the capability schema for target parameter types
 		capabilityForResolution := e.findCapabilitySchema(agentInfo, capability)
 		if e.logger != nil {
-			e.logger.Info("findCapabilitySchema result", map[string]interface{}{
+			e.logger.InfoWithContext(ctx, "findCapabilitySchema result", map[string]interface{}{
 				"step_id":        step.StepID,
 				"capability":     capability,
 				"schema_found":   capabilityForResolution != nil,
@@ -1248,7 +1291,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			resolved, err := e.hybridResolver.ResolveParameters(ctx, stepResultsMap, capabilityForResolution)
 			if err != nil {
 				if e.logger != nil {
-					e.logger.Warn("Hybrid resolution failed, falling back to template interpolation", map[string]interface{}{
+					e.logger.WarnWithContext(ctx, "Hybrid resolution failed, falling back to template interpolation", map[string]interface{}{
 						"operation": "hybrid_resolution_fallback",
 						"step_id":   step.StepID,
 						"error":     err.Error(),
@@ -1274,13 +1317,12 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				}
 
 				if e.logger != nil {
-					e.logger.Info("HYBRID RESOLUTION APPLIED", map[string]interface{}{
+					e.logger.InfoWithContext(ctx, "HYBRID RESOLUTION APPLIED", map[string]interface{}{
 						"operation":       "hybrid_parameter_resolution",
 						"step_id":         step.StepID,
 						"capability":      capability,
 						"resolved_params": resolved,
 						"final_params":    parameters,
-						"trace_id":        tc.TraceID,
 					})
 				}
 
@@ -1304,7 +1346,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		interpolated := e.interpolateParameters(parameters, depResults)
 		if interpolated != nil {
 			if e.logger != nil {
-				e.logger.Debug("Template parameters interpolated", map[string]interface{}{
+				e.logger.DebugWithContext(ctx, "Template parameters interpolated", map[string]interface{}{
 					"operation":    "parameter_interpolation",
 					"step_id":      step.StepID,
 					"original":     parameters,
@@ -1334,7 +1376,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		if capabilitySchema != nil {
 			schemaParams = len(capabilitySchema.Parameters)
 		}
-		e.logger.Info("TYPE COERCION CHECK", map[string]interface{}{
+		e.logger.InfoWithContext(ctx, "TYPE COERCION CHECK", map[string]interface{}{
 			"operation":             "type_coercion_entry",
 			"step_id":               step.StepID,
 			"capability":            capability,
@@ -1366,14 +1408,12 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			// Structured logging - INFO level for visibility
 			// This includes both type coercions (string->number) and object field extractions (map->string)
 			if e.logger != nil {
-				e.logger.Info("TYPE COERCION APPLIED", map[string]interface{}{
+				e.logger.InfoWithContext(ctx, "TYPE COERCION APPLIED", map[string]interface{}{
 					"operation":      "type_coercion",
 					"step_id":        step.StepID,
 					"capability":     capability,
 					"coercions":      coercionLog,
 					"coercion_count": len(coercionLog),
-					"trace_id":       tc.TraceID,
-					"span_id":        tc.SpanID,
 				})
 			}
 		}
@@ -1386,13 +1426,11 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		err := fmt.Errorf("capability %s not found for agent %s", capability, step.AgentName)
 		telemetry.RecordSpanError(ctx, err)
 		if e.logger != nil {
-			e.logger.Error("Capability endpoint not found", map[string]interface{}{
+			e.logger.ErrorWithContext(ctx, "Capability endpoint not found", map[string]interface{}{
 				"operation":  "capability_resolution",
 				"step_id":    step.StepID,
 				"agent_name": step.AgentName,
 				"capability": capability,
-				"trace_id":   tc.TraceID,
-				"span_id":    tc.SpanID,
 				"available_capabilities": func() []string {
 					caps := make([]string, len(agentInfo.Capabilities))
 					for i, cap := range agentInfo.Capabilities {
@@ -1425,7 +1463,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		isTransientErrorDetected := false // Reset for each attempt - tracks if LLM identified transient error
 
 		if e.logger != nil {
-			e.logger.Debug("Making HTTP call to agent", map[string]interface{}{
+			e.logger.DebugWithContext(ctx, "Making HTTP call to agent", map[string]interface{}{
 				"operation":    "agent_http_call",
 				"step_id":      step.StepID,
 				"agent_name":   step.AgentName,
@@ -1433,8 +1471,6 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				"max_attempts": maxAttempts,
 				"url":          url,
 				"capability":   capability,
-				"trace_id":     tc.TraceID,
-				"span_id":      tc.SpanID,
 			})
 		}
 
@@ -1451,14 +1487,12 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		}
 		if err == nil {
 			if e.logger != nil {
-				e.logger.Debug("Agent HTTP call successful", map[string]interface{}{
+				e.logger.DebugWithContext(ctx, "Agent HTTP call successful", map[string]interface{}{
 					"operation":       "agent_http_response",
 					"step_id":         step.StepID,
 					"agent_name":      step.AgentName,
 					"attempt":         attempt,
 					"response_length": len(response),
-					"trace_id":        tc.TraceID,
-					"span_id":         tc.SpanID,
 				})
 			}
 			result.Success = true
@@ -1494,7 +1528,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 			if analysisErr != nil {
 				if e.logger != nil {
-					e.logger.Warn("LLM error analysis failed", map[string]interface{}{
+					e.logger.WarnWithContext(ctx, "LLM error analysis failed", map[string]interface{}{
 						"operation":   "error_analysis_failed",
 						"step_id":     step.StepID,
 						"capability":  capability,
@@ -1506,7 +1540,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			} else if analysisResult == nil {
 				// nil result means delegate to resilience module (transient error)
 				if e.logger != nil {
-					e.logger.Debug("Error delegated to resilience module", map[string]interface{}{
+					e.logger.DebugWithContext(ctx, "Error delegated to resilience module", map[string]interface{}{
 						"operation":   "resilience_delegation",
 						"step_id":     step.StepID,
 						"capability":  capability,
@@ -1544,7 +1578,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				hasChanges := len(analysisResult.SuggestedChanges) > 0
 				if e.logger != nil {
 					if hasChanges {
-						e.logger.Info("LLM error analysis suggests retry with parameter changes", map[string]interface{}{
+						e.logger.InfoWithContext(ctx, "LLM error analysis suggests retry with parameter changes", map[string]interface{}{
 							"operation":         "error_analysis_retry",
 							"step_id":           step.StepID,
 							"capability":        capability,
@@ -1554,7 +1588,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 							"validation_retry":  validationRetries,
 						})
 					} else {
-						e.logger.Info("LLM error analysis suggests retry with same parameters (transient)", map[string]interface{}{
+						e.logger.InfoWithContext(ctx, "LLM error analysis suggests retry with same parameters (transient)", map[string]interface{}{
 							"operation":        "error_analysis_retry_same_params",
 							"step_id":          step.StepID,
 							"capability":       capability,
@@ -1576,7 +1610,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			} else if !analysisResult.ShouldRetry {
 				// LLM determined this error is not fixable
 				if e.logger != nil {
-					e.logger.Info("LLM error analysis: not retryable", map[string]interface{}{
+					e.logger.InfoWithContext(ctx, "LLM error analysis: not retryable", map[string]interface{}{
 						"operation":   "error_analysis_no_retry",
 						"step_id":     step.StepID,
 						"capability":  capability,
@@ -1599,16 +1633,31 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				// LAYER 4: Contextual Re-Resolution (Semantic Retry)
 				// ErrorAnalyzer said "cannot fix" but it lacks source data.
 				// Try ContextualReResolver which has BOTH error AND source data.
+				// For independent steps (no dependencies), sourceData will be empty
+				// but the LLM still has UserQuery, ErrorResponse, and Capability schema.
 				// ============================================================
 				if e.contextualReResolver != nil && validationRetries < e.maxSemanticRetries {
-					// Collect source data from dependencies (same data MicroResolver had)
+					// Collect source data from dependencies (may be empty for independent steps)
 					sourceData := e.collectSourceDataFromDependencies(ctx, step.DependsOn)
 
-					if len(sourceData) > 0 {
+					// Check if semantic retry for independent steps is enabled
+					// When disabled, skip Layer 4 for steps without dependencies (old behavior)
+					if len(sourceData) == 0 && !e.semanticRetryForIndependentSteps {
+						if e.logger != nil {
+							e.logger.DebugWithContext(ctx, "Skipping semantic retry for independent step (disabled by config)", map[string]interface{}{
+								"step_id":    step.StepID,
+								"capability": capability,
+							})
+						}
+						// Skip to transient error handling below
+					} else {
+						// Track if this is an independent step for telemetry
+						isIndependentStep := len(sourceData) == 0
+
 						// Build execution context with full trajectory
 						execCtx := &ExecutionContext{
 							UserQuery:       step.Instruction,
-							SourceData:      sourceData,
+							SourceData:      sourceData, // May be empty {} for independent steps
 							StepID:          step.StepID,
 							Capability:      capabilitySchema,
 							AttemptedParams: parameters,
@@ -1630,20 +1679,31 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 								attribute.String("capability", capability),
 								attribute.String("analysis", reResult.Analysis),
 								attribute.String("corrected_params", string(correctedJSON)),
+								attribute.Bool("independent_step", isIndependentStep),
 							)
+
+							// Separate metric for independent step retries
+							if isIndependentStep {
+								telemetry.Counter("orchestration.semantic_retry.independent_step",
+									"capability", capability,
+									"module", telemetry.ModuleOrchestration,
+								)
+							}
+
 							telemetry.Counter("orchestration.semantic_retry.applied",
 								"capability", capability,
 								"module", telemetry.ModuleOrchestration,
 							)
 
 							if e.logger != nil {
-								e.logger.Info("SEMANTIC RETRY: Applying corrected parameters", map[string]interface{}{
+								e.logger.InfoWithContext(ctx, "SEMANTIC RETRY: Applying corrected parameters", map[string]interface{}{
 									"operation":            "semantic_retry_applied",
 									"step_id":              step.StepID,
 									"capability":           capability,
 									"analysis":             reResult.Analysis,
 									"corrected_parameters": reResult.CorrectedParameters,
 									"semantic_retry_count": validationRetries,
+									"independent_step":     isIndependentStep,
 								})
 							}
 
@@ -1655,10 +1715,11 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 						// Re-resolution failed or said don't retry
 						if reErr != nil && e.logger != nil {
-							e.logger.Warn("Semantic retry failed", map[string]interface{}{
-								"operation": "semantic_retry_failed",
-								"step_id":   step.StepID,
-								"error":     reErr.Error(),
+							e.logger.WarnWithContext(ctx, "Semantic retry failed", map[string]interface{}{
+								"operation":        "semantic_retry_failed",
+								"step_id":          step.StepID,
+								"error":            reErr.Error(),
+								"independent_step": isIndependentStep,
 							})
 						}
 					}
@@ -1674,7 +1735,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				if analysisResult.IsTransientError {
 					isTransientErrorDetected = true // Flag to skip isNonRetryableToolError check below
 					if e.logger != nil {
-						e.logger.Info("Transient error detected, continuing with resilience retry", map[string]interface{}{
+						e.logger.InfoWithContext(ctx, "Transient error detected, continuing with resilience retry", map[string]interface{}{
 							"operation":   "transient_error_resilience_retry",
 							"step_id":     step.StepID,
 							"capability":  capability,
@@ -1734,15 +1795,13 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			)
 
 			if e.logger != nil {
-				e.logger.Info("Type error detected, requesting LLM correction", map[string]interface{}{
+				e.logger.InfoWithContext(ctx, "Type error detected, requesting LLM correction", map[string]interface{}{
 					"operation":        "validation_feedback",
 					"step_id":          step.StepID,
 					"capability":       capability,
 					"validation_retry": validationRetries,
 					"max_retries":      e.maxValidationRetries,
 					"error":            err.Error(),
-					"trace_id":         tc.TraceID,
-					"span_id":          tc.SpanID,
 				})
 			}
 
@@ -1763,13 +1822,11 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				)
 
 				if e.logger != nil {
-					e.logger.Debug("Parameters corrected by LLM", map[string]interface{}{
+					e.logger.DebugWithContext(ctx, "Parameters corrected by LLM", map[string]interface{}{
 						"operation":  "validation_feedback_success",
 						"step_id":    step.StepID,
 						"capability": capability,
 						"new_params": correctedParams,
-						"trace_id":   tc.TraceID,
-						"span_id":    tc.SpanID,
 					})
 				}
 
@@ -1791,13 +1848,11 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			)
 
 			if e.logger != nil {
-				e.logger.Warn("LLM parameter correction failed", map[string]interface{}{
+				e.logger.WarnWithContext(ctx, "LLM parameter correction failed", map[string]interface{}{
 					"operation":  "validation_feedback_failed",
 					"step_id":    step.StepID,
 					"capability": capability,
 					"error":      corrErr.Error(),
-					"trace_id":   tc.TraceID,
-					"span_id":    tc.SpanID,
 				})
 			}
 		}
@@ -1820,14 +1875,12 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			)
 
 			if e.logger != nil {
-				e.logger.Info("Non-retryable error detected, stopping retries", map[string]interface{}{
+				e.logger.InfoWithContext(ctx, "Non-retryable error detected, stopping retries", map[string]interface{}{
 					"operation":  "non_retryable_error",
 					"step_id":    step.StepID,
 					"capability": capability,
 					"attempt":    attempt,
 					"error":      err.Error(),
-					"trace_id":   tc.TraceID,
-					"span_id":    tc.SpanID,
 				})
 			}
 
@@ -1849,13 +1902,11 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				"max_attempts": maxAttempts,
 				"error":        err.Error(),
 				"will_retry":   attempt < maxAttempts,
-				"trace_id":     tc.TraceID,
-				"span_id":      tc.SpanID,
 			}
 			if logLevel == "Error" {
-				e.logger.Error("Agent HTTP call failed after all retries", logData)
+				e.logger.ErrorWithContext(ctx, "Agent HTTP call failed after all retries", logData)
 			} else {
-				e.logger.Debug("Agent HTTP call failed, retrying", logData)
+				e.logger.DebugWithContext(ctx, "Agent HTTP call failed, retrying", logData)
 			}
 		}
 
@@ -1872,7 +1923,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		if attempt < maxAttempts {
 			retryDelay := time.Duration(attempt) * time.Second
 			if e.logger != nil {
-				e.logger.Debug("Waiting before retry", map[string]interface{}{
+				e.logger.DebugWithContext(ctx, "Waiting before retry", map[string]interface{}{
 					"operation":     "retry_delay",
 					"step_id":       step.StepID,
 					"agent_name":    step.AgentName,
@@ -1901,15 +1952,13 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 	}
 
 	if e.logger != nil {
-		e.logger.Debug("Step execution completed", map[string]interface{}{
+		e.logger.DebugWithContext(ctx, "Step execution completed", map[string]interface{}{
 			"operation":   "step_execution_complete",
 			"step_id":     step.StepID,
 			"agent_name":  step.AgentName,
 			"success":     result.Success,
 			"duration_ms": result.Duration.Milliseconds(),
 			"error":       result.Error,
-			"trace_id":    tc.TraceID,
-			"span_id":     tc.SpanID,
 		})
 	}
 
@@ -2324,7 +2373,7 @@ func extractHTTPStatusFromError(err error) int {
 func (e *SmartExecutor) callComponentWithBody(ctx context.Context, url string, body []byte) (string, string, error) {
 	// Log request details at DEBUG level
 	if e.logger != nil {
-		e.logger.Debug("HTTP request to component", map[string]interface{}{
+		e.logger.DebugWithContext(ctx, "HTTP request to component", map[string]interface{}{
 			"operation":   "component_http_request",
 			"url":         url,
 			"method":      "POST",
@@ -2392,7 +2441,7 @@ func (e *SmartExecutor) callTool(ctx context.Context, url string, parameters map
 	}
 
 	if e.logger != nil {
-		e.logger.Debug("Calling tool with raw parameters", map[string]interface{}{
+		e.logger.DebugWithContext(ctx, "Calling tool with raw parameters", map[string]interface{}{
 			"operation":  "call_tool",
 			"url":        url,
 			"parameters": parameters,
@@ -2414,7 +2463,7 @@ func (e *SmartExecutor) callAgentService(ctx context.Context, url string, parame
 	}
 
 	if e.logger != nil {
-		e.logger.Debug("Calling agent with wrapped parameters", map[string]interface{}{
+		e.logger.DebugWithContext(ctx, "Calling agent with wrapped parameters", map[string]interface{}{
 			"operation":  "call_agent_service",
 			"url":        url,
 			"parameters": parameters,

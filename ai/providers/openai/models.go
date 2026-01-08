@@ -44,6 +44,29 @@ type ErrorResponse struct {
 	} `json:"error"`
 }
 
+// StreamChoice represents a choice in a streaming response
+type StreamChoice struct {
+	Index        int         `json:"index"`
+	Delta        StreamDelta `json:"delta"`
+	FinishReason string      `json:"finish_reason,omitempty"`
+}
+
+// StreamDelta represents the delta content in a streaming chunk
+type StreamDelta struct {
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
+// StreamResponse represents a streaming response chunk from OpenAI API
+type StreamResponse struct {
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Created int64          `json:"created"`
+	Model   string         `json:"model"`
+	Choices []StreamChoice `json:"choices"`
+	Usage   *Usage         `json:"usage,omitempty"` // Only present in final chunk with stream_options
+}
+
 // ModelAliases maps common model aliases to provider-specific model names.
 // This enables portable model names across different OpenAI-compatible providers.
 // Updated December 2025 with latest model offerings from official documentation.
