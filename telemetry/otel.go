@@ -416,9 +416,9 @@ func (o *OTelProvider) doShutdown(ctx context.Context, logger *TelemetryLogger, 
 
 	if len(errs) > 0 {
 		logger.Error("OpenTelemetry provider shutdown completed with errors", map[string]interface{}{
-			"error_count":  len(errs),
-			"errors":       fmt.Sprintf("%v", errs),
-			"shutdown_ms":  time.Since(startTime).Milliseconds(),
+			"error_count": len(errs),
+			"errors":      fmt.Sprintf("%v", errs),
+			"shutdown_ms": time.Since(startTime).Milliseconds(),
 		})
 		return fmt.Errorf("shutdown errors: %v", errs)
 	}
@@ -439,9 +439,9 @@ func (o *OTelProvider) doShutdown(ctx context.Context, logger *TelemetryLogger, 
 // Used when provider is shutdown or not properly initialized
 type noOpSpan struct{}
 
-func (s *noOpSpan) End()                                 {}
+func (s *noOpSpan) End()                                       {}
 func (s *noOpSpan) SetAttribute(key string, value interface{}) {}
-func (s *noOpSpan) RecordError(err error)                {}
+func (s *noOpSpan) RecordError(err error)                      {}
 
 // otelSpan wraps an OpenTelemetry span to implement core.Span
 type otelSpan struct {

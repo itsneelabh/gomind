@@ -66,6 +66,10 @@ func TestCircuitBreakerThresholds(t *testing.T) {
 
 // TestCircuitBreakerSafeTypeAssertion tests safe type assertion
 func TestCircuitBreakerSafeTypeAssertion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping circuit breaker type assertion test in short mode (requires 1s+ sleep)")
+	}
+
 	config := CircuitConfig{
 		Enabled:      true,
 		MaxFailures:  3,

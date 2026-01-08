@@ -49,12 +49,12 @@ func (f *FrameworkMetricsRegistry) EmitWithContext(ctx context.Context, name str
 		}
 
 		f.logger.Debug("Framework context-aware emission", map[string]interface{}{
-			"metric_name":  name,
-			"value":        value,
-			"has_baggage":  len(baggage) > 0,
-			"request_id":   requestID,
-			"label_count":  len(labels) / 2,
-			"source":       "framework",
+			"metric_name": name,
+			"value":       value,
+			"has_baggage": len(baggage) > 0,
+			"request_id":  requestID,
+			"label_count": len(labels) / 2,
+			"source":      "framework",
 		})
 	}
 

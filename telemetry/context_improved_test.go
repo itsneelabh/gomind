@@ -347,6 +347,10 @@ func BenchmarkLabelPool(b *testing.B) {
 
 // TestLargeBaggagePerformance tests performance with maximum baggage
 func TestLargeBaggagePerformance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping large baggage performance test in short mode (benchmark test)")
+	}
+
 	// Fill baggage to near maximum
 	ctx := context.Background()
 	for i := 0; i < MaxBaggageItems-1; i++ {

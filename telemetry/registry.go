@@ -160,11 +160,11 @@ func Initialize(config Config) error {
 
 		// Log successful initialization
 		logger.Info("Telemetry system initialized successfully", map[string]interface{}{
-			"declared_modules":    declaredCount,
-			"circuit_enabled":     registry.circuit != nil,
-			"limiter_enabled":     registry.limiter != nil,
-			"provider_type":       "OpenTelemetry",
-			"initialization_ms":   time.Since(registry.startTime).Milliseconds(),
+			"declared_modules":     declaredCount,
+			"circuit_enabled":      registry.circuit != nil,
+			"limiter_enabled":      registry.limiter != nil,
+			"provider_type":        "OpenTelemetry",
+			"initialization_ms":    time.Since(registry.startTime).Milliseconds(),
 			"framework_integrated": true,
 		})
 	})

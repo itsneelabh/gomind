@@ -9,6 +9,10 @@ import (
 
 // TestCircuitBreakerLogging tests the logging functionality of circuit breaker
 func TestCircuitBreakerLogging(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping circuit breaker logging test in short mode (requires 1s+ sleep)")
+	}
+
 	// Create a buffer to capture logs
 	var buf bytes.Buffer
 

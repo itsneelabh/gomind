@@ -75,12 +75,12 @@ func (cb *TelemetryCircuitBreaker) Allow() bool {
 
 					// Log state transition to half-open
 					GetLogger().Info("Circuit breaker entering HALF-OPEN state", map[string]interface{}{
-						"previous_state":    "open",
-						"recovery_wait":     cb.config.RecoveryTime.String(),
+						"previous_state":     "open",
+						"recovery_wait":      cb.config.RecoveryTime.String(),
 						"time_since_failure": time.Since(lastFailure).String(),
-						"max_test_requests": cb.config.HalfOpenMax,
-						"action":            "Testing backend connectivity with limited requests",
-						"impact":            fmt.Sprintf("Up to %d test requests will be allowed", cb.config.HalfOpenMax),
+						"max_test_requests":  cb.config.HalfOpenMax,
+						"action":             "Testing backend connectivity with limited requests",
+						"impact":             fmt.Sprintf("Up to %d test requests will be allowed", cb.config.HalfOpenMax),
 					})
 				}
 				cb.mu.Unlock()
