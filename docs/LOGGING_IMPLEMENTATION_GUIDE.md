@@ -876,7 +876,7 @@ Every log message in GoMind includes a `component` field that identifies the sou
 
 | Category | Format | Examples |
 |----------|--------|----------|
-| Framework modules | `framework/<module>` | `framework/core`, `framework/orchestration`, `framework/resilience`, `framework/ai`, `framework/ui` |
+| Framework modules | `framework/<module>` | `framework/core`, `framework/orchestration`, `framework/resilience`, `framework/ai` |
 | Agents | `agent/<name>` | `agent/travel-research-agent`, `agent/research-agent-telemetry` |
 | Tools | `tool/<name>` | `tool/weather-service`, `tool/currency-service` |
 
@@ -1224,7 +1224,6 @@ When debugging, the `component` field tells you exactly where the log came from:
 | `framework/orchestration` | Orchestration (auto-wiring, execution, planning) | "Building execution plan", "Workflow execution complete" |
 | `framework/resilience` | Resilience patterns (retries, circuit breakers) | "Retry attempt 2/3", "Circuit breaker opened" |
 | `framework/ai` | AI module (LLM calls, prompts) | "AI request completed", "Token usage logged" |
-| `framework/ui` | UI module (sessions, registry, dashboard) | "Session created", "Registry updated" |
 
 ### Sample Log Output Analysis
 

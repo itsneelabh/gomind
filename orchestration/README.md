@@ -1299,13 +1299,155 @@ The service provider includes built-in resilience:
 5. **Timeouts** - Configure appropriate timeouts for your use case
 6. **Capability Provider** - Use service provider for 100s+ agents to avoid token overflow
 
+## 🌊 Streaming Support
+
+The orchestration module supports real-time streaming of AI responses, enabling SSE/WebSocket chat interfaces and lower time-to-first-token UX.
+
+### ProcessRequestStreaming
+
+Stream orchestration results token-by-token as the AI generates them:
+
+```go
+func (o *AIOrchestrator) ProcessRequestStreaming(
+    ctx context.Context,
+    query string,
+    tools []*ServiceInfo,
+    callback core.StreamCallback,
+) (*StreamingOrchestratorResponse, error)
+```
+
+### Basic Streaming Example
+
+```go
+// Stream orchestration results
+result, err := orchestrator.ProcessRequestStreaming(ctx,
+    "Analyze Tesla stock and recommend action",
+    nil, // Auto-discover tools
+    func(chunk core.StreamChunk) error {
+        if chunk.Content != "" {
+            fmt.Print(chunk.Content) // Print each token as it arrives
+        }
+        return nil
+    },
+)
+
+if err != nil {
+    log.Printf("Streaming failed: %v", err)
+    return
+}
+
+fmt.Printf("\n\nCompleted in %v\n", result.ExecutionTime)
+```
+
+### Streaming with SSE (Chat Agent)
+
+```go
+func (h *ChatHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    flusher := w.(http.Flusher)
+
+    // Set SSE headers
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+
+    var req ChatRequest
+    json.NewDecoder(r.Body).Decode(&req)
+
+    // Stream with per-step callbacks for real-time progress
+    ctx = orchestration.WithStepCallback(ctx,
+        func(stepIndex, totalSteps int, step orchestration.RoutingStep, stepResult orchestration.StepResult) {
+            // Send SSE event for each tool completion
+            data, _ := json.Marshal(map[string]interface{}{
+                "event":      "step",
+                "step_id":    stepIndex,
+                "tool":       step.AgentName,
+                "success":    stepResult.Success,
+                "duration_ms": stepResult.Duration.Milliseconds(),
+            })
+            fmt.Fprintf(w, "event: step\ndata: %s\n\n", data)
+            flusher.Flush()
+        },
+    )
+
+    // Stream the AI response
+    result, err := h.orchestrator.ProcessRequestStreaming(ctx, req.Message, nil,
+        func(chunk core.StreamChunk) error {
+            if chunk.Content != "" {
+                data, _ := json.Marshal(map[string]string{"text": chunk.Content})
+                fmt.Fprintf(w, "event: chunk\ndata: %s\n\n", data)
+                flusher.Flush()
+            }
+            return nil
+        },
+    )
+
+    if err != nil {
+        fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+        return
+    }
+
+    // Send completion event
+    fmt.Fprintf(w, "event: done\ndata: {\"request_id\": \"%s\"}\n\n", result.RequestID)
+}
+```
+
+> **Note:** This is a simplified example. For a production implementation with conversation history, session management, and proper error handling, see the [Chat Agent Implementation Guide](../docs/CHAT_AGENT_GUIDE.md).
+
+### StreamingOrchestratorResponse
+
+The response includes both standard orchestration fields and streaming-specific metadata:
+
+```go
+type StreamingOrchestratorResponse struct {
+    // Standard fields
+    Response        string            // Complete accumulated response
+    RequestID       string            // Unique request identifier
+    AgentsInvolved  []string          // Tools/agents used
+    Confidence      float64           // Orchestration confidence
+    ExecutionTime   time.Duration     // Total execution time
+    Steps           []StepResult      // Individual step results
+    Usage           *core.AIUsage     // Token usage statistics
+
+    // Streaming-specific fields
+    ChunksDelivered int               // Number of chunks delivered
+    StreamCompleted bool              // Whether streaming completed successfully
+    PartialContent  bool              // True if response is partial due to error
+    FinishReason    string            // Why streaming stopped
+}
+```
+
+### Step Callbacks for Real-Time Progress
+
+Use `WithStepCallback` to receive notifications as each tool completes:
+
+```go
+ctx = orchestration.WithStepCallback(ctx,
+    func(stepIndex, totalSteps int, step orchestration.RoutingStep, result orchestration.StepResult) {
+        log.Printf("Step %d/%d: %s completed in %v",
+            stepIndex+1, totalSteps,
+            step.AgentName, result.Duration)
+    },
+)
+```
+
+### When to Use Streaming
+
+| Scenario | Regular `ProcessRequest` | Streaming `ProcessRequestStreaming` |
+|----------|-------------------------|-------------------------------------|
+| API backend | ✅ Simpler | ❌ Overkill |
+| Chat UI | ⚠️ Poor UX | ✅ Real-time feedback |
+| Long-running queries | ⚠️ User waits | ✅ Immediate feedback |
+| Progress indicators | ❌ No visibility | ✅ Per-step updates |
+
+**For a complete production example** with SSE streaming, session management, and conversation history, see the [Chat Agent Implementation Guide](../docs/CHAT_AGENT_GUIDE.md).
+
 ## 🔮 Potential Enhancements
 
 These features are not yet implemented but could be added:
 - Visual workflow designer UI
 - Distributed workflow execution across nodes
-- Streaming response support
-- WebSocket for real-time updates
+- WebSocket transport for bidirectional streaming
 - Workflow versioning and migration tools
 - Custom capability provider implementations (e.g., GraphQL-based)
 
@@ -1320,6 +1462,8 @@ These features are not yet implemented but could be added:
 - `ServiceCapabilityConfig` - Configuration for service-based provider
 - `WorkflowDefinition` - YAML workflow structure
 - `ExecutionResult` - Execution results
+- `StreamingOrchestratorResponse` - Streaming response with accumulated content and metadata
+- `StepCallback` - Callback type for per-step progress notifications
 
 ### Key Functions
 - `CreateOrchestrator(config, deps)` - Create orchestrator with dependencies
@@ -1328,6 +1472,8 @@ These features are not yet implemented but could be added:
 - `NewAIOrchestrator(config, discovery, aiClient)` - Low-level orchestrator creation
 - `NewWorkflowEngine(discovery, stateStore, logger)` - Create workflow engine
 - `ProcessRequest(ctx, request, metadata)` - Process natural language request
+- `ProcessRequestStreaming(ctx, query, tools, callback)` - Stream orchestration response with real-time tokens
+- `WithStepCallback(ctx, callback)` - Add per-request step completion callback
 - `ExecuteWorkflow(ctx, workflow, inputs)` - Execute defined workflow
 - `ParseWorkflowYAML(data)` - Parse workflow from YAML
 
@@ -1505,11 +1651,15 @@ Retries with: {amount: 46828.5} ✅ SUCCESS!
 config := orchestration.DefaultConfig()
 
 // Semantic retry is enabled by default
-config.SemanticRetry.Enabled = true        // Default: true
-config.SemanticRetry.MaxAttempts = 2       // Default: 2
+config.SemanticRetry.Enabled = true                   // Default: true
+config.SemanticRetry.MaxAttempts = 2                  // Default: 2
+config.SemanticRetry.EnableForIndependentSteps = true // Default: true
 
 // Disable for cost-sensitive deployments
 config.SemanticRetry.Enabled = false
+
+// Disable only for independent steps (revert to old behavior)
+config.SemanticRetry.EnableForIndependentSteps = false
 ```
 
 **Environment Variables:**
@@ -1519,6 +1669,9 @@ export GOMIND_SEMANTIC_RETRY_ENABLED=true
 
 # Maximum retry attempts (default: 2)
 export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
+
+# Enable for independent steps - steps without dependencies (default: true)
+export GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS=true
 ```
 
 **When Semantic Retry Activates:**
@@ -1529,11 +1682,13 @@ export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
 | Tool returns 500 (server error) | ❌ No (handled by resilience) |
 | Tool returns 401 (auth error) | ❌ No (not retryable) |
 | Layer 3 successfully corrects | ❌ No (already fixed) |
-| No source data from dependencies | ❌ No (nothing to compute from) |
+| Independent step (no dependencies) with error | ✅ Yes (uses user query + error context) |
+| Independent step + `EnableForIndependentSteps=false` | ❌ No (disabled by config) |
 
 **Observability:**
 - Span events: `contextual_re_resolution.start`, `contextual_re_resolution.complete`
-- Metrics: `orchestration.semantic_retry.success`, `orchestration.semantic_retry.cannot_fix`
+- Span attributes: `independent_step` (bool) indicating step had no dependencies
+- Metrics: `orchestration.semantic_retry.success`, `orchestration.semantic_retry.cannot_fix`, `orchestration.semantic_retry.independent_step`
 - Full visibility in Jaeger traces
 
 **Key Insight:** Semantic Retry succeeds where static rules fail because it has access to:

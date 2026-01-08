@@ -594,6 +594,7 @@ Semantic Retry is an advanced error recovery feature that uses LLM analysis to c
 |----------|---------|--------|-------------|--------|
 | `GOMIND_SEMANTIC_RETRY_ENABLED` | `true` | **Implemented** | Enable Layer 4 semantic retry with LLM-based parameter re-computation | [orchestration/interfaces.go](../orchestration/interfaces.go) |
 | `GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS` | `2` | **Implemented** | Maximum semantic retry attempts per step (0 = disabled) | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS` | `true` | **Implemented** | Enable semantic retry for steps without dependencies (first steps, parallel steps) | [orchestration/interfaces.go](../orchestration/interfaces.go) |
 
 **How Semantic Retry Works:**
 
@@ -624,6 +625,9 @@ export GOMIND_SEMANTIC_RETRY_ENABLED=false
 
 # Or limit retry attempts
 export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=1
+
+# Disable only for independent steps (revert to old behavior)
+export GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS=false
 ```
 
 ### Example
@@ -644,6 +648,7 @@ export GOMIND_PLAN_RETRY_MAX=2
 # For semantic retry configuration (Layer 4)
 export GOMIND_SEMANTIC_RETRY_ENABLED=true
 export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
+export GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS=true
 ```
 
 ---

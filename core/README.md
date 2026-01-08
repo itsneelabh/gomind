@@ -253,6 +253,7 @@ With the rise of AI and Large Language Models (LLMs), we need:
 - **Configuration** - Environment-based config with validation
 - **Kubernetes support** - Automatic Service DNS resolution
 - **Error handling** - Comprehensive error types and recovery
+- **Streaming interfaces** - Types for real-time AI response streaming
 
 ### ❌ NOT Included (Bring Your Own):
 - **AI/LLM integration** - Add via the `ai` module
@@ -1333,6 +1334,94 @@ tool.RegisterCapability(core.Capability{
 - Logs from the same request are correlated via trace/request IDs
 - Works seamlessly with OpenTelemetry distributed tracing
 - Essential for debugging in production environments
+
+### 🌊 Streaming Interface: Real-Time AI Responses
+
+For chat agents and real-time AI applications, the core module provides streaming types that enable token-by-token delivery of AI responses.
+
+#### Core Streaming Types
+
+```go
+// StreamChunk represents a single chunk of streaming output
+type StreamChunk struct {
+    Content      string                 // The text content of this chunk
+    Done         bool                   // True if this is the final chunk
+    FinishReason string                 // Why generation stopped (e.g., "stop", "length")
+    Usage        *AIUsage               // Token usage (only on final chunk)
+    Error        error                  // Error if streaming failed
+    Metadata     map[string]interface{} // Provider-specific metadata
+}
+
+// StreamCallback is a function that receives streaming chunks
+type StreamCallback func(chunk StreamChunk) error
+```
+
+#### Using Streaming in Handlers
+
+```go
+// Example: SSE streaming endpoint for chat
+func (h *ChatHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    flusher := w.(http.Flusher)
+
+    // Set SSE headers
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+
+    // Stream AI response
+    err := h.aiClient.StreamResponse(ctx, prompt, nil,
+        func(chunk core.StreamChunk) error {
+            if chunk.Error != nil {
+                return chunk.Error
+            }
+
+            // Send each token via SSE
+            if chunk.Content != "" {
+                fmt.Fprintf(w, "data: %s\n\n", chunk.Content)
+                flusher.Flush()
+            }
+
+            // Handle completion
+            if chunk.Done {
+                fmt.Fprintf(w, "event: done\ndata: complete\n\n")
+                flusher.Flush()
+            }
+
+            return nil
+        },
+    )
+
+    if err != nil {
+        fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+    }
+}
+```
+
+#### StreamingAIClient Interface
+
+AI clients that support streaming implement this interface:
+
+```go
+// StreamingAIClient extends AIClient with streaming support
+type StreamingAIClient interface {
+    AIClient
+
+    // StreamResponse generates a streaming response
+    StreamResponse(ctx context.Context, prompt string, options *AIOptions, callback StreamCallback) error
+}
+```
+
+#### When to Use Streaming
+
+| Scenario | Non-Streaming | Streaming |
+|----------|---------------|-----------|
+| API backend | ✅ Simpler | ❌ Overkill |
+| Chat UI | ⚠️ Poor UX | ✅ Real-time feedback |
+| Long-running queries | ⚠️ User waits | ✅ Immediate feedback |
+| Token tracking | ✅ Simple | ✅ Final chunk includes usage |
+
+For complete streaming examples, see the [Chat Agent Guide](../docs/CHAT_AGENT_GUIDE.md) and the [ai/README.md](../ai/README.md#-streaming-support).
 
 ### 🔍 Telemetry Interface: Measure Everything
 

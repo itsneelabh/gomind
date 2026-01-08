@@ -1283,11 +1283,11 @@ Each provider implementation can offer different capabilities:
 
 ```go
 // Check if a provider supports streaming
-if streamer, ok := client.(ai.StreamingClient); ok {
-    stream, _ := streamer.StreamResponse(ctx, prompt, options)
-    for chunk := range stream {
+if streamer, ok := client.(ai.StreamingAIClient); ok {
+    err := streamer.StreamResponse(ctx, prompt, options, func(chunk core.StreamChunk) error {
         fmt.Print(chunk.Content)  // Real-time streaming
-    }
+        return nil
+    })
 }
 
 // Check if a provider supports embeddings
@@ -1295,6 +1295,216 @@ if embedder, ok := client.(ai.EmbeddingClient); ok {
     embeddings, _ := embedder.GenerateEmbeddings(ctx, text)
 }
 ```
+
+## 🌊 Streaming Support
+
+The AI module provides comprehensive streaming support across all providers. Streaming delivers AI responses token-by-token as they're generated, enabling real-time UX and lower time-to-first-token.
+
+### Core Streaming Types
+
+```go
+// From core/interfaces.go
+
+// StreamChunk represents a single chunk of streaming output
+type StreamChunk struct {
+    Content      string                 // The text content of this chunk
+    Done         bool                   // True if this is the final chunk
+    FinishReason string                 // Why generation stopped (e.g., "stop", "length")
+    Usage        *AIUsage               // Token usage (only on final chunk for most providers)
+    Error        error                  // Error if streaming failed
+    Metadata     map[string]interface{} // Provider-specific metadata
+}
+
+// StreamCallback is a function that receives streaming chunks
+type StreamCallback func(chunk StreamChunk) error
+```
+
+### StreamingAIClient Interface
+
+All providers implement the `StreamingAIClient` interface:
+
+```go
+// StreamingAIClient extends AIClient with streaming support
+type StreamingAIClient interface {
+    AIClient
+
+    // StreamResponse generates a streaming response
+    StreamResponse(ctx context.Context, prompt string, options *AIOptions, callback StreamCallback) error
+}
+```
+
+### Basic Streaming Example
+
+```go
+import (
+    "context"
+    "fmt"
+
+    "github.com/itsneelabh/gomind/ai"
+    "github.com/itsneelabh/gomind/core"
+    _ "github.com/itsneelabh/gomind/ai/providers/openai"
+)
+
+func main() {
+    client, _ := ai.NewClient()
+
+    // Stream response token-by-token
+    err := client.StreamResponse(
+        context.Background(),
+        "Explain quantum computing",
+        nil, // Use default options
+        func(chunk core.StreamChunk) error {
+            if chunk.Error != nil {
+                return chunk.Error
+            }
+
+            // Print each token as it arrives
+            fmt.Print(chunk.Content)
+
+            if chunk.Done {
+                fmt.Println("\n--- Stream complete ---")
+                if chunk.Usage != nil {
+                    fmt.Printf("Tokens used: %d\n", chunk.Usage.TotalTokens)
+                }
+            }
+
+            return nil
+        },
+    )
+
+    if err != nil {
+        fmt.Printf("Streaming failed: %v\n", err)
+    }
+}
+```
+
+### Streaming with Chain Client (Failover)
+
+The Chain Client supports streaming with automatic failover:
+
+```go
+// Create chain client with streaming support
+client, _ := ai.NewChainClient(
+    ai.WithProviderChain("openai", "openai.deepseek", "anthropic"),
+)
+
+// Stream with automatic failover
+err := client.StreamResponse(ctx, prompt, options, func(chunk core.StreamChunk) error {
+    fmt.Print(chunk.Content)
+    return nil
+})
+// If OpenAI fails, automatically tries DeepSeek, then Anthropic
+```
+
+### Streaming with Custom Options
+
+```go
+err := client.StreamResponse(
+    ctx,
+    "Write a short story",
+    &core.AIOptions{
+        Model:       "smart",           // Use model alias
+        Temperature: 0.8,               // More creative
+        MaxTokens:   2000,              // Longer response
+    },
+    func(chunk core.StreamChunk) error {
+        // Handle each chunk
+        if chunk.Content != "" {
+            sendToUI(chunk.Content)
+        }
+
+        // Check for finish reason
+        if chunk.FinishReason == "length" {
+            log.Warn("Response truncated due to max_tokens")
+        }
+
+        return nil
+    },
+)
+```
+
+### Canceling a Stream
+
+Use context cancellation to stop streaming mid-response:
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+
+go func() {
+    time.Sleep(5 * time.Second)
+    cancel() // Stop streaming after 5 seconds
+}()
+
+err := client.StreamResponse(ctx, prompt, nil, callback)
+if errors.Is(err, context.Canceled) {
+    fmt.Println("Stream was canceled")
+}
+```
+
+### Provider Streaming Support
+
+| Provider | Streaming | Notes |
+|----------|-----------|-------|
+| OpenAI | ✅ Full | Native streaming support |
+| Anthropic | ✅ Full | Native streaming support |
+| Gemini | ✅ Full | Native streaming support |
+| Bedrock | ✅ Full | Native streaming support |
+| Groq | ✅ Full | OpenAI-compatible streaming |
+| DeepSeek | ✅ Full | OpenAI-compatible streaming |
+| xAI | ✅ Full | OpenAI-compatible streaming |
+| Qwen | ✅ Full | OpenAI-compatible streaming |
+| Ollama | ✅ Full | OpenAI-compatible streaming |
+| Mock | ✅ Full | Simulates realistic streaming |
+
+### Streaming Best Practices
+
+1. **Handle errors in callback**: Return errors from your callback to stop streaming
+2. **Check `Done` flag**: Final chunk has `Done: true` and may include usage stats
+3. **Use context for cancellation**: Pass a cancellable context for user-initiated stops
+4. **Buffer UI updates**: Consider buffering chunks before updating UI for smoother experience
+5. **Track finish reason**: Check `FinishReason` to detect truncation or stop reasons
+
+```go
+// Best practice: Complete streaming handler
+func streamWithBestPractices(ctx context.Context, client core.StreamingAIClient, prompt string) error {
+    var totalContent strings.Builder
+
+    err := client.StreamResponse(ctx, prompt, nil, func(chunk core.StreamChunk) error {
+        // 1. Handle errors
+        if chunk.Error != nil {
+            return fmt.Errorf("stream error: %w", chunk.Error)
+        }
+
+        // 2. Accumulate content
+        totalContent.WriteString(chunk.Content)
+
+        // 3. Update UI (could buffer for smoother experience)
+        updateUI(chunk.Content)
+
+        // 4. Handle completion
+        if chunk.Done {
+            // 5. Track finish reason
+            if chunk.FinishReason == "length" {
+                log.Warn("Response was truncated")
+            }
+
+            // 6. Log usage
+            if chunk.Usage != nil {
+                log.Info("Streaming completed", map[string]interface{}{
+                    "total_tokens": chunk.Usage.TotalTokens,
+                    "content_length": totalContent.Len(),
+                })
+            }
+        }
+
+        return nil
+    })
+
+    return err
+}
+```
+
+**For a complete working example** of streaming in a production chat agent with SSE, session management, and conversation history, see the [Chat Agent Implementation Guide](../docs/CHAT_AGENT_GUIDE.md).
 
 ## 🎯 Common Use Cases
 

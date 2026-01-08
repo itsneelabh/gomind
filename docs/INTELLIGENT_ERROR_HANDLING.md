@@ -1059,7 +1059,10 @@ Semantic Retry (Layer 4) uses the **full execution trajectory** to compute corre
 | Tool returns 500 (server error) | ❌ No (handled by resilience module) |
 | Tool returns 401/403 (auth error) | ❌ No (not retryable) |
 | Layer 3 successfully corrects parameters | ❌ No (already fixed) |
-| No source data from dependent steps | ❌ No (nothing to compute from) |
+| Independent step (no dependencies) with error | ✅ Yes (uses user query + error context) |
+| Independent step + `EnableForIndependentSteps=false` | ❌ No (disabled by config) |
+
+**Note on Independent Steps:** Steps without dependencies (first steps, parallel steps) now trigger Semantic Retry by default. The LLM receives the user's original query and error context to suggest corrections, even without source data from dependent steps.
 
 ### Transient Error Handling (503 Timeouts)
 
@@ -1090,13 +1093,23 @@ This ensures that transient infrastructure errors don't fail permanently when a 
 ```go
 // Semantic retry is enabled by default
 config := orchestration.DefaultConfig()
-config.SemanticRetry.Enabled = true    // Default: true
-config.SemanticRetry.MaxAttempts = 2   // Default: 2
+config.SemanticRetry.Enabled = true                   // Default: true
+config.SemanticRetry.MaxAttempts = 2                  // Default: 2
+config.SemanticRetry.EnableForIndependentSteps = true // Default: true
 
 // Or via environment variables:
 // GOMIND_SEMANTIC_RETRY_ENABLED=true
 // GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
+// GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS=true
 ```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOMIND_SEMANTIC_RETRY_ENABLED` | `true` | Enable Layer 4 semantic retry |
+| `GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS` | `2` | Maximum semantic retry attempts per step |
+| `GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS` | `true` | Enable semantic retry for steps without dependencies |
 
 ### Observability
 
@@ -1105,6 +1118,7 @@ Semantic retry generates detailed telemetry:
 **Distributed Tracing (Jaeger/Tempo):**
 - `contextual_re_resolution.start` - When semantic retry begins
 - `contextual_re_resolution.complete` - Result with should_retry, analysis, parameter count
+- `independent_step` attribute - Boolean indicating step had no dependencies
 
 **Prometheus Metrics:**
 ```promql
@@ -1114,6 +1128,9 @@ sum(rate(orchestration_semantic_retry_attempts_total[5m]))
 
 # LLM latency for semantic retry
 histogram_quantile(0.95, orchestration_semantic_retry_llm_latency_ms)
+
+# Independent step semantic retries (new metric)
+sum(rate(orchestration_semantic_retry_independent_step_total[5m])) by (capability)
 ```
 
 ### The Complete Error Handling Stack

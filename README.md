@@ -685,10 +685,9 @@ graph TD
 import (
     "github.com/itsneelabh/gomind/core"          // Base agent (always needed)
     "github.com/itsneelabh/gomind/ai"            // Add if you need LLM integration
-    "github.com/itsneelabh/gomind/orchestration" // Add for multi-agent coordination  
+    "github.com/itsneelabh/gomind/orchestration" // Add for multi-agent coordination
     "github.com/itsneelabh/gomind/resilience"    // Add for circuit breakers
     "github.com/itsneelabh/gomind/telemetry"     // Add for metrics
-    "github.com/itsneelabh/gomind/ui"            // Add for chat interfaces and transports
 )
 ```
 
@@ -1108,11 +1107,10 @@ spec:
 ## Module Documentation
 
 - [Core Module](core/README.md) - Base agent implementation, discovery, capabilities
-- [AI Module](ai/README.md) - Multi-provider LLM integration with automatic failover, OpenAI-compatible providers (DeepSeek, Groq, Together AI), model aliases  
+- [AI Module](ai/README.md) - Multi-provider LLM integration with automatic failover, OpenAI-compatible providers (DeepSeek, Groq, Together AI), model aliases
 - [Orchestration Module](orchestration/README.md) - Multi-agent coordination and workflows
 - [Resilience Module](resilience/README.md) - Fault tolerance for agent operations
 - [Telemetry Module](telemetry/README.md) - Agent metrics, tracing, and observability
-- [UI Module](ui/README.md) - Chat interfaces, transports (WebSocket, SSE), session management
 
 ## Examples
 

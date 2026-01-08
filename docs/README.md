@@ -81,9 +81,6 @@ Each module is like a LEGO brick - small, focused, composable:
   
 - **[Orchestration](./modules/orchestration.md)** - Coordinate multiple agents (3MB)
   - Workflows, multi-agent systems
-  
-- **[UI](./modules/ui.md)** - Add chat interfaces (2MB)
-  - WebSocket, HTTP, SSE transports
 
 ### 🏭 Production Deployment
 - **[Production Guide](./guides/production.md)** - Deploy with confidence
