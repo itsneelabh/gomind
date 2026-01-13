@@ -380,8 +380,9 @@ func TestDependencyInjection(t *testing.T) {
 		Logger:         mockLog,
 	}
 
-	// Configure for service provider
+	// Configure for service provider (disable tiered to test service provider injection)
 	config := DefaultConfig()
+	config.EnableTieredResolution = false // Disable to test ServiceCapabilityProvider
 	config.CapabilityProviderType = "service"
 	config.CapabilityService.Endpoint = "http://test:8080"
 

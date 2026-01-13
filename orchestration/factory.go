@@ -157,6 +157,34 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		})
 	}
 
+	// Initialize TieredCapabilityProvider if enabled (token optimization)
+	// Priority: 1) Tiered (if enabled), 2) Service (if configured), 3) Default
+	var tieredProvider *TieredCapabilityProvider
+	if config.EnableTieredResolution {
+		tieredProvider = NewTieredCapabilityProvider(
+			orchestrator.catalog,
+			deps.AIClient,
+			&config.TieredResolution,
+		)
+		tieredProvider.SetLogger(deps.Logger)
+		tieredProvider.SetTelemetry(deps.Telemetry)
+		if deps.CircuitBreaker != nil {
+			tieredProvider.SetCircuitBreaker(deps.CircuitBreaker)
+		}
+		orchestrator.SetCapabilityProvider(tieredProvider)
+
+		factoryLogger.Info("Using TieredCapabilityProvider for token optimization", map[string]interface{}{
+			"operation": "capability_provider_initialization",
+			"min_tools": config.TieredResolution.MinToolsForTiering,
+			"enabled":   true,
+		})
+	} else {
+		factoryLogger.Debug("TieredCapabilityProvider disabled, using default capability provider", map[string]interface{}{
+			"operation": "capability_provider_initialization",
+			"enabled":   false,
+		})
+	}
+
 	// Configure LLM-based error analyzer if enabled (Layer 3: Error Analysis)
 	// This removes the need for tools to set Retryable flags - the LLM decides
 	if deps.EnableErrorAnalyzer && deps.AIClient != nil {
@@ -202,6 +230,11 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 			})
 		}
 		orchestrator.SetLLMDebugStore(config.LLMDebugStore)
+
+		// Propagate LLM debug store to TieredCapabilityProvider for tiered_selection recording
+		if tieredProvider != nil {
+			tieredProvider.SetLLMDebugStore(config.LLMDebugStore)
+		}
 	}
 
 	factoryLogger.Info("Orchestrator created successfully", map[string]interface{}{
@@ -339,5 +372,14 @@ func WithLLMDebugTTL(ttl time.Duration) OrchestratorOption {
 func WithLLMDebugErrorTTL(ttl time.Duration) OrchestratorOption {
 	return func(c *OrchestratorConfig) {
 		c.LLMDebug.ErrorTTL = ttl
+	}
+}
+
+// WithTieredResolution enables tiered capability resolution for token optimization.
+// This is recommended for deployments with 20+ tools.
+// Both tiers use the AI client's default model for simplicity.
+func WithTieredResolution(enabled bool) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.EnableTieredResolution = enabled
 	}
 }

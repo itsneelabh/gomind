@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,21 @@ type EnhancedCapability struct {
 	// Internal capabilities are still callable via HTTP but are excluded from
 	// the service catalog used for AI orchestration decisions.
 	Internal bool `json:"internal,omitempty"`
+
+	// Summary is a pre-computed 1-2 sentence description for Tier 1 selection.
+	// If empty, GetSummary() auto-generates from Description.
+	// Tools can set this explicitly for better selection accuracy.
+	Summary string `json:"summary,omitempty"`
+}
+
+// GetSummary returns the summary for Tier 1 selection.
+// If Summary is explicitly set, returns it. Otherwise, auto-generates
+// from the first 1-2 sentences of Description.
+func (c *EnhancedCapability) GetSummary() string {
+	if c.Summary != "" {
+		return c.Summary
+	}
+	return extractFirstSentences(c.Description, 2)
 }
 
 // Parameter describes an input parameter
@@ -517,4 +533,153 @@ func (c *AgentCatalog) FormatForLLM() string {
 	}
 
 	return output
+}
+
+// CapabilitySummary is a lightweight representation of a capability for Tier 1 selection.
+// It contains only the essential information needed to determine tool relevance.
+type CapabilitySummary struct {
+	// AgentName is the service name (used in execution plans)
+	AgentName string `json:"agent_name"`
+
+	// CapabilityName is the specific capability identifier
+	CapabilityName string `json:"capability_name"`
+
+	// Summary is a 1-2 sentence description of what this capability does
+	// This should be concise but informative enough for tool selection
+	Summary string `json:"summary"`
+
+	// Tags are optional categorization labels (e.g., "weather", "finance", "location")
+	Tags []string `json:"tags,omitempty"`
+}
+
+// GetCapabilitySummaries returns lightweight summaries of all capabilities.
+// This is used by TieredCapabilityProvider for Tier 1 tool selection.
+func (c *AgentCatalog) GetCapabilitySummaries() []CapabilitySummary {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var summaries []CapabilitySummary
+
+	for _, agent := range c.agents {
+		for _, cap := range agent.Capabilities {
+			// Skip internal capabilities
+			if cap.Internal {
+				continue
+			}
+
+			summaries = append(summaries, CapabilitySummary{
+				AgentName:      agent.Registration.Name,
+				CapabilityName: cap.Name,
+				Summary:        cap.GetSummary(),
+				Tags:           cap.Tags,
+			})
+		}
+	}
+
+	return summaries
+}
+
+// GetToolCount returns the total number of public capabilities.
+// Used to determine if tiered resolution should be used.
+func (c *AgentCatalog) GetToolCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	count := 0
+	for _, agent := range c.agents {
+		for _, cap := range agent.Capabilities {
+			if !cap.Internal {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// FormatToolsForLLM formats only the specified tools for LLM consumption.
+// Tool identifiers are in format "agent_name/capability_name".
+// This is used by TieredCapabilityProvider for Tier 2 schema retrieval.
+func (c *AgentCatalog) FormatToolsForLLM(toolIDs []string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Build lookup set for O(1) checking
+	toolSet := make(map[string]bool)
+	for _, id := range toolIDs {
+		toolSet[id] = true
+	}
+
+	var output strings.Builder
+	output.WriteString("Available Agents and Capabilities:\n\n")
+
+	for id, agent := range c.agents {
+		// Collect capabilities that match the selection
+		var matchingCaps []EnhancedCapability
+		for _, cap := range agent.Capabilities {
+			if cap.Internal {
+				continue
+			}
+
+			toolID := fmt.Sprintf("%s/%s", agent.Registration.Name, cap.Name)
+			if toolSet[toolID] {
+				matchingCaps = append(matchingCaps, cap)
+			}
+		}
+
+		// Skip agents with no matching capabilities
+		if len(matchingCaps) == 0 {
+			continue
+		}
+
+		// Format this agent and its matching capabilities
+		output.WriteString(fmt.Sprintf("Agent: %s (ID: %s)\n", agent.Registration.Name, id))
+		output.WriteString(fmt.Sprintf("  Address: http://%s:%d\n", agent.Registration.Address, agent.Registration.Port))
+
+		for _, cap := range matchingCaps {
+			output.WriteString(fmt.Sprintf("  - Capability: %s\n", cap.Name))
+			output.WriteString(fmt.Sprintf("    Description: %s\n", cap.Description))
+
+			if len(cap.Parameters) > 0 {
+				output.WriteString("    Parameters:\n")
+				for _, param := range cap.Parameters {
+					required := ""
+					if param.Required {
+						required = " (required)"
+					}
+					output.WriteString(fmt.Sprintf("      - %s: %s%s - %s\n",
+						param.Name, param.Type, required, param.Description))
+				}
+			}
+
+			if cap.Returns.Type != "" {
+				output.WriteString(fmt.Sprintf("    Returns: %s - %s\n",
+					cap.Returns.Type, cap.Returns.Description))
+			}
+		}
+		output.WriteString("\n")
+	}
+
+	return output.String()
+}
+
+// extractFirstSentences extracts the first N sentences from text.
+// Used for auto-generating capability summaries.
+func extractFirstSentences(text string, n int) string {
+	if text == "" {
+		return ""
+	}
+
+	// Simple sentence detection (handles ., !, ?)
+	sentences := 0
+	for i, r := range text {
+		if r == '.' || r == '!' || r == '?' {
+			sentences++
+			if sentences >= n {
+				return strings.TrimSpace(text[:i+1])
+			}
+		}
+	}
+
+	// Text has fewer sentences than requested
+	return strings.TrimSpace(text)
 }
