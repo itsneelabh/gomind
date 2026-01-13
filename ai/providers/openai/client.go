@@ -43,6 +43,15 @@ func NewClient(apiKey, baseURL, providerAlias string, logger core.Logger) *Clien
 	}
 }
 
+// getProviderName returns the provider name for AIResponse.
+// Falls back to "openai" if providerAlias is not set.
+func (c *Client) getProviderName() string {
+	if c.providerAlias == "" {
+		return "openai"
+	}
+	return c.providerAlias
+}
+
 // GenerateResponse generates a response using OpenAI
 func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
 	// Start distributed tracing span
@@ -212,8 +221,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	}
 
 	result := &core.AIResponse{
-		Content: openAIResp.Choices[0].Message.Content,
-		Model:   openAIResp.Model,
+		Content:  openAIResp.Choices[0].Message.Content,
+		Model:    openAIResp.Model,
+		Provider: c.getProviderName(),
 		Usage: core.TokenUsage{
 			PromptTokens:     openAIResp.Usage.PromptTokens,
 			CompletionTokens: openAIResp.Usage.CompletionTokens,
@@ -380,9 +390,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			// Return partial result with what we have
 			if fullContent.Len() > 0 {
 				return &core.AIResponse{
-					Content: fullContent.String(),
-					Model:   model,
-					Usage:   usage,
+					Content:  fullContent.String(),
+					Model:    model,
+					Provider: c.getProviderName(),
+					Usage:    usage,
 				}, core.ErrStreamPartiallyCompleted
 			}
 			return nil, ctx.Err()
@@ -398,9 +409,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			if fullContent.Len() > 0 {
 				span.SetAttribute("ai.stream_partial", true)
 				return &core.AIResponse{
-					Content: fullContent.String(),
-					Model:   model,
-					Usage:   usage,
+					Content:  fullContent.String(),
+					Model:    model,
+					Provider: c.getProviderName(),
+					Usage:    usage,
 				}, core.ErrStreamPartiallyCompleted
 			}
 			span.RecordError(err)
@@ -471,9 +483,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 					// Callback requested stop
 					span.SetAttribute("ai.stream_stopped_by_callback", true)
 					return &core.AIResponse{
-						Content: fullContent.String(),
-						Model:   model,
-						Usage:   usage,
+						Content:  fullContent.String(),
+						Model:    model,
+						Provider: c.getProviderName(),
+						Usage:    usage,
 					}, nil
 				}
 			}
@@ -498,9 +511,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	}
 
 	result := &core.AIResponse{
-		Content: fullContent.String(),
-		Model:   model,
-		Usage:   usage,
+		Content:  fullContent.String(),
+		Model:    model,
+		Provider: c.getProviderName(),
+		Usage:    usage,
 	}
 
 	// Add token usage to span for cost tracking

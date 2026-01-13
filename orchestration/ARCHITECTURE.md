@@ -17,6 +17,7 @@
 7. [Integration Patterns](#integration-patterns)
 8. [Capability Provider Architecture](#capability-provider-architecture)
 9. [Resilience & Fault Tolerance](#resilience--fault-tolerance)
+   - [LLM Debug Payload Store](#llm-debug-payload-store)
 10. [Performance & Scalability](#performance--scalability)
 11. [Production Deployment](#production-deployment)
 12. [Common Patterns & Examples](#common-patterns--examples)
@@ -191,7 +192,7 @@ module github.com/itsneelabh/gomind/orchestration
 require (
     github.com/itsneelabh/gomind/core v0.1.0
     github.com/itsneelabh/gomind/telemetry v0.1.0  // Allowed for observability
-    // NO direct imports of ai, resilience, or ui modules
+    // NO direct imports of ai or resilience modules
 )
 ```
 
@@ -1077,6 +1078,75 @@ GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
 ```
 
 For detailed design, see [SEMANTIC_RETRY_DESIGN.md](./notes/SEMANTIC_RETRY_DESIGN.md).
+
+### LLM Debug Payload Store
+
+The orchestration module includes a debug store that captures complete LLM request/response payloads for production debugging. This addresses the limitation of Jaeger spans which truncate large payloads.
+
+**Architecture:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    LLM Debug Store Architecture                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Recording Sites (6 total):                                      │
+│  ├── Orchestrator: plan_generation, correction, synthesis_streaming│
+│  ├── Synthesizer: synthesis                                      │
+│  ├── MicroResolver: micro_resolution                             │
+│  └── ContextualReResolver: semantic_retry                        │
+│                                                                  │
+│  Storage Layer:                                                  │
+│  ├── RedisLLMDebugStore (production) - Redis DB 7               │
+│  ├── MemoryLLMDebugStore (testing)                               │
+│  └── NoOpLLMDebugStore (disabled/fallback)                       │
+│                                                                  │
+│  Three-Layer Resilience:                                         │
+│  ├── Layer 1: Built-in retry (3 attempts, 50ms backoff)         │
+│  ├── Layer 2: Optional circuit breaker (via DI)                  │
+│  └── Layer 3: Automatic fallback to NoOp                         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Design Decisions:**
+- **Disabled by default**: Must explicitly enable via `GOMIND_LLM_DEBUG_ENABLED=true`
+- **Dedicated Redis DB**: Uses `core.RedisDBLLMDebug` (DB 7) to isolate debug data
+- **TTL-based cleanup**: 24h for success, 168h (7 days) for errors
+- **Async recording**: Uses goroutines with WaitGroup for non-blocking capture
+- **Graceful fallback**: Never fails orchestration if debug store fails
+
+**Configuration:**
+```bash
+# Enable debug capture (default: false)
+export GOMIND_LLM_DEBUG_ENABLED=true
+
+# TTL settings
+export GOMIND_LLM_DEBUG_TTL=24h       # Success records
+export GOMIND_LLM_DEBUG_ERROR_TTL=168h # Error records (7 days)
+
+# Redis database index
+export GOMIND_LLM_DEBUG_REDIS_DB=7
+```
+
+**Programmatic Usage:**
+```go
+deps := orchestration.OrchestratorDependencies{
+    Discovery: discovery,
+    AIClient:  aiClient,
+}
+
+// Enable debug capture
+orchestrator, _ := orchestration.CreateOrchestratorWithOptions(deps,
+    orchestration.WithLLMDebug(true),
+)
+
+// Or inject custom store
+orchestrator, _ := orchestration.CreateOrchestratorWithOptions(deps,
+    orchestration.WithLLMDebugStore(customStore),
+)
+```
+
+For detailed implementation, data model, and API reference, see [LLM_DEBUG_PAYLOAD_DESIGN.md](./notes/LLM_DEBUG_PAYLOAD_DESIGN.md).
 
 ### Implementation Checklist
 

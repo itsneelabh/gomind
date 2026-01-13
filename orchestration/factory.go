@@ -3,6 +3,7 @@ package orchestration
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/itsneelabh/gomind/core"
 	"github.com/itsneelabh/gomind/telemetry"
@@ -166,10 +167,48 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		})
 	}
 
+	// Initialize LLM Debug Store if enabled
+	// This provides full payload visibility for debugging orchestration issues.
+	// Disabled by default - enable via GOMIND_LLM_DEBUG_ENABLED=true or WithLLMDebug(true)
+	if config.LLMDebug.Enabled {
+		if config.LLMDebugStore == nil {
+			// Auto-configure Redis store from environment
+			store, err := NewRedisLLMDebugStore(
+				WithDebugRedisDB(config.LLMDebug.RedisDB),
+				WithDebugLogger(deps.Logger),
+				WithDebugTTL(config.LLMDebug.TTL),
+				WithDebugErrorTTL(config.LLMDebug.ErrorTTL),
+			)
+			if err != nil {
+				// Resilient behavior - use NoOp store if Redis unavailable
+				factoryLogger.Warn("Failed to initialize Redis LLM debug store, using NoOp", map[string]interface{}{
+					"operation": "llm_debug_store_initialization",
+					"error":     err.Error(),
+					"hint":      "Set REDIS_URL or GOMIND_REDIS_URL, or disable via GOMIND_LLM_DEBUG_ENABLED=false",
+				})
+				config.LLMDebugStore = NewNoOpLLMDebugStore()
+			} else {
+				config.LLMDebugStore = store
+				factoryLogger.Info("Redis LLM debug store initialized", map[string]interface{}{
+					"operation": "llm_debug_store_initialization",
+					"redis_db":  config.LLMDebug.RedisDB,
+					"ttl":       config.LLMDebug.TTL.String(),
+					"error_ttl": config.LLMDebug.ErrorTTL.String(),
+				})
+			}
+		} else {
+			factoryLogger.Info("Using custom LLM debug store", map[string]interface{}{
+				"operation": "llm_debug_store_initialization",
+			})
+		}
+		orchestrator.SetLLMDebugStore(config.LLMDebugStore)
+	}
+
 	factoryLogger.Info("Orchestrator created successfully", map[string]interface{}{
 		"operation":      "orchestrator_creation_complete",
 		"success":        true,
 		"error_analyzer": deps.EnableErrorAnalyzer,
+		"llm_debug":      config.LLMDebug.Enabled,
 	})
 
 	return orchestrator, nil
@@ -267,5 +306,38 @@ func WithCircuitBreaker(cb core.CircuitBreaker) func(*OrchestratorDependencies) 
 func WithLogger(logger core.Logger) func(*OrchestratorDependencies) {
 	return func(d *OrchestratorDependencies) {
 		d.Logger = logger
+	}
+}
+
+// WithLLMDebug enables or disables LLM debug payload storage.
+// When enabled without explicit store, auto-uses Redis from discovery if available.
+// Precedence: explicit config > REDIS_URL > GOMIND_REDIS_URL > discovery Redis
+func WithLLMDebug(enabled bool) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.LLMDebug.Enabled = enabled
+	}
+}
+
+// WithLLMDebugStore explicitly sets the debug store implementation.
+// Use this when you want a custom backend (PostgreSQL, S3, etc.)
+// Setting a store automatically enables LLM debug.
+func WithLLMDebugStore(store LLMDebugStore) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.LLMDebug.Enabled = true
+		c.LLMDebugStore = store
+	}
+}
+
+// WithLLMDebugTTL sets custom TTL for successful debug records.
+func WithLLMDebugTTL(ttl time.Duration) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.LLMDebug.TTL = ttl
+	}
+}
+
+// WithLLMDebugErrorTTL sets custom TTL for error debug records.
+func WithLLMDebugErrorTTL(ttl time.Duration) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.LLMDebug.ErrorTTL = ttl
 	}
 }

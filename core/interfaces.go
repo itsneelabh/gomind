@@ -74,9 +74,10 @@ type AIOptions struct {
 
 // AIResponse from AI client
 type AIResponse struct {
-	Content string
-	Model   string
-	Usage   TokenUsage
+	Content  string
+	Model    string
+	Provider string // Provider identifier (e.g., "openai", "openai.groq", "anthropic", "gemini", "bedrock")
+	Usage    TokenUsage
 }
 
 // TokenUsage for AI responses

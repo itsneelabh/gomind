@@ -24,10 +24,11 @@ This document provides a comprehensive reference for all environment variables s
 11. [Development Configuration](#development-configuration)
 12. [Kubernetes Configuration](#kubernetes-configuration)
 13. [Orchestration Configuration](#orchestration-configuration)
-14. [Async Task Configuration](#async-task-configuration)
-15. [Prompt Configuration](#prompt-configuration)
-16. [Example/Tool Specific Variables](#exampletool-specific-variables)
-17. [Quick Reference Table](#quick-reference-table)
+14. [LLM Debug Configuration](#llm-debug-configuration)
+15. [Async Task Configuration](#async-task-configuration)
+16. [Prompt Configuration](#prompt-configuration)
+17. [Example/Tool Specific Variables](#exampletool-specific-variables)
+18. [Quick Reference Table](#quick-reference-table)
 
 ---
 
@@ -653,6 +654,61 @@ export GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS=true
 
 ---
 
+## LLM Debug Configuration
+
+Configure LLM debug payload storage for debugging orchestration issues. This feature captures full LLM request/response payloads to help diagnose planning failures, parse errors, and unexpected AI behavior.
+
+> **Important**: This feature is **disabled by default** to minimize storage overhead. Enable only when debugging is needed.
+
+### LLM Debug Variables
+
+| Variable | Default | Status | Description | Source |
+|----------|---------|--------|-------------|--------|
+| `GOMIND_LLM_DEBUG_ENABLED` | `false` | **Implemented** | Enable LLM debug payload storage | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_LLM_DEBUG_TTL` | `24h` | **Implemented** | Retention period for successful debug records | [orchestration/redis_llm_debug_store.go](../orchestration/redis_llm_debug_store.go) |
+| `GOMIND_LLM_DEBUG_ERROR_TTL` | `168h` (7 days) | **Implemented** | Retention period for error debug records (longer for troubleshooting) | [orchestration/redis_llm_debug_store.go](../orchestration/redis_llm_debug_store.go) |
+| `GOMIND_LLM_DEBUG_REDIS_DB` | `7` | **Implemented** | Redis database number for debug storage (uses `core.RedisDBLLMDebug`) | [orchestration/redis_llm_debug_store.go](../orchestration/redis_llm_debug_store.go) |
+
+### How It Works
+
+When enabled, the orchestrator automatically captures:
+- **Request payloads**: Full prompts sent to the LLM
+- **Response payloads**: Complete LLM responses (parsed and raw)
+- **Timing metadata**: Duration, timestamps, retry attempts
+- **Error context**: Parse failures, validation errors with original content
+
+### Example: Enable Debug Storage
+
+```bash
+# Enable LLM debug storage
+export GOMIND_LLM_DEBUG_ENABLED=true
+
+# Increase retention for debugging (optional)
+export GOMIND_LLM_DEBUG_TTL=48h
+export GOMIND_LLM_DEBUG_ERROR_TTL=168h
+```
+
+### Example: Kubernetes Deployment
+
+```yaml
+env:
+  - name: GOMIND_LLM_DEBUG_ENABLED
+    value: "true"
+  - name: GOMIND_LLM_DEBUG_TTL
+    value: "48h"
+  - name: GOMIND_LLM_DEBUG_ERROR_TTL
+    value: "168h"
+```
+
+### Viewing Debug Records
+
+Use the Registry Viewer App to view captured debug records:
+1. Navigate to the "LLM Debug" tab in the sidebar
+2. Browse records by agent, timestamp, or status (success/error)
+3. Inspect full request/response payloads for troubleshooting
+
+---
+
 ## Async Task Configuration
 
 Configure asynchronous task processing for long-running operations. The async task system enables the HTTP 202 + Polling pattern for operations that may take minutes to complete.
@@ -843,6 +899,16 @@ export GOMIND_HTTP_READ_TIMEOUT=5m
 export GOMIND_DEV_MODE=true
 export GOMIND_MOCK_DISCOVERY=true
 export GOMIND_DEBUG=true
+```
+
+### LLM Debug Variables (for Troubleshooting)
+
+```bash
+# Enable debug payload storage (disabled by default)
+export GOMIND_LLM_DEBUG_ENABLED=true
+export GOMIND_LLM_DEBUG_TTL=24h           # Success record retention
+export GOMIND_LLM_DEBUG_ERROR_TTL=168h    # Error record retention (7 days)
+export GOMIND_LLM_DEBUG_REDIS_DB=7        # Redis database number
 ```
 
 ### Kubernetes ConfigMap Example

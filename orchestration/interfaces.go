@@ -293,6 +293,16 @@ type OrchestratorConfig struct {
 	// Layer 4: Semantic Retry Configuration
 	// When enabled, uses ContextualReResolver to fix errors that require computation
 	SemanticRetry SemanticRetryConfig `json:"semantic_retry,omitempty"`
+
+	// LLM Debug Payload Storage
+	// When enabled, stores complete LLM prompts/responses for debugging.
+	// Disabled by default. Enable via GOMIND_LLM_DEBUG_ENABLED=true or WithLLMDebug(true).
+	LLMDebug LLMDebugConfig `json:"llm_debug,omitempty"`
+
+	// LLMDebugStore is the storage backend for LLM debug payloads.
+	// If nil and LLMDebug.Enabled is true, auto-configures Redis from environment.
+	// Use WithLLMDebugStore() to inject a custom backend (PostgreSQL, S3, etc.).
+	LLMDebugStore LLMDebugStore `json:"-"` // Not serializable
 }
 
 // SemanticRetryConfig configures Layer 4 contextual re-resolution
@@ -385,6 +395,29 @@ func DefaultConfig() *OrchestratorConfig {
 	}
 	if independentSteps := os.Getenv("GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS"); independentSteps != "" {
 		config.SemanticRetry.EnableForIndependentSteps = strings.ToLower(independentSteps) == "true"
+	}
+
+	// LLM Debug Payload Storage defaults (disabled by default)
+	config.LLMDebug = DefaultLLMDebugConfig()
+
+	// LLM Debug configuration from environment
+	if enabled := os.Getenv("GOMIND_LLM_DEBUG_ENABLED"); enabled != "" {
+		config.LLMDebug.Enabled = strings.ToLower(enabled) == "true"
+	}
+	if ttl := os.Getenv("GOMIND_LLM_DEBUG_TTL"); ttl != "" {
+		if duration, err := time.ParseDuration(ttl); err == nil {
+			config.LLMDebug.TTL = duration
+		}
+	}
+	if errorTTL := os.Getenv("GOMIND_LLM_DEBUG_ERROR_TTL"); errorTTL != "" {
+		if duration, err := time.ParseDuration(errorTTL); err == nil {
+			config.LLMDebug.ErrorTTL = duration
+		}
+	}
+	if redisDB := os.Getenv("GOMIND_LLM_DEBUG_REDIS_DB"); redisDB != "" {
+		if val, err := strconv.Atoi(redisDB); err == nil && val >= 0 {
+			config.LLMDebug.RedisDB = val
+		}
 	}
 
 	return config

@@ -1107,10 +1107,17 @@ if metrics.ComponentCallsFailed > 10 {
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GOMIND_ORCHESTRATION_TIMEOUT` | `60s` | HTTP client timeout for tool/agent calls. For long-running AI workflows, set higher values (e.g., `5m`, `10m`). Uses Go duration format. |
+| `GOMIND_LLM_DEBUG_ENABLED` | `false` | Enable LLM debug payload capture for production debugging |
+| `GOMIND_LLM_DEBUG_TTL` | `24h` | TTL for successful debug records |
+| `GOMIND_LLM_DEBUG_ERROR_TTL` | `168h` | TTL for error debug records (7 days) |
+| `GOMIND_LLM_DEBUG_REDIS_DB` | `7` | Redis database index for debug storage |
 
 ```bash
 # Example: Allow 5 minutes for AI-heavy workflows
 export GOMIND_ORCHESTRATION_TIMEOUT=5m
+
+# Example: Enable LLM debug capture
+export GOMIND_LLM_DEBUG_ENABLED=true
 ```
 
 ### Programmatic Configuration
@@ -1697,6 +1704,44 @@ export GOMIND_SEMANTIC_RETRY_INDEPENDENT_STEPS=true
 3. **Error context** - knows exactly what went wrong
 
 This is the **same reasoning a human developer would apply** when debugging a failed API call, now automated by the framework.
+
+### LLM Debug Payload Store
+
+The orchestration module captures complete LLM request/response payloads for production debugging. Unlike Jaeger spans which truncate large payloads, the debug store preserves full prompts and responses.
+
+**Key Features:**
+- **Complete Payload Visibility**: No truncation of prompts or responses
+- **Request Correlation**: Query by `request_id` (trace ID or sequence number)
+- **6 Recording Sites**: `plan_generation`, `correction`, `synthesis`, `synthesis_streaming`, `micro_resolution`, `semantic_retry`
+- **Three-Layer Resilience**: Built-in retry → optional circuit breaker → NoOp fallback
+- **Provider Tracking**: Captures AI provider (openai, anthropic, gemini, bedrock)
+
+**Configuration:**
+```bash
+# Enable debug capture (disabled by default)
+export GOMIND_LLM_DEBUG_ENABLED=true
+
+# TTL for records (default: 24h success, 168h errors)
+export GOMIND_LLM_DEBUG_TTL=24h
+export GOMIND_LLM_DEBUG_ERROR_TTL=168h
+
+# Redis database (default: 7)
+export GOMIND_LLM_DEBUG_REDIS_DB=7
+```
+
+**Programmatic Configuration:**
+```go
+deps := orchestration.OrchestratorDependencies{
+    Discovery: discovery,
+    AIClient:  aiClient,
+}
+
+orchestrator, _ := orchestration.CreateOrchestratorWithOptions(deps,
+    orchestration.WithLLMDebug(true),  // Enable debug capture
+)
+```
+
+> 📖 **For detailed implementation, data model, and API reference, see [LLM_DEBUG_PAYLOAD_DESIGN.md](notes/LLM_DEBUG_PAYLOAD_DESIGN.md).**
 
 ### Comprehensive Logging System
 The orchestration module now includes production-grade logging for all operations:

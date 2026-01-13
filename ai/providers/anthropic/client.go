@@ -226,8 +226,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	}
 
 	result := &core.AIResponse{
-		Content: content,
-		Model:   anthropicResp.Model,
+		Content:  content,
+		Model:    anthropicResp.Model,
+		Provider: "anthropic",
 		Usage: core.TokenUsage{
 			PromptTokens:     anthropicResp.Usage.InputTokens,
 			CompletionTokens: anthropicResp.Usage.OutputTokens,
@@ -377,8 +378,9 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 		case <-ctx.Done():
 			if fullContent.Len() > 0 {
 				return &core.AIResponse{
-					Content: fullContent.String(),
-					Model:   model,
+					Content:  fullContent.String(),
+					Model:    model,
+					Provider: "anthropic",
 					Usage: core.TokenUsage{
 						PromptTokens:     inputTokens,
 						CompletionTokens: outputTokens,
@@ -398,8 +400,9 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			if fullContent.Len() > 0 {
 				span.SetAttribute("ai.stream_partial", true)
 				return &core.AIResponse{
-					Content: fullContent.String(),
-					Model:   model,
+					Content:  fullContent.String(),
+					Model:    model,
+					Provider: "anthropic",
 					Usage: core.TokenUsage{
 						PromptTokens:     inputTokens,
 						CompletionTokens: outputTokens,
@@ -467,8 +470,9 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 				if err := callback(chunk); err != nil {
 					span.SetAttribute("ai.stream_stopped_by_callback", true)
 					return &core.AIResponse{
-						Content: fullContent.String(),
-						Model:   model,
+						Content:  fullContent.String(),
+						Model:    model,
+						Provider: "anthropic",
 						Usage: core.TokenUsage{
 							PromptTokens:     inputTokens,
 							CompletionTokens: outputTokens,
@@ -509,8 +513,9 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	}
 
 	result := &core.AIResponse{
-		Content: fullContent.String(),
-		Model:   model,
+		Content:  fullContent.String(),
+		Model:    model,
+		Provider: "anthropic",
 		Usage: core.TokenUsage{
 			PromptTokens:     inputTokens,
 			CompletionTokens: outputTokens,

@@ -176,8 +176,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	// Build the response
 	result := &core.AIResponse{
-		Content: content,
-		Model:   options.Model,
+		Content:  content,
+		Model:    options.Model,
+		Provider: "bedrock",
 	}
 
 	// Add usage information if available
@@ -323,9 +324,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 						// Callback requested stop
 						span.SetAttribute("ai.stream_stopped_by_callback", true)
 						return &core.AIResponse{
-							Content: fullContent,
-							Model:   options.Model,
-							Usage:   usage,
+							Content:  fullContent,
+							Model:    options.Model,
+							Provider: "bedrock",
+							Usage:    usage,
 						}, nil
 					}
 				}
@@ -360,9 +362,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			if fullContent != "" {
 				span.SetAttribute("ai.stream_partial", true)
 				return &core.AIResponse{
-					Content: fullContent,
-					Model:   options.Model,
-					Usage:   usage,
+					Content:  fullContent,
+					Model:    options.Model,
+					Provider: "bedrock",
+					Usage:    usage,
 				}, core.ErrStreamPartiallyCompleted
 			}
 			span.RecordError(ctx.Err())
@@ -385,9 +388,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 		if fullContent != "" {
 			span.SetAttribute("ai.stream_partial", true)
 			return &core.AIResponse{
-				Content: fullContent,
-				Model:   options.Model,
-				Usage:   usage,
+				Content:  fullContent,
+				Model:    options.Model,
+				Provider: "bedrock",
+				Usage:    usage,
 			}, core.ErrStreamPartiallyCompleted
 		}
 		span.RecordError(err)
@@ -407,9 +411,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	}
 
 	result := &core.AIResponse{
-		Content: fullContent,
-		Model:   options.Model,
-		Usage:   usage,
+		Content:  fullContent,
+		Model:    options.Model,
+		Provider: "bedrock",
+		Usage:    usage,
 	}
 
 	// Add token usage to span

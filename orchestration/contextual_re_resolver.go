@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
@@ -60,6 +62,11 @@ type ReResolutionResult struct {
 type ContextualReResolver struct {
 	aiClient core.AIClient
 	logger   core.Logger
+
+	// LLM Debug Store for full payload visibility
+	debugStore LLMDebugStore
+	debugWg    sync.WaitGroup
+	debugSeqID atomic.Uint64
 }
 
 // NewContextualReResolver creates a new contextual re-resolver
@@ -112,6 +119,15 @@ func (r *ContextualReResolver) ReResolve(
 		"source_data_keys": getMapKeys(execCtx.SourceData),
 	})
 
+	// Get request ID from context baggage for debug correlation
+	requestID := ""
+	if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+		requestID = baggage["request_id"]
+	}
+	if requestID == "" {
+		requestID = r.generateFallbackRequestID()
+	}
+
 	startTime := time.Now()
 
 	// LLM generates corrected parameters with reasoning
@@ -138,12 +154,44 @@ func (r *ContextualReResolver) ReResolve(
 			"capability", execCtx.Capability.Name,
 			"module", telemetry.ModuleOrchestration,
 		)
+
+		// LLM Debug: Record failed semantic retry attempt
+		r.recordDebugInteraction(ctx, requestID, LLMInteraction{
+			Type:        "semantic_retry",
+			Timestamp:   startTime,
+			DurationMs:  duration.Milliseconds(),
+			Prompt:      prompt,
+			Temperature: 0.0,
+			MaxTokens:   1000,
+			Success:     false,
+			Error:       err.Error(),
+			Attempt:     execCtx.RetryCount + 1,
+		})
+
 		r.logWarn("Re-resolution LLM call failed", map[string]interface{}{
 			"error":       err.Error(),
 			"duration_ms": duration.Milliseconds(),
 		})
 		return nil, fmt.Errorf("re-resolution LLM call failed: %w", err)
 	}
+
+	// LLM Debug: Record successful semantic retry
+	r.recordDebugInteraction(ctx, requestID, LLMInteraction{
+		Type:             "semantic_retry",
+		Timestamp:        startTime,
+		DurationMs:       duration.Milliseconds(),
+		Prompt:           prompt,
+		Temperature:      0.0,
+		MaxTokens:        1000,
+		Model:            response.Model,
+		Provider:         response.Provider,
+		Response:         response.Content,
+		PromptTokens:     response.Usage.PromptTokens,
+		CompletionTokens: response.Usage.CompletionTokens,
+		TotalTokens:      response.Usage.TotalTokens,
+		Success:          true,
+		Attempt:          execCtx.RetryCount + 1,
+	})
 
 	// Parse structured response
 	result, parseErr := r.parseReResolutionResponse(response.Content)
@@ -333,5 +381,56 @@ func (r *ContextualReResolver) logInfo(msg string, fields map[string]interface{}
 func (r *ContextualReResolver) logWarn(msg string, fields map[string]interface{}) {
 	if r.logger != nil {
 		r.logger.Warn(msg, fields)
+	}
+}
+
+// SetLLMDebugStore sets the LLM debug store for full payload visibility.
+func (r *ContextualReResolver) SetLLMDebugStore(store LLMDebugStore) {
+	r.debugStore = store
+}
+
+// recordDebugInteraction stores an LLM interaction for debugging.
+// Uses WaitGroup to track in-flight recordings for graceful shutdown.
+func (r *ContextualReResolver) recordDebugInteraction(ctx context.Context, requestID string, interaction LLMInteraction) {
+	if r.debugStore == nil {
+		return
+	}
+
+	r.debugWg.Add(1)
+	go func() {
+		defer r.debugWg.Done()
+
+		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := r.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {
+			r.logWarn("Failed to record LLM debug interaction", map[string]interface{}{
+				"request_id": requestID,
+				"type":       interaction.Type,
+				"error":      err.Error(),
+			})
+		}
+	}()
+}
+
+// generateFallbackRequestID generates a request ID when TraceID is not available.
+func (r *ContextualReResolver) generateFallbackRequestID() string {
+	seq := r.debugSeqID.Add(1)
+	return fmt.Sprintf("reresolver-%d-%d", time.Now().UnixNano(), seq)
+}
+
+// Shutdown waits for pending debug recordings to complete.
+func (r *ContextualReResolver) Shutdown(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		r.debugWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
@@ -30,6 +31,14 @@ type AIOrchestrator struct {
 	// Prompt builder for extensible prompt customization (Layer 1-3)
 	// If nil, uses the hardcoded default prompt for backwards compatibility
 	promptBuilder PromptBuilder
+
+	// LLM Debug Store for full payload visibility
+	// When enabled, stores complete prompts/responses for debugging
+	debugStore LLMDebugStore
+	// debugWg tracks in-flight debug recording goroutines for graceful shutdown
+	debugWg sync.WaitGroup
+	// debugSeqID provides fallback correlation IDs when TraceID is not available
+	debugSeqID atomic.Uint64
 
 	// Observability (follows framework design principles)
 	telemetry core.Telemetry // For metrics and tracing
@@ -218,6 +227,124 @@ func (o *AIOrchestrator) SetErrorAnalyzer(analyzer *ErrorAnalyzer) {
 	}
 }
 
+// SetLLMDebugStore sets the LLM debug store for full payload visibility.
+// When configured, complete LLM prompts and responses are stored for debugging.
+// This enables operators to see exactly what was sent to and received from the LLM.
+// The store is propagated to all sub-components that make LLM calls:
+// synthesizer, micro_resolver, and contextual_re_resolver.
+// See orchestration/notes/LLM_DEBUG_PAYLOAD_DESIGN.md for design rationale.
+func (o *AIOrchestrator) SetLLMDebugStore(store LLMDebugStore) {
+	if store == nil {
+		return
+	}
+
+	o.debugStore = store
+
+	// Propagate to synthesizer
+	if o.synthesizer != nil {
+		o.synthesizer.SetLLMDebugStore(store)
+	}
+
+	// Propagate to executor's sub-components
+	if o.executor != nil {
+		// Propagate to HybridResolver's MicroResolver
+		if o.executor.hybridResolver != nil && o.executor.hybridResolver.microResolver != nil {
+			o.executor.hybridResolver.microResolver.SetLLMDebugStore(store)
+		}
+		// Propagate to ContextualReResolver
+		if o.executor.contextualReResolver != nil {
+			o.executor.contextualReResolver.SetLLMDebugStore(store)
+		}
+	}
+
+	if o.logger != nil {
+		o.logger.Info("LLM debug store configured", map[string]interface{}{
+			"operation": "set_llm_debug_store",
+		})
+	}
+}
+
+// GetLLMDebugStore returns the configured LLM debug store (for API handlers).
+func (o *AIOrchestrator) GetLLMDebugStore() LLMDebugStore {
+	return o.debugStore
+}
+
+// recordDebugInteraction stores an LLM interaction for debugging.
+// Runs asynchronously to avoid blocking orchestration. Errors are logged, not propagated.
+// Uses WaitGroup to track in-flight recordings for graceful shutdown.
+// This follows FRAMEWORK_DESIGN_PRINCIPLES.md: Resilient Runtime Behavior.
+func (o *AIOrchestrator) recordDebugInteraction(ctx context.Context, requestID string, interaction LLMInteraction) {
+	if o.debugStore == nil {
+		return
+	}
+
+	// Track this goroutine for graceful shutdown
+	o.debugWg.Add(1)
+
+	// Run async to avoid blocking orchestration
+	go func() {
+		defer o.debugWg.Done()
+
+		// Use background context with timeout to ensure recording completes
+		// even if the request context is cancelled.
+		// Note: We use background context because the original request context
+		// may be cancelled, but we still want debug recording to complete.
+		// The requestID provides correlation with the original request.
+		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := o.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {
+			// Log but don't fail - debug is observability, not critical path
+			if o.logger != nil {
+				o.logger.Warn("Failed to record LLM debug interaction", map[string]interface{}{
+					"request_id": requestID,
+					"type":       interaction.Type,
+					"error":      err.Error(),
+				})
+			}
+		}
+	}()
+}
+
+// Shutdown gracefully shuts down the orchestrator, waiting for pending debug recordings.
+// This follows FRAMEWORK_DESIGN_PRINCIPLES.md: Component Lifecycle Rules.
+func (o *AIOrchestrator) Shutdown(ctx context.Context) error {
+	// Stop background operations first
+	o.cancel()
+
+	// Wait for pending debug recordings with timeout
+	done := make(chan struct{})
+	go func() {
+		o.debugWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if o.logger != nil {
+			o.logger.Info("Orchestrator shutdown complete", map[string]interface{}{
+				"operation": "shutdown",
+			})
+		}
+		return nil
+	case <-ctx.Done():
+		if o.logger != nil {
+			o.logger.Warn("Orchestrator shutdown timed out, some debug recordings may be lost", map[string]interface{}{
+				"operation": "shutdown",
+				"error":     ctx.Err().Error(),
+			})
+		}
+		return ctx.Err()
+	}
+}
+
+// generateFallbackRequestID generates a request ID when TraceID is not available.
+// Uses atomic counter for uniqueness.
+func (o *AIOrchestrator) generateFallbackRequestID() string {
+	seq := o.debugSeqID.Add(1)
+	return fmt.Sprintf("debug-%d-%d", time.Now().UnixNano(), seq)
+}
+
 // requestParameterCorrection asks the LLM to fix parameters based on type error feedback.
 // This is the Layer 3 (Validation Feedback) mechanism that enables recovery from type errors
 // that slip through Layers 1 and 2.
@@ -286,11 +413,49 @@ Respond with ONLY the corrected JSON parameters object. No explanation, no markd
 		})
 	}
 
+	// Get request ID from context baggage for debug correlation
+	requestID := ""
+	if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+		requestID = baggage["request_id"]
+	}
+	if requestID == "" {
+		requestID = o.generateFallbackRequestID()
+	}
+
 	// Call LLM for correction
+	llmStartTime := time.Now()
 	response, err := o.aiClient.GenerateResponse(ctx, correctionPrompt, nil)
+	llmDuration := time.Since(llmStartTime)
+
 	if err != nil {
+		// LLM Debug: Record failed correction attempt
+		o.recordDebugInteraction(ctx, requestID, LLMInteraction{
+			Type:       "correction",
+			Timestamp:  llmStartTime,
+			DurationMs: llmDuration.Milliseconds(),
+			Prompt:     correctionPrompt,
+			Success:    false,
+			Error:      err.Error(),
+			Attempt:    1,
+		})
 		return nil, fmt.Errorf("LLM correction request failed: %w", err)
 	}
+
+	// LLM Debug: Record successful correction attempt
+	o.recordDebugInteraction(ctx, requestID, LLMInteraction{
+		Type:             "correction",
+		Timestamp:        llmStartTime,
+		DurationMs:       llmDuration.Milliseconds(),
+		Prompt:           correctionPrompt,
+		Response:         response.Content,
+		Model:            response.Model,
+		Provider:         response.Provider,
+		PromptTokens:     response.Usage.PromptTokens,
+		CompletionTokens: response.Usage.CompletionTokens,
+		TotalTokens:      response.Usage.TotalTokens,
+		Success:          true,
+		Attempt:          1,
+	})
 
 	// Extract JSON from response (handle potential markdown wrapping)
 	content := response.Content
@@ -688,6 +853,10 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 	}
 
 	// Stream the synthesis response
+	// Capture start time for LLM debug recording
+	synthesisStart := time.Now()
+	systemPrompt := "You are a helpful assistant synthesizing responses from multiple agents."
+
 	var fullContent strings.Builder
 	chunkIndex := 0
 	var finishReason string
@@ -706,12 +875,32 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 	aiResponse, err := streamingClient.StreamResponse(ctx, synthesisPrompt, &core.AIOptions{
 		Temperature:  0.7,
 		MaxTokens:    2000,
-		SystemPrompt: "You are a helpful assistant synthesizing responses from multiple agents.",
+		SystemPrompt: systemPrompt,
 	}, streamCallback)
 
 	// Handle streaming errors
 	if err != nil {
 		if err == core.ErrStreamPartiallyCompleted {
+			// LLM Debug: Record partial streaming synthesis (interrupted but has content)
+			o.recordDebugInteraction(ctx, requestID, LLMInteraction{
+				Type:             "synthesis_streaming",
+				Timestamp:        synthesisStart,
+				DurationMs:       time.Since(synthesisStart).Milliseconds(),
+				Prompt:           synthesisPrompt,
+				SystemPrompt:     systemPrompt,
+				Temperature:      0.7,
+				MaxTokens:        2000,
+				Model:            aiResponse.Model,
+				Provider:         aiResponse.Provider,
+				Response:         aiResponse.Content,
+				PromptTokens:     aiResponse.Usage.PromptTokens,     // May be partial
+				CompletionTokens: aiResponse.Usage.CompletionTokens, // May be partial
+				TotalTokens:      aiResponse.Usage.TotalTokens,      // May be partial
+				Success:          true,                              // Partial success - we have content
+				Error:            "stream partially completed",
+				Attempt:          1,
+			})
+
 			return &StreamingOrchestratorResponse{
 				OrchestratorResponse: OrchestratorResponse{
 					RequestID:       requestID,
@@ -730,6 +919,20 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 				FinishReason:    "cancelled",
 			}, nil
 		}
+
+		// LLM Debug: Record failed streaming synthesis
+		o.recordDebugInteraction(ctx, requestID, LLMInteraction{
+			Type:         "synthesis_streaming",
+			Timestamp:    synthesisStart,
+			DurationMs:   time.Since(synthesisStart).Milliseconds(),
+			Prompt:       synthesisPrompt,
+			SystemPrompt: systemPrompt,
+			Temperature:  0.7,
+			MaxTokens:    2000,
+			Success:      false,
+			Error:        err.Error(),
+			Attempt:      1,
+		})
 
 		return nil, fmt.Errorf("synthesis streaming failed: %w", err)
 	}
@@ -762,6 +965,25 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 			"duration_ms":      time.Since(startTime).Milliseconds(),
 		})
 	}
+
+	// LLM Debug: Record successful streaming synthesis
+	o.recordDebugInteraction(ctx, requestID, LLMInteraction{
+		Type:             "synthesis_streaming",
+		Timestamp:        synthesisStart,
+		DurationMs:       time.Since(synthesisStart).Milliseconds(),
+		Prompt:           synthesisPrompt,
+		SystemPrompt:     systemPrompt,
+		Temperature:      0.7,
+		MaxTokens:        2000,
+		Model:            aiResponse.Model,
+		Provider:         aiResponse.Provider,
+		Response:         aiResponse.Content,
+		PromptTokens:     aiResponse.Usage.PromptTokens,
+		CompletionTokens: aiResponse.Usage.CompletionTokens,
+		TotalTokens:      aiResponse.Usage.TotalTokens,
+		Success:          true,
+		Attempt:          1,
+	})
 
 	return response, nil
 }
@@ -867,6 +1089,21 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 				"module", telemetry.ModuleOrchestration, "status", "error")
 			telemetry.Counter("plan_generation.total",
 				"module", telemetry.ModuleOrchestration, "status", "error")
+
+			// LLM Debug: Record failed interaction (includes prompt for debugging)
+			o.recordDebugInteraction(ctx, requestID, LLMInteraction{
+				Type:         "plan_generation",
+				Timestamp:    llmStartTime,
+				DurationMs:   llmDuration.Milliseconds(),
+				Prompt:       prompt,
+				SystemPrompt: "You are an intelligent orchestrator that creates execution plans for multi-agent systems.",
+				Temperature:  0.3,
+				MaxTokens:    2000,
+				Success:      false,
+				Error:        err.Error(),
+				Attempt:      attempt,
+			})
+
 			return nil, err
 		}
 
@@ -892,6 +1129,25 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 			"input", int64(aiResponse.Usage.PromptTokens))
 		telemetry.RecordAITokens(telemetry.ModuleOrchestration, "plan_generation",
 			"output", int64(aiResponse.Usage.CompletionTokens))
+
+		// LLM Debug: Record successful interaction with full prompt and response
+		o.recordDebugInteraction(ctx, requestID, LLMInteraction{
+			Type:             "plan_generation",
+			Timestamp:        llmStartTime,
+			DurationMs:       llmDuration.Milliseconds(),
+			Prompt:           prompt,
+			SystemPrompt:     "You are an intelligent orchestrator that creates execution plans for multi-agent systems.",
+			Temperature:      0.3,
+			MaxTokens:        2000,
+			Model:            aiResponse.Model,
+			Provider:         aiResponse.Provider,
+			Response:         aiResponse.Content,
+			PromptTokens:     aiResponse.Usage.PromptTokens,
+			CompletionTokens: aiResponse.Usage.CompletionTokens,
+			TotalTokens:      aiResponse.Usage.TotalTokens,
+			Success:          true,
+			Attempt:          attempt,
+		})
 
 		if o.logger != nil {
 			o.logger.DebugWithContext(ctx, "LLM response received", map[string]interface{}{

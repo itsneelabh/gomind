@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
@@ -16,6 +18,12 @@ import (
 type AISynthesizer struct {
 	aiClient core.AIClient
 	strategy SynthesisStrategy
+	logger   core.Logger
+
+	// LLM Debug Store for full payload visibility
+	debugStore LLMDebugStore
+	debugWg    sync.WaitGroup
+	debugSeqID atomic.Uint64
 }
 
 // NewAISynthesizer creates a new AI-powered synthesizer
@@ -44,6 +52,7 @@ func (s *AISynthesizer) Synthesize(ctx context.Context, request string, results 
 func (s *AISynthesizer) synthesizeWithLLM(ctx context.Context, request string, results *ExecutionResult) (string, error) {
 	// Build prompt with all agent responses
 	prompt := s.buildSynthesisPrompt(request, results)
+	systemPrompt := "You are an AI that synthesizes multiple agent responses into coherent, helpful answers."
 
 	// Telemetry: Record LLM prompt for synthesis
 	telemetry.AddSpanEvent(ctx, "llm.synthesis.request",
@@ -55,12 +64,21 @@ func (s *AISynthesizer) synthesizeWithLLM(ctx context.Context, request string, r
 		attribute.Int("max_tokens", 1500),
 	)
 
+	// Get request ID from context baggage for debug correlation
+	requestID := ""
+	if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+		requestID = baggage["request_id"]
+	}
+	if requestID == "" {
+		requestID = s.generateFallbackRequestID()
+	}
+
 	// Call LLM for synthesis
 	llmStartTime := time.Now()
 	aiResponse, err := s.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
 		Temperature:  0.5, // Balanced creativity
 		MaxTokens:    1500,
-		SystemPrompt: "You are an AI that synthesizes multiple agent responses into coherent, helpful answers.",
+		SystemPrompt: systemPrompt,
 	})
 	llmDuration := time.Since(llmStartTime)
 
@@ -69,6 +87,21 @@ func (s *AISynthesizer) synthesizeWithLLM(ctx context.Context, request string, r
 			attribute.String("error", err.Error()),
 			attribute.Int64("duration_ms", llmDuration.Milliseconds()),
 		)
+
+		// LLM Debug: Record failed synthesis attempt
+		s.recordDebugInteraction(ctx, requestID, LLMInteraction{
+			Type:         "synthesis",
+			Timestamp:    llmStartTime,
+			DurationMs:   llmDuration.Milliseconds(),
+			Prompt:       prompt,
+			SystemPrompt: systemPrompt,
+			Temperature:  0.5,
+			MaxTokens:    1500,
+			Success:      false,
+			Error:        err.Error(),
+			Attempt:      1,
+		})
+
 		return "", fmt.Errorf("synthesis failed: %w", err)
 	}
 
@@ -81,6 +114,25 @@ func (s *AISynthesizer) synthesizeWithLLM(ctx context.Context, request string, r
 		attribute.Int("total_tokens", aiResponse.Usage.TotalTokens),
 		attribute.Int64("duration_ms", llmDuration.Milliseconds()),
 	)
+
+	// LLM Debug: Record successful synthesis
+	s.recordDebugInteraction(ctx, requestID, LLMInteraction{
+		Type:             "synthesis",
+		Timestamp:        llmStartTime,
+		DurationMs:       llmDuration.Milliseconds(),
+		Prompt:           prompt,
+		SystemPrompt:     systemPrompt,
+		Temperature:      0.5,
+		MaxTokens:        1500,
+		Model:            aiResponse.Model,
+		Provider:         aiResponse.Provider,
+		Response:         aiResponse.Content,
+		PromptTokens:     aiResponse.Usage.PromptTokens,
+		CompletionTokens: aiResponse.Usage.CompletionTokens,
+		TotalTokens:      aiResponse.Usage.TotalTokens,
+		Success:          true,
+		Attempt:          1,
+	})
 
 	return aiResponse.Content, nil
 }
@@ -196,6 +248,72 @@ func (s *AISynthesizer) synthesizeSimple(results *ExecutionResult) (string, erro
 // SetStrategy sets the synthesis strategy
 func (s *AISynthesizer) SetStrategy(strategy SynthesisStrategy) {
 	s.strategy = strategy
+}
+
+// SetLogger sets the logger for the synthesizer.
+func (s *AISynthesizer) SetLogger(logger core.Logger) {
+	if logger == nil {
+		s.logger = nil
+	} else {
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			s.logger = cal.WithComponent("framework/orchestration")
+		} else {
+			s.logger = logger
+		}
+	}
+}
+
+// SetLLMDebugStore sets the LLM debug store for full payload visibility.
+func (s *AISynthesizer) SetLLMDebugStore(store LLMDebugStore) {
+	s.debugStore = store
+}
+
+// recordDebugInteraction stores an LLM interaction for debugging.
+// Uses WaitGroup to track in-flight recordings for graceful shutdown.
+func (s *AISynthesizer) recordDebugInteraction(ctx context.Context, requestID string, interaction LLMInteraction) {
+	if s.debugStore == nil {
+		return
+	}
+
+	s.debugWg.Add(1)
+	go func() {
+		defer s.debugWg.Done()
+
+		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := s.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("Failed to record LLM debug interaction", map[string]interface{}{
+					"request_id": requestID,
+					"type":       interaction.Type,
+					"error":      err.Error(),
+				})
+			}
+		}
+	}()
+}
+
+// generateFallbackRequestID generates a request ID when TraceID is not available.
+func (s *AISynthesizer) generateFallbackRequestID() string {
+	seq := s.debugSeqID.Add(1)
+	return fmt.Sprintf("synth-%d-%d", time.Now().UnixNano(), seq)
+}
+
+// Shutdown waits for pending debug recordings to complete.
+func (s *AISynthesizer) Shutdown(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.debugWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // SimpleSynthesizer provides basic synthesis without AI

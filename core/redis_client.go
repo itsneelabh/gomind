@@ -81,6 +81,19 @@ func NewRedisClient(opts RedisClientOptions) (*RedisClient, error) {
 		})
 	}
 
+	// Warn if application is using a framework-reserved DB
+	// This respects the explicit override principle - they can still use reserved DBs if needed
+	if IsReservedDB(opts.DB) && opts.DB != RedisDBLLMDebug {
+		if opts.Logger != nil {
+			opts.Logger.Warn("Using framework-reserved Redis DB", map[string]interface{}{
+				"db":       opts.DB,
+				"db_name":  GetRedisDBName(opts.DB),
+				"reserved": fmt.Sprintf("%d-%d", RedisDBReservedStart, RedisDBReservedEnd),
+				"hint":     "DBs 7-15 are reserved for framework extensions. Use DBs 0-6 for application data.",
+			})
+		}
+	}
+
 	if opts.RedisURL == "" {
 		if opts.Logger != nil {
 			opts.Logger.Error("Failed to initialize Redis client", map[string]interface{}{
@@ -329,8 +342,10 @@ const (
 	// RedisDBTelemetry is for telemetry data
 	RedisDBTelemetry = 6
 
-	// RedisDBReserved7 through RedisDBReserved15 are reserved for future use
-	RedisDBReserved7  = 7
+	// RedisDBLLMDebug is for LLM debug payload storage (orchestration module)
+	RedisDBLLMDebug = 7
+
+	// RedisDBReserved8 through RedisDBReserved15 are reserved for future framework extensions
 	RedisDBReserved8  = 8
 	RedisDBReserved9  = 9
 	RedisDBReserved10 = 10
@@ -339,7 +354,20 @@ const (
 	RedisDBReserved13 = 13
 	RedisDBReserved14 = 14
 	RedisDBReserved15 = 15
+
+	// RedisDBReservedStart marks the beginning of framework-reserved databases
+	RedisDBReservedStart = 7
+
+	// RedisDBReservedEnd marks the end of framework-reserved databases
+	// Note: Redis default is 0-15 (16 DBs). Configure `databases` in redis.conf for more.
+	RedisDBReservedEnd = 15
 )
+
+// IsReservedDB returns true if the DB number is reserved for framework extensions.
+// DBs 7-15 are reserved for framework use. Applications should use DBs 0-6.
+func IsReservedDB(db int) bool {
+	return db >= RedisDBReservedStart && db <= RedisDBReservedEnd
+}
 
 // GetRedisDBName returns a human-readable name for the Redis DB
 func GetRedisDBName(db int) string {
@@ -358,7 +386,12 @@ func GetRedisDBName(db int) string {
 		return "Metrics"
 	case RedisDBTelemetry:
 		return "Telemetry"
+	case RedisDBLLMDebug:
+		return "LLM Debug"
 	default:
+		if IsReservedDB(db) {
+			return fmt.Sprintf("Reserved DB %d", db)
+		}
 		return fmt.Sprintf("DB %d", db)
 	}
 }

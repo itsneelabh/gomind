@@ -2303,6 +2303,111 @@ config := &orchestration.OrchestratorConfig{
 // and provides fast, structured search without hitting discovery
 ```
 
+### LLM Debug Store
+
+Captures complete LLM request/response payloads for production debugging. Unlike Jaeger spans which truncate large payloads, the debug store preserves full prompts and responses.
+
+#### LLMDebugStore Interface
+
+```go
+type LLMDebugStore interface {
+    // RecordInteraction appends an LLM interaction to the debug record
+    RecordInteraction(ctx context.Context, requestID string, interaction LLMInteraction) error
+
+    // GetRecord retrieves the complete debug record for a request
+    GetRecord(ctx context.Context, requestID string) (*LLMDebugRecord, error)
+
+    // SetMetadata adds metadata to an existing record (for investigation notes)
+    SetMetadata(ctx context.Context, requestID string, key, value string) error
+
+    // ExtendTTL extends retention for important records
+    ExtendTTL(ctx context.Context, requestID string, duration time.Duration) error
+
+    // ListRecent returns recent records for UI listing (newest first)
+    ListRecent(ctx context.Context, limit int) ([]LLMDebugRecordSummary, error)
+}
+```
+
+#### LLMInteraction Type
+
+```go
+type LLMInteraction struct {
+    // Identity
+    Type      string    // Recording site (plan_generation, synthesis, etc.)
+    Timestamp time.Time // When the interaction started
+    DurationMs int64    // Call duration in milliseconds
+
+    // Request fields
+    Prompt       string  // Complete prompt sent to LLM
+    SystemPrompt string  // System prompt if used
+    Temperature  float64 // Temperature setting
+    MaxTokens    int     // Max tokens setting
+    Model        string  // Model identifier (e.g., "gpt-4o")
+    Provider     string  // Provider (openai, anthropic, gemini, bedrock)
+
+    // Response fields
+    Response         string // Complete response from LLM
+    PromptTokens     int    // Prompt token count
+    CompletionTokens int    // Completion token count
+    TotalTokens      int    // Total token count
+
+    // Status fields
+    Success bool   // Whether the call succeeded
+    Error   string // Error message if failed
+    Attempt int    // Attempt number (for retries)
+}
+```
+
+#### Factory Options
+
+```go
+// Orchestrator options (for CreateOrchestratorWithOptions)
+orchestration.WithLLMDebug(true)                    // Enable debug capture
+orchestration.WithLLMDebugStore(customStore)        // Inject custom store
+orchestration.WithLLMDebugTTL(48 * time.Hour)       // Custom TTL for success
+orchestration.WithLLMDebugErrorTTL(14 * 24 * time.Hour) // Custom TTL for errors
+
+// RedisLLMDebugStore options (for NewRedisLLMDebugStore)
+orchestration.WithDebugRedisURL("redis://localhost:6379")
+orchestration.WithDebugRedisDB(7)
+orchestration.WithDebugLogger(logger)
+orchestration.WithDebugCircuitBreaker(cb)
+orchestration.WithDebugTTL(24 * time.Hour)
+orchestration.WithDebugErrorTTL(168 * time.Hour)
+```
+
+**Example - Enable Debug Capture:**
+```go
+deps := orchestration.OrchestratorDependencies{
+    Discovery: discovery,
+    AIClient:  aiClient,
+}
+
+// Enable debug capture
+orchestrator, err := orchestration.CreateOrchestratorWithOptions(deps,
+    orchestration.WithLLMDebug(true),
+)
+
+// Query debug records (from your application's API)
+record, _ := orchestrator.GetLLMDebugStore().GetRecord(ctx, requestID)
+for _, interaction := range record.Interactions {
+    fmt.Printf("Site: %s, Model: %s, Provider: %s\n",
+        interaction.Type, interaction.Model, interaction.Provider)
+    fmt.Printf("Prompt: %s\n", interaction.Prompt[:100])  // First 100 chars
+}
+```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOMIND_LLM_DEBUG_ENABLED` | `false` | Enable debug capture |
+| `GOMIND_LLM_DEBUG_TTL` | `24h` | TTL for successful records |
+| `GOMIND_LLM_DEBUG_ERROR_TTL` | `168h` | TTL for error records (7 days) |
+| `GOMIND_LLM_DEBUG_REDIS_DB` | `7` | Redis database index |
+
+For detailed implementation and architecture, see [LLM_DEBUG_PAYLOAD_DESIGN.md](../orchestration/notes/LLM_DEBUG_PAYLOAD_DESIGN.md).
+
 ---
 
 ## UI Module

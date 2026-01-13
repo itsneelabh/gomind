@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/itsneelabh/gomind/core"
@@ -58,6 +60,11 @@ type MicroResolver struct {
 	functionClient FunctionCallingClient
 	// logger for debugging
 	logger core.Logger
+
+	// LLM Debug Store for full payload visibility
+	debugStore LLMDebugStore
+	debugWg    sync.WaitGroup
+	debugSeqID atomic.Uint64
 }
 
 // NewMicroResolver creates a new micro-resolver
@@ -204,6 +211,15 @@ RESPONSE FORMAT (JSON only):
 		attribute.String("hint", hint),
 	)
 
+	// Get request ID from context baggage for debug correlation
+	requestID := ""
+	if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+		requestID = baggage["request_id"]
+	}
+	if requestID == "" {
+		requestID = m.generateFallbackRequestID()
+	}
+
 	// Make the LLM call
 	llmStartTime := time.Now()
 	resp, err := m.aiClient.GenerateResponse(ctx, prompt, &core.AIOptions{
@@ -218,6 +234,20 @@ RESPONSE FORMAT (JSON only):
 			attribute.String("error", err.Error()),
 			attribute.Int64("duration_ms", llmDuration.Milliseconds()),
 		)
+
+		// LLM Debug: Record failed micro-resolution attempt
+		m.recordDebugInteraction(ctx, requestID, LLMInteraction{
+			Type:        "micro_resolution",
+			Timestamp:   llmStartTime,
+			DurationMs:  llmDuration.Milliseconds(),
+			Prompt:      prompt,
+			Temperature: 0.0,
+			MaxTokens:   500,
+			Success:     false,
+			Error:       err.Error(),
+			Attempt:     1,
+		})
+
 		return nil, fmt.Errorf("micro-resolution text call failed: %w", err)
 	}
 
@@ -228,6 +258,24 @@ RESPONSE FORMAT (JSON only):
 		attribute.Int("response_length", len(resp.Content)),
 		attribute.Int64("duration_ms", llmDuration.Milliseconds()),
 	)
+
+	// LLM Debug: Record successful micro-resolution
+	m.recordDebugInteraction(ctx, requestID, LLMInteraction{
+		Type:             "micro_resolution",
+		Timestamp:        llmStartTime,
+		DurationMs:       llmDuration.Milliseconds(),
+		Prompt:           prompt,
+		Temperature:      0.0,
+		MaxTokens:        500,
+		Model:            resp.Model,
+		Provider:         resp.Provider,
+		Response:         resp.Content,
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.TotalTokens,
+		Success:          true,
+		Attempt:          1,
+	})
 
 	// Parse the JSON response
 	content := strings.TrimSpace(resp.Content)
@@ -338,5 +386,56 @@ func (m *MicroResolver) logInfo(msg string, fields map[string]interface{}) {
 func (m *MicroResolver) logWarn(msg string, fields map[string]interface{}) {
 	if m.logger != nil {
 		m.logger.Warn(msg, fields)
+	}
+}
+
+// SetLLMDebugStore sets the LLM debug store for full payload visibility.
+func (m *MicroResolver) SetLLMDebugStore(store LLMDebugStore) {
+	m.debugStore = store
+}
+
+// recordDebugInteraction stores an LLM interaction for debugging.
+// Uses WaitGroup to track in-flight recordings for graceful shutdown.
+func (m *MicroResolver) recordDebugInteraction(ctx context.Context, requestID string, interaction LLMInteraction) {
+	if m.debugStore == nil {
+		return
+	}
+
+	m.debugWg.Add(1)
+	go func() {
+		defer m.debugWg.Done()
+
+		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := m.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {
+			m.logWarn("Failed to record LLM debug interaction", map[string]interface{}{
+				"request_id": requestID,
+				"type":       interaction.Type,
+				"error":      err.Error(),
+			})
+		}
+	}()
+}
+
+// generateFallbackRequestID generates a request ID when TraceID is not available.
+func (m *MicroResolver) generateFallbackRequestID() string {
+	seq := m.debugSeqID.Add(1)
+	return fmt.Sprintf("micro-%d-%d", time.Now().UnixNano(), seq)
+}
+
+// Shutdown waits for pending debug recordings to complete.
+func (m *MicroResolver) Shutdown(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		m.debugWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

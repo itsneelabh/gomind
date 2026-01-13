@@ -107,6 +107,50 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
+func TestClient_getProviderName(t *testing.T) {
+	tests := []struct {
+		name          string
+		providerAlias string
+		want          string
+	}{
+		{
+			name:          "empty alias returns openai",
+			providerAlias: "",
+			want:          "openai",
+		},
+		{
+			name:          "openai alias",
+			providerAlias: "openai",
+			want:          "openai",
+		},
+		{
+			name:          "groq alias",
+			providerAlias: "openai.groq",
+			want:          "openai.groq",
+		},
+		{
+			name:          "deepseek alias",
+			providerAlias: "openai.deepseek",
+			want:          "openai.deepseek",
+		},
+		{
+			name:          "custom alias",
+			providerAlias: "openai.custom",
+			want:          "openai.custom",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewClient("test-key", "", tt.providerAlias, nil)
+			got := client.getProviderName()
+			if got != tt.want {
+				t.Errorf("getProviderName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClient_GenerateResponse(t *testing.T) {
 	tests := []struct {
 		name           string

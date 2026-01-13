@@ -241,8 +241,9 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	}
 
 	result := &core.AIResponse{
-		Content: content,
-		Model:   options.Model,
+		Content:  content,
+		Model:    options.Model,
+		Provider: "gemini",
 		Usage: core.TokenUsage{
 			PromptTokens:     geminiResp.UsageMetadata.PromptTokenCount,
 			CompletionTokens: geminiResp.UsageMetadata.CandidatesTokenCount,
@@ -403,9 +404,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 		case <-ctx.Done():
 			if fullContent.Len() > 0 {
 				return &core.AIResponse{
-					Content: fullContent.String(),
-					Model:   options.Model,
-					Usage:   usage,
+					Content:  fullContent.String(),
+					Model:    options.Model,
+					Provider: "gemini",
+					Usage:    usage,
 				}, core.ErrStreamPartiallyCompleted
 			}
 			return nil, ctx.Err()
@@ -420,9 +422,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			if fullContent.Len() > 0 {
 				span.SetAttribute("ai.stream_partial", true)
 				return &core.AIResponse{
-					Content: fullContent.String(),
-					Model:   options.Model,
-					Usage:   usage,
+					Content:  fullContent.String(),
+					Model:    options.Model,
+					Provider: "gemini",
+					Usage:    usage,
 				}, core.ErrStreamPartiallyCompleted
 			}
 			span.RecordError(err)
@@ -473,9 +476,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 					if err := callback(streamChunk); err != nil {
 						span.SetAttribute("ai.stream_stopped_by_callback", true)
 						return &core.AIResponse{
-							Content: fullContent.String(),
-							Model:   options.Model,
-							Usage:   usage,
+							Content:  fullContent.String(),
+							Model:    options.Model,
+							Provider: "gemini",
+							Usage:    usage,
 						}, nil
 					}
 				}
@@ -510,9 +514,10 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	}
 
 	result := &core.AIResponse{
-		Content: fullContent.String(),
-		Model:   options.Model,
-		Usage:   usage,
+		Content:  fullContent.String(),
+		Model:    options.Model,
+		Provider: "gemini",
+		Usage:    usage,
 	}
 
 	// Add token usage to span
