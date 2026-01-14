@@ -99,6 +99,9 @@ spec:
         # Logging Configuration
         - name: GOMIND_LOG_FORMAT
           value: "json"
+        # LLM Debug Feature - stores debug payloads in Redis DB 7
+        - name: GOMIND_LLM_DEBUG_ENABLED
+          value: "true"
         # Orchestration configuration
         - name: GOMIND_ORCHESTRATOR_MODE
           value: "autonomous"

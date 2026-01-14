@@ -136,10 +136,37 @@ func main() {
 		log.Fatalf("Failed to create framework: %v", err)
 	}
 
-	// 6. Initialize orchestrator (MUST be after framework creation when Discovery is available)
-	// NOTE: From this point forward, use agent.Logger instead of log.Printf
-	// The framework has configured the ProductionLogger with proper formatting
-	if agent.BaseAgent.Discovery != nil {
+	// 6. Initialize orchestrator in background (Discovery is set during framework.Run())
+	// This goroutine waits for Discovery to become available and then initializes the orchestrator.
+	// This is cleaner than lazy initialization in handlers because:
+	// - Initialization logic is centralized in main.go
+	// - Orchestrator is ready as soon as possible after framework starts
+	// - No mixing of init logic with health check logic
+	go func() {
+		// Wait for Discovery, logging warnings if it takes too long
+		startTime := time.Now()
+		lastWarning := time.Time{}
+
+		for agent.BaseAgent.Discovery == nil {
+			time.Sleep(100 * time.Millisecond)
+
+			elapsed := time.Since(startTime)
+			// Log warning after 30s, then every 60s thereafter
+			if elapsed > 30*time.Second && time.Since(lastWarning) > 60*time.Second {
+				if lastWarning.IsZero() {
+					agent.Logger.Warn("Discovery not available after 30s", map[string]interface{}{
+						"hint": "check Redis connectivity (REDIS_URL)",
+					})
+				} else {
+					agent.Logger.Warn("Still waiting for Discovery", map[string]interface{}{
+						"elapsed": elapsed.Round(time.Second).String(),
+					})
+				}
+				lastWarning = time.Now()
+			}
+		}
+
+		// Discovery is available, initialize orchestrator
 		if err := agent.InitializeOrchestrator(agent.BaseAgent.Discovery); err != nil {
 			agent.Logger.Warn("Failed to initialize orchestrator", map[string]interface{}{
 				"error":  err.Error(),
@@ -148,9 +175,7 @@ func main() {
 		} else {
 			agent.Logger.Info("Orchestrator initialized successfully", nil)
 		}
-	} else {
-		agent.Logger.Warn("Discovery not available, orchestrator not initialized", nil)
-	}
+	}()
 
 	// 7. Emit startup metrics
 	startupDuration := time.Since(startupStart)

@@ -11,6 +11,15 @@ require (
 	go.opentelemetry.io/otel v1.38.0
 )
 
+// Replace directives for Docker builds using local workspace modules
+// These are used by Dockerfile.workspace which copies local modules into /app/
+replace (
+	github.com/itsneelabh/gomind/ai => ../../ai
+	github.com/itsneelabh/gomind/core => ../../core
+	github.com/itsneelabh/gomind/orchestration => ../../orchestration
+	github.com/itsneelabh/gomind/telemetry => ../../telemetry
+)
+
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

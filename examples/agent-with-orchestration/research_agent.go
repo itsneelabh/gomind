@@ -214,7 +214,7 @@ func NewTravelResearchAgent() (*TravelResearchAgent, error) {
 //   - Configures travel-specific type rules for coordinates, currencies, etc.
 //   - Adds custom instructions for travel research context
 //
-// See: orchestration/LLM_PLANNING_PROMPT_GUIDE.md for full documentation
+// See: docs/guides/LLM_PLANNING_PROMPT_GUIDE.md for full documentation
 func (t *TravelResearchAgent) InitializeOrchestrator(discovery core.Discovery) error {
 	if discovery == nil {
 		return fmt.Errorf("discovery service is required for orchestration")
@@ -233,8 +233,15 @@ func (t *TravelResearchAgent) InitializeOrchestrator(discovery core.Discovery) e
 
 	// Configure PromptBuilder with travel-specific type rules
 	// This ensures the LLM generates execution plans with correct JSON types
-	// See: orchestration/LLM_PLANNING_PROMPT_GUIDE.md
+	// See: docs/guides/LLM_PLANNING_PROMPT_GUIDE.md
 	config.PromptConfig = orchestration.PromptConfig{
+		// SystemInstructions defines the orchestrator's persona and behavioral context.
+		// This becomes the primary identity, with the orchestrator role as secondary.
+		// Similar to LangChain's system_prompt, AutoGen's system_message, or OpenAI's instructions.
+		SystemInstructions: `You are a helpful travel planning assistant.
+You help users plan trips by coordinating information from various travel services.
+Provide practical, actionable recommendations and prioritize traveler needs.`,
+
 		// Domain helps the LLM understand the context
 		Domain: "travel",
 
@@ -304,9 +311,10 @@ func (t *TravelResearchAgent) InitializeOrchestrator(discovery core.Discovery) e
 
 	// Log PromptBuilder configuration for debugging
 	t.Logger.Debug("PromptBuilder configured", map[string]interface{}{
-		"domain":               config.PromptConfig.Domain,
+		"domain":                config.PromptConfig.Domain,
+		"has_system_instructions": config.PromptConfig.SystemInstructions != "",
 		"additional_type_rules": len(config.PromptConfig.AdditionalTypeRules),
-		"custom_instructions":  len(config.PromptConfig.CustomInstructions),
+		"custom_instructions":   len(config.PromptConfig.CustomInstructions),
 	})
 
 	// Start the orchestrator

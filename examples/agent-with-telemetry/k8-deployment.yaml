@@ -168,7 +168,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: research-agent-telemetry-service
+  name: research-agent-telemetry
   namespace: gomind-examples
   labels:
     app: research-agent-telemetry

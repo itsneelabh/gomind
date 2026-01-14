@@ -288,9 +288,10 @@ build_docker() {
         no_cache_flag="--no-cache"
     fi
 
-    # Build using standalone Dockerfile (fetches modules from GitHub)
-    docker build $no_cache_flag -t travel-research-agent:latest "$AGENT_DIR"
-    log_success "travel-research-agent:latest built"
+    # Build using workspace Dockerfile (uses local modules from workspace)
+    local GOMIND_ROOT="$(dirname "$EXAMPLES_DIR")"
+    docker build $no_cache_flag -f "$AGENT_DIR/Dockerfile.workspace" -t travel-research-agent:latest "$GOMIND_ROOT"
+    log_success "travel-research-agent:latest built (from local workspace)"
 }
 
 # Load images to Kind
@@ -456,8 +457,11 @@ port_forward() {
 port_forward_all() {
     log_info "Setting up port forwards for agent and monitoring..."
 
-    # Kill existing port forwards
-    pkill -f "port-forward.*$NAMESPACE" 2>/dev/null || true
+    # Kill only port forwards for this agent's services (preserve jaeger, registry-viewer, etc.)
+    pkill -f "port-forward.*travel-research-agent" 2>/dev/null || true
+    pkill -f "port-forward.*grafana" 2>/dev/null || true
+    pkill -f "port-forward.*prometheus" 2>/dev/null || true
+    pkill -f "port-forward.*otel-collector.*4318" 2>/dev/null || true
 
     sleep 2
 
@@ -839,8 +843,8 @@ full_deploy() {
 cleanup_all() {
     log_info "Cleaning up everything..."
 
-    # Stop port forwards
-    pkill -f "port-forward.*$NAMESPACE" 2>/dev/null || true
+    # Stop port forwards for this agent only (preserve jaeger, registry-viewer, etc.)
+    pkill -f "port-forward.*travel-research-agent" 2>/dev/null || true
 
     # Delete K8s resources
     kubectl delete -f "$AGENT_DIR/k8-deployment.yaml" --ignore-not-found 2>/dev/null || true

@@ -513,14 +513,6 @@ func (t *TravelResearchAgent) handleHealth(w http.ResponseWriter, r *http.Reques
 			})
 		} else {
 			health["redis"] = "healthy"
-			// Try to initialize orchestrator if not yet done
-			if t.orchestrator == nil {
-				if err := t.InitializeOrchestrator(t.Discovery); err != nil {
-					t.Logger.WarnWithContext(ctx, "Failed to initialize orchestrator during health check", map[string]interface{}{
-						"error": err.Error(),
-					})
-				}
-			}
 		}
 	}
 

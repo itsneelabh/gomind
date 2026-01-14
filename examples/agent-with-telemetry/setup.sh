@@ -268,7 +268,7 @@ cmd_test() {
 
     # Start port forward in background
     print_info "Starting port forward..."
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8092:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/$APP_NAME 8092:80 >/dev/null 2>&1 &
     PF_PID=$!
     sleep 3
 
@@ -305,7 +305,7 @@ cmd_forward() {
 
     print_info "Starting port forward on localhost:8092..."
     print_info "Press Ctrl+C to stop"
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8092:80
+    kubectl port-forward -n $NAMESPACE svc/$APP_NAME 8092:80
 }
 
 # Port forward for agent and monitoring
@@ -318,7 +318,7 @@ cmd_forward_all() {
 
     # Start port forwarding in background
     print_info "Starting port forwards..."
-    kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8092:80 >/dev/null 2>&1 &
+    kubectl port-forward -n $NAMESPACE svc/$APP_NAME 8092:80 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
     kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
