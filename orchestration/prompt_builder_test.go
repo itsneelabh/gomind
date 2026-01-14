@@ -843,3 +843,207 @@ func (m *MockLogger) ErrorWithContext(ctx context.Context, msg string, fields ma
 func (m *MockLogger) DebugWithContext(ctx context.Context, msg string, fields map[string]interface{}) {
 	m.debugCalls = append(m.debugCalls, msg)
 }
+
+// =============================================================================
+// SystemInstructions / Persona Tests
+// =============================================================================
+
+func TestBuildPersonaSection_DefaultWhenEmpty(t *testing.T) {
+	config := &PromptConfig{SystemInstructions: ""}
+	builder, err := NewDefaultPromptBuilder(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result := builder.buildPersonaSection()
+
+	expected := "You are an AI orchestrator managing a multi-agent system."
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
+	}
+
+	// Should NOT contain the subordinate phrasing when using default
+	if strings.Contains(result, "As an AI orchestrator") {
+		t.Error("default persona should not contain 'As an AI orchestrator' phrasing")
+	}
+}
+
+func TestBuildPersonaSection_CustomPersonaWithOrchestratorRole(t *testing.T) {
+	config := &PromptConfig{
+		SystemInstructions: "You are a travel planning specialist.",
+	}
+	builder, err := NewDefaultPromptBuilder(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result := builder.buildPersonaSection()
+
+	// Should contain the custom persona
+	if !strings.Contains(result, "You are a travel planning specialist.") {
+		t.Error("result should contain custom persona")
+	}
+
+	// Should also contain the orchestrator function as subordinate role
+	if !strings.Contains(result, "As an AI orchestrator, you manage a multi-agent system") {
+		t.Error("result should contain orchestrator function")
+	}
+}
+
+func TestBuildPersonaSection_MultilineInstructions(t *testing.T) {
+	config := &PromptConfig{
+		SystemInstructions: `You are a travel planning assistant.
+Always check weather before recommending outdoor activities.
+Prefer real-time data sources over cached data.`,
+	}
+	builder, err := NewDefaultPromptBuilder(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result := builder.buildPersonaSection()
+
+	// Should contain all lines of the custom instructions
+	if !strings.Contains(result, "travel planning assistant") {
+		t.Error("result should contain first line of instructions")
+	}
+	if !strings.Contains(result, "weather") {
+		t.Error("result should contain weather instruction")
+	}
+	if !strings.Contains(result, "real-time data") {
+		t.Error("result should contain real-time data instruction")
+	}
+}
+
+func TestBuildPlanningPrompt_WithSystemInstructions(t *testing.T) {
+	config := &PromptConfig{
+		SystemInstructions: "You are a financial advisor assistant.",
+	}
+	builder, err := NewDefaultPromptBuilder(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "Test capabilities",
+		Request:        "Test request",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Custom persona should appear at the start
+	if !strings.Contains(prompt, "You are a financial advisor assistant.") {
+		t.Error("prompt should contain custom persona")
+	}
+
+	// Orchestrator role should be present
+	if !strings.Contains(prompt, "As an AI orchestrator") {
+		t.Error("prompt should contain orchestrator role")
+	}
+
+	// Should NOT have duplicate "You are an AI orchestrator" at the start
+	// The custom persona replaces the default
+	idx := strings.Index(prompt, "You are")
+	if idx >= 0 {
+		// First "You are" should be from custom instructions, not default
+		nextChars := prompt[idx : idx+40]
+		if strings.Contains(nextChars, "AI orchestrator managing") {
+			t.Error("prompt should not start with default orchestrator persona when custom is set")
+		}
+	}
+}
+
+func TestBuildPlanningPrompt_WithoutSystemInstructions(t *testing.T) {
+	config := &PromptConfig{}
+	builder, err := NewDefaultPromptBuilder(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "Test capabilities",
+		Request:        "Test request",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Default persona should be present
+	if !strings.Contains(prompt, "You are an AI orchestrator managing a multi-agent system.") {
+		t.Error("prompt should contain default orchestrator persona")
+	}
+
+	// Should NOT contain "As an AI orchestrator" (that's only for custom personas)
+	if strings.Contains(prompt, "As an AI orchestrator, you manage") {
+		t.Error("prompt without custom persona should not have subordinate orchestrator phrasing")
+	}
+}
+
+func TestSystemInstructions_CombinedWithDomain(t *testing.T) {
+	config := &PromptConfig{
+		SystemInstructions: "You are a healthcare data analyst.",
+		Domain:             "healthcare",
+	}
+	builder, err := NewDefaultPromptBuilder(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "Test capabilities",
+		Request:        "Analyze patient data",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Both custom persona and domain instructions should be present
+	if !strings.Contains(prompt, "healthcare data analyst") {
+		t.Error("prompt should contain custom persona")
+	}
+	if !strings.Contains(prompt, "HEALTHCARE DOMAIN REQUIREMENTS") {
+		t.Error("prompt should contain domain-specific requirements")
+	}
+}
+
+func TestSystemInstructions_CombinedWithCustomInstructions(t *testing.T) {
+	config := &PromptConfig{
+		SystemInstructions: "You are a travel assistant.",
+		CustomInstructions: []string{
+			"Always prefer direct flights",
+			"Include visa requirements",
+		},
+	}
+	builder, err := NewDefaultPromptBuilder(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	input := PromptInput{
+		CapabilityInfo: "Test capabilities",
+		Request:        "Plan a trip to Tokyo",
+	}
+
+	prompt, err := builder.BuildPlanningPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// All customizations should be present
+	if !strings.Contains(prompt, "travel assistant") {
+		t.Error("prompt should contain custom persona")
+	}
+	if !strings.Contains(prompt, "direct flights") {
+		t.Error("prompt should contain first custom instruction")
+	}
+	if !strings.Contains(prompt, "visa requirements") {
+		t.Error("prompt should contain second custom instruction")
+	}
+}

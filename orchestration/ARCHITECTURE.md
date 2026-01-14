@@ -654,6 +654,93 @@ func (p *ServiceCapabilityProvider) GetCapabilities(ctx context.Context, request
 }
 ```
 
+#### 3. Tiered Capability Provider (20-100 tools) - Default
+
+The `TieredCapabilityProvider` implements a research-backed 2-phase capability resolution strategy that reduces LLM token usage by 50-75% for medium-scale deployments.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      User Request                                │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Tier 1: Tool Selection (Lightweight)                           │
+│  • Send only: tool names + 1-sentence summaries                 │
+│  • ~50-100 tokens per tool (vs 200-500 for full schema)         │
+│  • Output: JSON array of needed tool names                      │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ ["weather-tool", "currency-tool"]
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Tier 2: Schema Retrieval (Targeted)                            │
+│  • Fetch full capability schemas ONLY for selected tools        │
+│  • No LLM call - just catalog lookup                            │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ Full schemas for selected tools
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Tier 3: Plan Generation (Existing Logic)                       │
+│  • Generate execution plan with full parameter details          │
+│  • Reduced context = better accuracy                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Design Decisions:**
+- **Enabled by default**: Research shows accuracy degrades beyond ~20 tools ("Less is More", Nov 2024)
+- **Graceful fallback**: On Tier 1 failure, falls back to sending all tools (safe degradation)
+- **Hallucination filtering**: Validates LLM-selected tools exist in catalog before proceeding
+- **No external dependencies**: Works without RAG service or vector database
+
+```go
+type TieredCapabilityProvider struct {
+    catalog            *AgentCatalog
+    aiClient           core.AIClient
+    MinToolsForTiering int  // Default: 20
+
+    // Optional dependencies (injected)
+    logger     core.Logger
+    telemetry  core.Telemetry
+    debugStore LLMDebugStore
+}
+
+func (t *TieredCapabilityProvider) GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (string, error) {
+    summaries := t.catalog.GetCapabilitySummaries()
+
+    // Below threshold - use direct approach
+    if len(summaries) < t.MinToolsForTiering {
+        return t.catalog.FormatForLLM(), nil
+    }
+
+    // Tier 1: Select relevant tools
+    selectedTools, err := t.selectRelevantTools(ctx, request, summaries)
+    if err != nil {
+        // Graceful fallback to all tools
+        return t.catalog.FormatForLLM(), nil
+    }
+
+    // Tier 2: Get full schemas for selected tools only
+    return t.catalog.FormatToolsForLLM(selectedTools), nil
+}
+```
+
+**Configuration:**
+```go
+config := orchestration.DefaultConfig()
+config.EnableTieredResolution = true  // Default
+config.TieredResolution = orchestration.TieredCapabilityConfig{
+    MinToolsForTiering: 20,  // Threshold based on research
+}
+```
+
+**Environment Variables:**
+```bash
+GOMIND_TIERED_RESOLUTION_ENABLED=true   # Default
+GOMIND_TIERED_MIN_TOOLS=20              # Research-backed default
+```
+
+> 📖 **For detailed research references and implementation, see [Tiered Capability Resolution Design](notes/TIERED_CAPABILITY_RESOLUTION.md).**
+
 ### Auto-Configuration
 
 ```go

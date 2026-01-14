@@ -2120,6 +2120,7 @@ func CreateOrchestratorWithOptions(deps OrchestratorDependencies, opts ...Orches
 
 **Available options:**
 - `WithCapabilityProvider(type, url)` - Configure capability discovery
+- `WithTieredResolution(enabled)` - Enable tiered capability resolution (token optimization)
 - `WithTelemetry(enabled)` - Enable metrics and tracing
 - `WithFallback(enabled)` - Graceful degradation
 - `WithCache(enabled, ttl)` - Cache discovery results
@@ -2186,6 +2187,74 @@ config.ExecutionOptions.MaxValidationRetries = 3  // More retries for edge cases
 ```
 
 See [Intelligent Error Handling](./INTELLIGENT_ERROR_HANDLING.md#orchestration-module-multi-layer-type-safety) for details on how type safety layers work together.
+
+### TieredCapabilityConfig
+
+Configures tiered capability resolution for LLM token optimization. When enabled with 20+ tools, uses a two-phase approach: lightweight summaries for tool selection, then full schemas only for selected tools.
+
+```go
+type TieredCapabilityConfig struct {
+    // MinToolsForTiering is the minimum tool count to trigger tiered resolution.
+    // Below this threshold, all tools are sent directly (simpler, one LLM call).
+    // Default: 20 | Env: GOMIND_TIERED_MIN_TOOLS
+    // Research: "Less is More" (Nov 2024) shows LLM accuracy degradation at ~20 tools
+    MinToolsForTiering int `json:"min_tools_for_tiering,omitempty"`
+}
+```
+
+**Example - Enable Tiered Resolution:**
+```go
+config := orchestration.DefaultConfig()
+config.EnableTieredResolution = true
+config.TieredResolution = orchestration.TieredCapabilityConfig{
+    MinToolsForTiering: 25,  // Override threshold (default: 20)
+}
+```
+
+For detailed architecture and token savings analysis, see [TIERED_CAPABILITY_RESOLUTION.md](../orchestration/notes/TIERED_CAPABILITY_RESOLUTION.md).
+
+### PromptConfig
+
+Configures prompt building behavior including persona customization and type rules.
+
+```go
+type PromptConfig struct {
+    // SystemInstructions defines the orchestrator's core behavioral context.
+    // Similar to LangChain's system_prompt, AutoGen's system_message, OpenAI's instructions.
+    // When set, the developer's persona becomes the primary identity.
+    SystemInstructions string `json:"system_instructions,omitempty"`
+
+    // AdditionalTypeRules extend default type handling rules.
+    AdditionalTypeRules []TypeRule `json:"additional_type_rules,omitempty"`
+
+    // TemplateFile is the path to a Go text/template file for prompt customization.
+    TemplateFile string `json:"template_file,omitempty"`
+
+    // Template is an inline Go text/template string.
+    Template string `json:"template,omitempty"`
+
+    // CustomInstructions are additional instructions appended to the prompt.
+    CustomInstructions []string `json:"custom_instructions,omitempty"`
+
+    // Domain provides context for domain-specific prompt adjustments.
+    // Examples: "healthcare", "finance", "legal", "retail"
+    Domain string `json:"domain,omitempty"`
+
+    // IncludeAntiPatterns controls whether to show "what NOT to do" examples.
+    IncludeAntiPatterns *bool `json:"include_anti_patterns,omitempty"`
+}
+```
+
+**Example - Custom Agent Persona:**
+```go
+config := orchestration.DefaultConfig()
+config.PromptConfig = orchestration.PromptConfig{
+    SystemInstructions: `You are a travel planning assistant.
+Always check weather before recommending outdoor activities.
+Prefer real-time data sources over cached information.`,
+    Domain: "travel",
+}
+```
 
 ### ProcessRequestStreaming
 
@@ -2286,10 +2355,23 @@ Different strategies for different scales and use cases:
 
 **Example - Scaling Orchestration:**
 ```go
-// Small scale (< 10 services) - Let AI figure it out
+// Small scale (< 20 tools) - Let AI figure it out
 config := &orchestration.OrchestratorConfig{
     RoutingMode:       orchestration.ModeAutonomous,
     SynthesisStrategy: orchestration.StrategyLLM,
+}
+
+// Medium scale (20-100 tools) - Use tiered resolution (default)
+// Reduces token usage by 50-75% via two-phase tool selection
+config := &orchestration.OrchestratorConfig{
+    RoutingMode:            orchestration.ModeAutonomous,
+    EnableTieredResolution: true,  // Default: true
+    TieredResolution: orchestration.TieredCapabilityConfig{
+        MinToolsForTiering: 20,  // Trigger threshold
+    },
+    PromptConfig: orchestration.PromptConfig{
+        SystemInstructions: "You are a helpful assistant specializing in travel planning.",
+    },
 }
 
 // Large scale (100+ services) - Use capability service
@@ -2302,6 +2384,8 @@ config := &orchestration.OrchestratorConfig{
 // Capability service indexes all available capabilities
 // and provides fast, structured search without hitting discovery
 ```
+
+For tiered resolution architecture details, see [TIERED_CAPABILITY_RESOLUTION.md](../orchestration/notes/TIERED_CAPABILITY_RESOLUTION.md).
 
 ### LLM Debug Store
 

@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +11,14 @@ import (
 
 	"github.com/itsneelabh/gomind/core"
 )
+
+// immediateFailTransport is a mock HTTP transport that fails immediately
+// instead of waiting for connection timeout. This makes tests run fast.
+type immediateFailTransport struct{}
+
+func (t *immediateFailTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, errors.New("immediate fail: connection refused (mock)")
+}
 
 // TestLogger captures logs for verification in tests
 type TestLogger struct {
@@ -255,6 +264,10 @@ func TestAIOrchestrator_ProcessRequest_SuccessLogging(t *testing.T) {
 	orchestrator := NewAIOrchestrator(config, mockDiscovery, mockAIClient)
 	orchestrator.SetLogger(testLogger)
 
+	// Inject immediate-fail transport and disable retries to avoid delays
+	orchestrator.executor.httpClient = &http.Client{Transport: &immediateFailTransport{}}
+	orchestrator.executor.SetMaxAttempts(1) // Disable retries for fast tests
+
 	// Set up capability provider to avoid nil issues
 	orchestrator.capabilityProvider = NewDefaultCapabilityProvider(orchestrator.catalog)
 
@@ -452,6 +465,10 @@ func TestSmartExecutor_StepExecutionLogging(t *testing.T) {
 
 	executor := NewSmartExecutor(catalog)
 	executor.SetLogger(testLogger)
+
+	// Inject immediate-fail transport and disable retries to avoid delays
+	executor.httpClient = &http.Client{Transport: &immediateFailTransport{}}
+	executor.SetMaxAttempts(1) // Disable retries for fast tests
 
 	// Populate catalog
 	ctx := context.Background()
@@ -821,6 +838,10 @@ func TestLogging_OperationCoverage(t *testing.T) {
 
 	orchestrator := NewAIOrchestrator(config, mockDiscovery, mockAIClient)
 	orchestrator.SetLogger(testLogger)
+
+	// Inject immediate-fail transport and disable retries to avoid delays
+	orchestrator.executor.httpClient = &http.Client{Transport: &immediateFailTransport{}}
+	orchestrator.executor.SetMaxAttempts(1) // Disable retries for fast tests
 
 	ctx := context.Background()
 	orchestrator.catalog.Refresh(ctx)

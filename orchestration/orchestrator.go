@@ -16,6 +16,35 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// orchestratorContextKey is a custom type for orchestrator context keys to avoid collisions
+type orchestratorContextKey string
+
+const (
+	// requestIDContextKey holds the orchestrator's request ID for correlation across components
+	requestIDContextKey orchestratorContextKey = "orchestrator_request_id"
+)
+
+// WithRequestID adds the orchestrator's request ID to the context.
+// This enables child components (like TieredCapabilityProvider) to correlate
+// their debug recordings with the orchestrator's request.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDContextKey, requestID)
+}
+
+// GetRequestID retrieves the orchestrator's request ID from context.
+// Returns empty string if not set.
+func GetRequestID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v := ctx.Value(requestIDContextKey); v != nil {
+		if id, ok := v.(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
 // AIOrchestrator is an AI-powered orchestrator that uses LLM for intelligent routing
 type AIOrchestrator struct {
 	config      *OrchestratorConfig
@@ -1018,6 +1047,10 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 		return nil, fmt.Errorf("AI client not configured")
 	}
 
+	// Inject requestID into context for child components (e.g., TieredCapabilityProvider)
+	// to correlate their debug recordings with this orchestrator request.
+	ctx = WithRequestID(ctx, requestID)
+
 	// Build initial prompt with capability information
 	prompt, err := o.buildPlanningPrompt(ctx, request)
 	if err != nil {
@@ -1250,28 +1283,20 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 }
 
 // buildPlanningPrompt constructs the prompt for the LLM using capability provider
-// and optional PromptBuilder for customization
+// and optional PromptBuilder for customization.
+// Note: No child span is created here so that tiered_selection and plan_generation
+// events are all recorded on the parent orchestrator span for unified visibility.
 func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string) (string, error) {
-	// Start telemetry span if available
-	var span core.Span
-	if o.telemetry != nil {
-		ctx, span = o.telemetry.StartSpan(ctx, "orchestrator.build_prompt")
-		defer span.End()
-	} else {
-		span = &core.NoOpSpan{}
-	}
-
 	// Check if capability provider is available
 	if o.capabilityProvider == nil {
 		return "", fmt.Errorf("capability provider not configured")
 	}
 
 	// Get capabilities from provider
+	// Note: TieredCapabilityProvider adds span events to the current (parent) span
 	capabilityInfo, err := o.capabilityProvider.GetCapabilities(ctx, request, nil)
 	if err != nil {
-		if span != nil {
-			span.RecordError(err)
-		}
+		telemetry.RecordSpanError(ctx, err)
 		return "", fmt.Errorf("failed to get capabilities: %w", err)
 	}
 
@@ -1283,9 +1308,7 @@ func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string
 		})
 	}
 
-	if span != nil {
-		span.SetAttribute("capability_info_size", len(capabilityInfo))
-	}
+	telemetry.SetSpanAttributes(ctx, attribute.Int("capability_info_size", len(capabilityInfo)))
 
 	// Use PromptBuilder if available (Layer 1-3 customization)
 	if o.promptBuilder != nil {
@@ -1304,9 +1327,7 @@ func (o *AIOrchestrator) buildPlanningPrompt(ctx context.Context, request string
 			}
 			// Fall through to default prompt
 		} else {
-			if span != nil {
-				span.SetAttribute("prompt_builder_used", true)
-			}
+			telemetry.SetSpanAttributes(ctx, attribute.Bool("prompt_builder_used", true))
 			return prompt, nil
 		}
 	}
@@ -1545,6 +1566,9 @@ func (o *AIOrchestrator) regeneratePlan(ctx context.Context, request string, req
 	if o.aiClient == nil {
 		return nil, fmt.Errorf("AI client not configured for plan regeneration")
 	}
+
+	// Inject requestID into context for child components
+	ctx = WithRequestID(ctx, requestID)
 
 	basePrompt, err := o.buildPlanningPrompt(ctx, request)
 	if err != nil {

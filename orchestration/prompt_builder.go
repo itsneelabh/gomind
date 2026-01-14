@@ -114,6 +114,19 @@ type PromptConfig struct {
 	// IncludeAntiPatterns controls whether to show "what NOT to do" examples.
 	// Default: true (recommended for better LLM guidance)
 	IncludeAntiPatterns *bool `json:"include_anti_patterns,omitempty"`
+
+	// SystemInstructions defines the orchestrator's core behavioral context.
+	// This is prepended to the planning prompt, similar to:
+	// - LangChain's system_prompt
+	// - AutoGen's system_message
+	// - OpenAI's instructions
+	//
+	// When set, the developer's persona becomes the primary identity, and
+	// the orchestrator role becomes a functional description.
+	//
+	// Example: "You are a travel planning assistant. Always check weather
+	// before recommending outdoor activities. Prefer real-time data sources."
+	SystemInstructions string `json:"system_instructions,omitempty"`
 }
 
 // ValidateTypeRule validates a TypeRule for correctness.

@@ -466,6 +466,7 @@ func TestSmartExecutor_FailedDependency(t *testing.T) {
 	executor.httpClient = &http.Client{
 		Transport: mockRT,
 	}
+	executor.SetMaxAttempts(1) // Disable retries for fast tests
 
 	// Plan where step-2 depends on step-1
 	plan := &RoutingPlan{
@@ -1470,6 +1471,7 @@ func TestSmartExecutor_ValidationFeedbackDisabled(t *testing.T) {
 		},
 	}
 	executor.httpClient = &http.Client{Transport: mockRT}
+	executor.SetMaxAttempts(1) // Disable retries for fast tests
 
 	// Disable validation feedback
 	executor.SetValidationFeedback(false, 0)

@@ -211,6 +211,27 @@ All logs are automatically enriched with:
 - Discovery cache hit rates
 - Circuit breaker state
 
+### LLM Debug Payload Store (Orchestration)
+
+For debugging orchestration issues, the framework provides complete LLM payload capture:
+
+**Features:**
+- Complete prompt and response storage (no truncation like Jaeger)
+- 6 recording sites: `plan_generation`, `correction`, `synthesis`, `synthesis_streaming`, `micro_resolution`, `semantic_retry`
+- Request correlation via trace ID
+- Provider and model tracking
+- Configurable TTL (24h success, 7 days errors)
+
+**Configuration:**
+```bash
+export GOMIND_LLM_DEBUG_ENABLED=true
+```
+
+**Key Files:**
+- `orchestration/llm_debug_store.go` - Interface and types
+- `orchestration/redis_llm_debug_store.go` - Redis implementation
+- `orchestration/notes/LLM_DEBUG_PAYLOAD_DESIGN.md` - Design documentation
+
 ## Resilience & Fault Tolerance
 
 ### Circuit Breaker Pattern
@@ -379,6 +400,62 @@ export GOMIND_SEMANTIC_RETRY_MAX_ATTEMPTS=2
 **Key Files:**
 - `orchestration/contextual_re_resolver.go` - Semantic retry implementation
 - `orchestration/executor.go` - Integration with execution loop
+
+### Tiered Capability Resolution (Token Optimization)
+
+For deployments with 20+ tools, the orchestration module provides **tiered capability resolution** to reduce LLM token usage by 50-75%.
+
+**How it works:**
+1. **Tier 1**: Send lightweight tool summaries (~50-100 tokens each) to LLM for tool selection
+2. **Tier 2**: Fetch full schemas only for selected tools (no LLM call)
+3. **Tier 3**: Generate execution plan with focused context
+
+**Benefits:**
+- 50-75% token reduction for medium-scale deployments (20-100 tools)
+- Improved accuracy with smaller context (research-backed)
+- No external dependencies (unlike RAG-based solutions)
+- Graceful fallback on selection errors
+
+**Configuration:**
+```bash
+# Enabled by default
+export GOMIND_TIERED_RESOLUTION_ENABLED=true
+
+# Minimum tools to trigger tiering (default: 20)
+export GOMIND_TIERED_MIN_TOOLS=20
+```
+
+```go
+config := orchestration.DefaultConfig()
+config.EnableTieredResolution = true  // Default
+config.TieredResolution = orchestration.TieredCapabilityConfig{
+    MinToolsForTiering: 20,
+}
+```
+
+For detailed design, see [Tiered Capability Resolution Design](../orchestration/notes/TIERED_CAPABILITY_RESOLUTION.md).
+
+**Key Files:**
+- `orchestration/tiered_capability_provider.go` - Tiered resolution implementation
+- `orchestration/catalog.go` - Capability summaries
+
+### Orchestrator Persona Customization
+
+Define your orchestrator's behavioral context using `SystemInstructions`:
+
+```go
+config.PromptConfig = orchestration.PromptConfig{
+    SystemInstructions: `You are a travel planning assistant.
+Always check weather before recommending outdoor activities.`,
+    Domain: "travel",
+}
+```
+
+This is similar to LangChain's `system_prompt` and AutoGen's `system_message`. When set, your persona becomes the primary identity and the orchestrator role becomes functional.
+
+**Key Files:**
+- `orchestration/prompt_builder.go` - PromptConfig structure
+- `orchestration/default_prompt_builder.go` - Persona integration
 
 ## Configuration Examples
 

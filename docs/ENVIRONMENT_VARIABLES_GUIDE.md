@@ -554,6 +554,8 @@ Configure the AI orchestrator for multi-agent coordination.
 | Variable | Default | Status | Description | Source |
 |----------|---------|--------|-------------|--------|
 | `GOMIND_ORCHESTRATION_TIMEOUT` | `60s` | **Implemented** | HTTP client timeout for tool/agent calls | [orchestration/executor.go:80](../orchestration/executor.go#L80) |
+| `GOMIND_TIERED_RESOLUTION_ENABLED` | `true` | **Implemented** | Enable tiered capability resolution for LLM token optimization. Uses 2-phase approach to reduce tokens by 50-75%. | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_TIERED_MIN_TOOLS` | `20` | **Implemented** | Minimum tool count to trigger tiered resolution. Below this threshold, all tools are sent directly. Research-backed default. | [orchestration/tiered_capability_provider.go](../orchestration/tiered_capability_provider.go) |
 | `GOMIND_CAPABILITY_SERVICE_URL` | (none) | **Implemented** | External capability service URL | [orchestration/capability_provider.go:83](../orchestration/capability_provider.go#L83) |
 | `CAPABILITY_SERVICE_URL` | (fallback) | **Implemented** | Alternative capability service URL | [orchestration/capability_provider.go:81](../orchestration/capability_provider.go#L81) |
 | `GOMIND_CAPABILITY_TOP_K` | `20` | **Implemented** | Number of capabilities to return | [orchestration/capability_provider.go:91](../orchestration/capability_provider.go#L91) |
@@ -564,6 +566,28 @@ Configure the AI orchestrator for multi-agent coordination.
 | `GOMIND_AGENT_MAX_RETRIES` | `2` | Example Only | Max retries for agent execution | [examples/agent-example/orchestration.go:157](../examples/agent-example/orchestration.go#L157) |
 | `GOMIND_AGENT_USE_AI_CORRECTION` | `true` | Example Only | Enable AI-based parameter correction | [examples/agent-example/orchestration.go:162](../examples/agent-example/orchestration.go#L162) |
 | `GOMIND_ORCHESTRATOR_MODE` | (none) | Example Only | Orchestrator mode selection | [examples/agent-with-orchestration/main.go:290](../examples/agent-with-orchestration/main.go#L290) |
+
+### Tiered Capability Resolution
+
+Tiered resolution is a research-backed optimization that reduces LLM token usage by 50-75% for deployments with 20+ tools. It works by first sending lightweight tool summaries to select relevant tools, then fetching full schemas only for selected tools.
+
+```bash
+# Tiered resolution is enabled by default
+export GOMIND_TIERED_RESOLUTION_ENABLED=true
+
+# Adjust threshold for when tiering kicks in (default: 20)
+export GOMIND_TIERED_MIN_TOOLS=25
+
+# Disable for small deployments (< 20 tools)
+export GOMIND_TIERED_RESOLUTION_ENABLED=false
+```
+
+**When to use:**
+- **< 20 tools**: Disable tiered resolution (overhead not worth it)
+- **20-100 tools**: Use tiered resolution (default, 50-75% token savings)
+- **100s+ tools**: Consider ServiceCapabilityProvider for semantic search
+
+See [Tiered Capability Resolution Design](../orchestration/notes/TIERED_CAPABILITY_RESOLUTION.md) for detailed research and implementation.
 
 ### Plan Parse Retry
 

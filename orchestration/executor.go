@@ -85,6 +85,9 @@ type SmartExecutor struct {
 	// Called after each step completes to enable per-tool progress reporting.
 	// See notes/ASYNC_TASK_DESIGN.md Phase 6 for details.
 	onStepComplete StepCompleteCallback
+
+	// Retry configuration
+	maxAttempts int // Maximum number of retry attempts (default: 2)
 }
 
 // NewSmartExecutor creates a new smart executor
@@ -115,7 +118,18 @@ func NewSmartExecutor(catalog *AgentCatalog) *SmartExecutor {
 		// Layer 3: Validation Feedback defaults
 		validationFeedbackEnabled: true, // Enable by default for production reliability
 		maxValidationRetries:      2,    // Up to 2 correction attempts
+		// Retry defaults
+		maxAttempts: 2, // Up to 2 retry attempts (default)
 	}
+}
+
+// SetMaxAttempts configures the maximum number of retry attempts for step execution.
+// Set to 1 to disable retries (useful for tests). Default is 2.
+func (e *SmartExecutor) SetMaxAttempts(max int) {
+	if max < 1 {
+		max = 1
+	}
+	e.maxAttempts = max
 }
 
 // SetCorrectionCallback sets the callback for Layer 3 validation feedback.
@@ -1454,7 +1468,10 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		endpoint)
 
 	// Execute with retry logic including Layer 3 validation feedback
-	maxAttempts := 2
+	maxAttempts := e.maxAttempts
+	if maxAttempts < 1 {
+		maxAttempts = 2 // Fallback default if not set
+	}
 	validationRetries := 0
 	previousErrors := []string{} // Layer 4: tracks error history for semantic retry
 

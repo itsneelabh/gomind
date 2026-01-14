@@ -202,8 +202,16 @@ func (d *DefaultPromptBuilder) BuildPlanningPrompt(ctx context.Context, input Pr
 	// Build domain-specific section
 	domainSection := d.buildDomainSection()
 
+	// Build persona section (handles SystemInstructions vs default)
+	personaSection := d.buildPersonaSection()
+
+	// Add span attribute for custom persona usage
+	if d.telemetry != nil && span != nil {
+		span.SetAttribute("has_custom_persona", d.config.SystemInstructions != "")
+	}
+
 	// Construct the complete prompt
-	prompt := fmt.Sprintf(`You are an AI orchestrator managing a multi-agent system.
+	prompt := fmt.Sprintf(`%s
 
 %s
 
@@ -275,6 +283,7 @@ CRITICAL FORMAT RULES (applies to all LLM providers):
 - Start your response with { and end with } - nothing else
 
 Response (raw JSON only, no formatting):`,
+		personaSection,
 		input.CapabilityInfo,
 		input.Request,
 		stepReferenceInstructions,
@@ -390,6 +399,24 @@ LEGAL DOMAIN REQUIREMENTS:
 	default:
 		return ""
 	}
+}
+
+// buildPersonaSection generates the persona statement for the prompt.
+// If SystemInstructions is configured, uses it as the primary identity.
+// Otherwise, uses the default orchestrator identity.
+//
+// This follows the pattern established by LangChain, AutoGen, and OpenAI
+// where a single field defines the agent's core behavioral context.
+func (d *DefaultPromptBuilder) buildPersonaSection() string {
+	if d.config.SystemInstructions != "" {
+		// Developer's persona is primary identity, orchestrator role is functional
+		return fmt.Sprintf(`%s
+
+As an AI orchestrator, you manage a multi-agent system to fulfill user requests.`,
+			d.config.SystemInstructions)
+	}
+	// Default identity when no custom instructions provided
+	return "You are an AI orchestrator managing a multi-agent system."
 }
 
 // GetTypeRules returns the current type rules (useful for debugging)

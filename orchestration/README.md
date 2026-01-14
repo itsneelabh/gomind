@@ -1107,6 +1107,8 @@ if metrics.ComponentCallsFailed > 10 {
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GOMIND_ORCHESTRATION_TIMEOUT` | `60s` | HTTP client timeout for tool/agent calls. For long-running AI workflows, set higher values (e.g., `5m`, `10m`). Uses Go duration format. |
+| `GOMIND_TIERED_RESOLUTION_ENABLED` | `true` | Enable tiered capability resolution for LLM token optimization. Automatically selects relevant tools before plan generation. |
+| `GOMIND_TIERED_MIN_TOOLS` | `20` | Minimum tool count to trigger tiered resolution. Below this threshold, all tools are sent directly. |
 | `GOMIND_LLM_DEBUG_ENABLED` | `false` | Enable LLM debug payload capture for production debugging |
 | `GOMIND_LLM_DEBUG_TTL` | `24h` | TTL for successful debug records |
 | `GOMIND_LLM_DEBUG_ERROR_TTL` | `168h` | TTL for error debug records (7 days) |
@@ -1126,14 +1128,29 @@ export GOMIND_LLM_DEBUG_ENABLED=true
 config := &orchestration.OrchestratorConfig{
     // Routing mode
     RoutingMode: orchestration.ModeAutonomous,  // Options: ModeAutonomous, ModeWorkflow
-    
-    // Synthesis strategy  
+
+    // Synthesis strategy
     SynthesisStrategy: orchestration.StrategyLLM, // Options: StrategyLLM, StrategyTemplate, StrategySimple
-    
+
     // Capability Provider (for scaling)
     CapabilityProviderType: "default",  // Options: "default" or "service"
     EnableFallback: true,                // Fallback to default provider on service failure
-    
+
+    // Tiered Capability Resolution (token optimization)
+    // Enabled by default - uses 2-phase approach for 20+ tools
+    EnableTieredResolution: true,
+    TieredResolution: orchestration.TieredCapabilityConfig{
+        MinToolsForTiering: 20,  // Threshold to trigger tiered resolution
+    },
+
+    // Prompt customization
+    PromptConfig: orchestration.PromptConfig{
+        // SystemInstructions defines the orchestrator's persona and behavioral context
+        // Similar to LangChain's system_prompt, AutoGen's system_message
+        SystemInstructions: `You are a helpful assistant.
+Prioritize accuracy and provide practical recommendations.`,
+    },
+
     // Execution configuration
     ExecutionOptions: orchestration.ExecutionOptions{
         MaxConcurrency:   5,                // Maximum parallel tool/agent calls
@@ -1145,7 +1162,7 @@ config := &orchestration.OrchestratorConfig{
         FailureThreshold: 5,                // Circuit breaker threshold
         RecoveryTimeout:  30 * time.Second, // Circuit breaker recovery
     },
-    
+
     // History and caching
     HistorySize:  100,              // Execution history buffer size
     CacheEnabled: true,              // Enable routing cache
@@ -1174,18 +1191,55 @@ When you have hundreds or thousands of agents and tools, sending ALL their capab
 
 ### The Solution: Smart Capability Discovery
 
-The orchestration module provides two strategies:
+The orchestration module provides three strategies:
 
-#### 1. Default Provider (Small Scale: < 200 agents)
+#### 1. Default Provider (Small Scale: < 20 tools)
 ```go
 // Sends ALL capabilities to LLM (original behavior)
 config := orchestration.DefaultConfig()
-config.CapabilityProviderType = "default"  // This is the default
+config.CapabilityProviderType = "default"
+config.EnableTieredResolution = false  // Disable tiering for small deployments
 
 // Simple, no external dependencies, perfect for getting started
 ```
 
-#### 2. Service Provider (Large Scale: 100s-1000s of agents)
+#### 2. Tiered Resolution (Medium Scale: 20-100 tools) - **Default**
+
+A 2-phase approach that reduces LLM token usage by 50-75% without external services.
+
+**How it works:**
+1. **Phase 1 (Tier 1)**: Send lightweight tool summaries to LLM for tool selection
+2. **Phase 2 (Tier 2)**: Fetch full schemas only for selected tools
+3. **Phase 3 (Tier 3)**: Generate execution plan with focused context
+
+```go
+// Enabled by default for optimal token usage
+config := orchestration.DefaultConfig()
+// EnableTieredResolution: true (default)
+// TieredResolution.MinToolsForTiering: 20 (default)
+
+// Or configure explicitly
+config.EnableTieredResolution = true
+config.TieredResolution = orchestration.TieredCapabilityConfig{
+    MinToolsForTiering: 25,  // Custom threshold (default: 20)
+}
+```
+
+**Environment configuration:**
+```bash
+export GOMIND_TIERED_RESOLUTION_ENABLED=true
+export GOMIND_TIERED_MIN_TOOLS=20
+```
+
+**Token savings (example: 50 tools, user needs 3):**
+| Approach | Total Tokens | Savings |
+|----------|--------------|---------|
+| All tools | ~13,000 | - |
+| Tiered | ~6,500 | **50%** |
+
+> 📖 **For detailed design and research references, see [Tiered Capability Resolution Design](notes/TIERED_CAPABILITY_RESOLUTION.md).**
+
+#### 3. Service Provider (Large Scale: 100s-1000s of agents)
 
 **Kubernetes (Recommended):** Use environment variable for the endpoint:
 ```bash
@@ -1292,8 +1346,9 @@ The service provider includes built-in resilience:
 
 | Scenario | Provider | Why |
 |----------|----------|-----|
-| **Development/Testing** | Default | Simple, no dependencies |
-| **< 200 agents** | Default | Token usage acceptable |
+| **Development/Testing** | Default (tiered disabled) | Simple, fast iteration |
+| **< 20 tools** | Default (tiered disabled) | Overhead not worth it |
+| **20-100 tools** | Tiered (default) | 50-75% token savings, no external dependencies |
 | **100s-1000s agents** | Service | Semantic search scales better |
 | **Production critical** | Service + Circuit Breaker | Maximum resilience |
 
