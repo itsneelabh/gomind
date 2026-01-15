@@ -195,47 +195,15 @@ cmd_infra() {
 }
 
 setup_api_keys() {
-    print_header "Setting up AI API keys"
+    print_header "Setting up configuration"
 
     load_env
 
-    # Check if secret already exists
-    if kubectl get secret ai-api-keys -n "$NAMESPACE" &> /dev/null; then
-        print_info "AI API keys secret already exists"
-        read -p "Do you want to update it? (y/N) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            return 0
-        fi
-        kubectl delete secret ai-api-keys -n "$NAMESPACE"
-    fi
+    # Country Info Tool uses the free RestCountries API - no API keys needed
+    print_info "Country Info Tool uses the free RestCountries API - no API keys required"
 
-    # Collect API keys
-    if [ -z "$OPENAI_API_KEY" ]; then
-        read -p "Enter OpenAI API Key (or press Enter to skip): " OPENAI_API_KEY
-    fi
-
-    if [ -z "$ANTHROPIC_API_KEY" ]; then
-        read -p "Enter Anthropic API Key (or press Enter to skip): " ANTHROPIC_API_KEY
-    fi
-
-    if [ -z "$GROQ_API_KEY" ]; then
-        read -p "Enter Groq API Key (or press Enter to skip): " GROQ_API_KEY
-    fi
-
-    # Create secret with available keys
-    local secret_args=""
-    [ -n "$OPENAI_API_KEY" ] && secret_args="$secret_args --from-literal=OPENAI_API_KEY=$OPENAI_API_KEY"
-    [ -n "$ANTHROPIC_API_KEY" ] && secret_args="$secret_args --from-literal=ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
-    [ -n "$GROQ_API_KEY" ] && secret_args="$secret_args --from-literal=GROQ_API_KEY=$GROQ_API_KEY"
-
-    if [ -z "$secret_args" ]; then
-        print_error "No API keys provided"
-        exit 1
-    fi
-
-    kubectl create secret generic ai-api-keys -n "$NAMESPACE" $secret_args
-    print_success "AI API keys secret created"
+    # Skip secret creation for this tool
+    print_success "Configuration complete (no API keys needed)"
 }
 
 ################################################################################

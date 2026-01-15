@@ -255,31 +255,32 @@ cmd_forward() {
 cmd_forward_all() {
     print_header "Port Forwarding - All Services"
 
-    # Kill existing port-forwards
-    if [ -f /tmp/geocoding-tool-forward-all.pid ]; then
-        print_info "Stopping existing port forwards..."
-        pkill -F /tmp/geocoding-tool-forward-all.pid 2>/dev/null || true
-        rm -f /tmp/geocoding-tool-forward-all.pid
+    # Only kill this tool's port forward (preserve shared services for other tools/agents)
+    pkill -f "port-forward.*geocoding-tool" 2>/dev/null || true
+    sleep 1
+
+    # Start tool port forward
+    print_info "Starting port forwards..."
+    kubectl port-forward -n "${NAMESPACE}" svc/geocoding-tool-service 8095:80 >/dev/null 2>&1 &
+
+    # Start shared monitoring forwards ONLY if not already running
+    if ! nc -z localhost 3000 2>/dev/null; then
+        kubectl port-forward -n "${NAMESPACE}" svc/grafana 3000:80 >/dev/null 2>&1 &
+    else
+        print_info "Grafana already forwarded on port 3000 (reusing)"
     fi
 
-    # Start new port forwards in background
-    print_info "Starting port forwards..."
+    if ! nc -z localhost 9090 2>/dev/null; then
+        kubectl port-forward -n "${NAMESPACE}" svc/prometheus 9090:9090 >/dev/null 2>&1 &
+    else
+        print_info "Prometheus already forwarded on port 9090 (reusing)"
+    fi
 
-    # Tool service
-    kubectl port-forward -n "${NAMESPACE}" "service/${APP_NAME}" 8095:80 > /tmp/geocoding-tool-pf.log 2>&1 &
-    echo $! > /tmp/geocoding-tool-forward-all.pid
-
-    # Grafana
-    kubectl port-forward -n monitoring service/grafana 3000:3000 > /tmp/grafana-pf.log 2>&1 &
-    echo $! >> /tmp/geocoding-tool-forward-all.pid
-
-    # Prometheus
-    kubectl port-forward -n monitoring service/prometheus 9090:9090 > /tmp/prometheus-pf.log 2>&1 &
-    echo $! >> /tmp/geocoding-tool-forward-all.pid
-
-    # Jaeger
-    kubectl port-forward -n monitoring service/jaeger 16686:16686 > /tmp/jaeger-pf.log 2>&1 &
-    echo $! >> /tmp/geocoding-tool-forward-all.pid
+    if ! nc -z localhost 16686 2>/dev/null; then
+        kubectl port-forward -n "${NAMESPACE}" svc/jaeger-query 16686:80 >/dev/null 2>&1 &
+    else
+        print_info "Jaeger already forwarded on port 16686 (reusing)"
+    fi
 
     sleep 2
 
@@ -291,8 +292,7 @@ cmd_forward_all() {
     print_info "  - Prometheus: http://localhost:9090"
     print_info "  - Jaeger: http://localhost:16686"
     echo ""
-    print_info "PIDs saved to: /tmp/geocoding-tool-forward-all.pid"
-    print_info "To stop all: pkill -F /tmp/geocoding-tool-forward-all.pid"
+    print_info "Press Ctrl+C to stop this tool's port forward"
 }
 
 # Show logs

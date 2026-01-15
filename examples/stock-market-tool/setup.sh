@@ -332,9 +332,9 @@ cmd_forward() {
 cmd_forward_all() {
     print_header "Port Forwarding All Services"
 
-    # Kill any existing port forwards
-    pkill -f "kubectl port-forward.*$NAMESPACE" 2>/dev/null || true
-    sleep 2
+    # Only kill this tool's port forward (preserve shared services for other tools/agents)
+    pkill -f "port-forward.*stock-service" 2>/dev/null || true
+    sleep 1
 
     print_info "Starting port forwards..."
 
@@ -342,24 +342,34 @@ cmd_forward_all() {
     kubectl port-forward -n $NAMESPACE svc/stock-service 8082:80 >/dev/null 2>&1 &
     print_success "Stock Tool: http://localhost:8082"
 
-    # Grafana
-    kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
-    print_success "Grafana: http://localhost:3000 (admin/admin)"
+    # Start shared monitoring forwards ONLY if not already running
+    if ! nc -z localhost 3000 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+        print_success "Grafana: http://localhost:3000 (admin/admin)"
+    else
+        print_info "Grafana already forwarded on port 3000 (reusing)"
+    fi
 
-    # Prometheus
-    kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
-    print_success "Prometheus: http://localhost:9090"
+    if ! nc -z localhost 9090 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+        print_success "Prometheus: http://localhost:9090"
+    else
+        print_info "Prometheus already forwarded on port 9090 (reusing)"
+    fi
 
-    # Jaeger
-    kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
-    print_success "Jaeger: http://localhost:16686"
+    if ! nc -z localhost 16686 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:80 >/dev/null 2>&1 &
+        print_success "Jaeger: http://localhost:16686"
+    else
+        print_info "Jaeger already forwarded on port 16686 (reusing)"
+    fi
 
     echo ""
     print_info "Port forwards running in background"
-    print_info "To stop: pkill -f 'kubectl port-forward'"
+    print_info "To stop this tool's port forward: pkill -f 'port-forward.*stock-service'"
     echo ""
     print_info "Waiting for services to be ready..."
-    sleep 5
+    sleep 3
 }
 
 # View logs

@@ -3,8 +3,8 @@ module github.com/itsneelabh/gomind/examples/news-tool
 go 1.25
 
 require (
-	github.com/itsneelabh/gomind/core v0.8.3
-	github.com/itsneelabh/gomind/telemetry v0.8.3
+	github.com/itsneelabh/gomind/core v0.9.1
+	github.com/itsneelabh/gomind/telemetry v0.9.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0
 	go.opentelemetry.io/otel v1.38.0
 )

@@ -58,58 +58,74 @@ A comprehensive example demonstrating how to build a **Tool** (passive component
 
 > **Note**: The tool works without an API key using mock/simulated data, which is useful for development and testing.
 
-### Option 1: Complete Setup (Easiest)
+### Quick Start (Recommended)
 
 ```bash
-# 1. Navigate to the example
 cd examples/tool-example
 
-# 2. (Optional) Configure Weather API key for real data
-cp .env.example .env
-# Edit .env and add your WEATHER_API_KEY (tool works with mock data without key)
-
-# 3. Deploy everything with one command
-make all
-
-# That's it! The tool is now running in your local Kind cluster.
+# 1. Create .env from the example file (safe - won't overwrite existing)
+[ ! -f .env ] && cp .env.example .env
 ```
 
-### Option 2: Step-by-Step Setup
+**Optional:** Open `.env` and configure your Weather API key for real data:
+- `WEATHER_API_KEY=your-key` (Get free key at [weatherapi.com](https://www.weatherapi.com/))
+- Without a key, the tool returns mock data (useful for development)
 
 ```bash
-# 1. Create Kind cluster and install dependencies
-make setup
+# 2. Deploy everything with one command
+./setup.sh full-deploy
+```
 
-# 2. Deploy the weather tool
-make deploy
+**What `./setup.sh full-deploy` does:**
+1. Creates a Kind Kubernetes cluster with proper port mappings
+2. Deploys infrastructure (Redis, Prometheus, Grafana, Jaeger)
+3. Builds and deploys the weather tool
+4. Sets up port forwarding automatically
 
-# 3. Test the deployment
-make test
+Once complete, the tool is available at:
 
-# 4. View logs
-make logs
+| Service | URL | Description |
+|---------|-----|-------------|
+| **Weather Tool API** | http://localhost:8090 | REST API for weather data |
+| **Health Check** | http://localhost:8090/health | Health status endpoint |
+
+### Step-by-Step Deployment
+
+If you prefer to understand each step or need more control:
+
+```bash
+# 1. Create Kind cluster
+./setup.sh cluster
+
+# 2. Deploy infrastructure
+./setup.sh infra
+
+# 3. Deploy the weather tool
+./setup.sh deploy
+
+# 4. Set up port forwarding
+./setup.sh forward-all
+
+# 5. Test the deployment
+./setup.sh test
 ```
 
 ### Test the Deployed Tool
 
 ```bash
-# Port forward to access the tool
-kubectl port-forward -n gomind-examples svc/weather-service 8080:80
-
-# In another terminal:
 # Health check
-curl http://localhost:8080/health
+curl http://localhost:8090/health
 
 # List all capabilities
-curl http://localhost:8080/api/capabilities
+curl http://localhost:8090/api/capabilities
 
 # Test current weather capability
-curl -X POST http://localhost:8080/api/capabilities/current_weather \
+curl -X POST http://localhost:8090/api/capabilities/current_weather \
   -H "Content-Type: application/json" \
   -d '{"location":"New York","units":"metric"}'
 
 # Test Phase 3 schema endpoint (v0.6.4 feature)
-curl http://localhost:8080/api/capabilities/current_weather/schema
+curl http://localhost:8090/api/capabilities/current_weather/schema
 ```
 
 ### Expected Response

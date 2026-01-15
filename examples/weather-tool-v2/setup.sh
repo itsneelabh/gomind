@@ -305,16 +305,32 @@ cmd_forward() {
 cmd_forward_all() {
     print_header "Port Forwarding (All Services)"
 
-    # Kill existing port forwards
-    pkill -f "kubectl.*port-forward.*$NAMESPACE" 2>/dev/null || true
-    sleep 2
+    # Only kill this tool's port forward (preserve shared services for other tools/agents)
+    pkill -f "port-forward.*$APP_NAME" 2>/dev/null || true
+    sleep 1
 
-    # Start port forwarding in background
+    # Start tool port forward
     print_info "Starting port forwards..."
     kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8096:80 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
+
+    # Start shared monitoring forwards ONLY if not already running
+    if ! nc -z localhost 3000 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+    else
+        print_info "Grafana already forwarded on port 3000 (reusing)"
+    fi
+
+    if ! nc -z localhost 9090 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+    else
+        print_info "Prometheus already forwarded on port 9090 (reusing)"
+    fi
+
+    if ! nc -z localhost 16686 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:80 >/dev/null 2>&1 &
+    else
+        print_info "Jaeger already forwarded on port 16686 (reusing)"
+    fi
 
     sleep 2
     print_success "Port forwarding active"
@@ -330,7 +346,7 @@ cmd_forward_all() {
     echo "    -H 'Content-Type: application/json' \\"
     echo "    -d '{\"lat\": 40.7128, \"lon\": -74.0060}'"
     echo ""
-    echo "Press Ctrl+C or run: pkill -f 'kubectl.*port-forward.*$NAMESPACE'"
+    echo "Press Ctrl+C to stop this tool's port forward"
 }
 
 # View logs
