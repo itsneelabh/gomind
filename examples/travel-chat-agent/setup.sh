@@ -183,35 +183,49 @@ setup_redis() {
 
 # Check for API keys
 check_api_keys() {
-    local has_key=false
-    local key_source=""
+    local found_keys=""
 
-    # Check environment variable first
+    # Check OpenAI
     if [ -n "$OPENAI_API_KEY" ]; then
-        has_key=true
-        key_source="environment variable"
-    # Then check .env file
+        found_keys="OpenAI (env)"
     elif [ -f .env ] && grep -q "^OPENAI_API_KEY=sk-" .env; then
-        has_key=true
-        key_source=".env file"
+        found_keys="OpenAI (.env)"
     fi
 
-    if [ "$has_key" = true ]; then
-        log_success "OpenAI API key found ($key_source)"
+    # Check Anthropic
+    if [ -n "$ANTHROPIC_API_KEY" ]; then
+        [ -n "$found_keys" ] && found_keys="$found_keys, "
+        found_keys="${found_keys}Anthropic (env)"
+    elif [ -f .env ] && grep -q "^ANTHROPIC_API_KEY=sk-ant-" .env; then
+        [ -n "$found_keys" ] && found_keys="$found_keys, "
+        found_keys="${found_keys}Anthropic (.env)"
+    fi
+
+    # Check Groq
+    if [ -n "$GROQ_API_KEY" ]; then
+        [ -n "$found_keys" ] && found_keys="$found_keys, "
+        found_keys="${found_keys}Groq (env)"
+    elif [ -f .env ] && grep -q "^GROQ_API_KEY=gsk_" .env; then
+        [ -n "$found_keys" ] && found_keys="$found_keys, "
+        found_keys="${found_keys}Groq (.env)"
+    fi
+
+    if [ -n "$found_keys" ]; then
+        log_success "AI provider key(s) found: $found_keys"
         return 0
     else
-        log_warn "No OpenAI API key configured"
+        log_warn "No AI provider API keys configured"
         echo ""
         echo -e "${YELLOW}┌────────────────────────────────────────────────────────────┐${NC}"
         echo -e "${YELLOW}│  AI Features Require an API Key                            │${NC}"
         echo -e "${YELLOW}├────────────────────────────────────────────────────────────┤${NC}"
-        echo -e "${YELLOW}│  To add your API key:                                      │${NC}"
+        echo -e "${YELLOW}│  Configure at least ONE provider in your .env file:        │${NC}"
         echo -e "${YELLOW}│                                                            │${NC}"
-        echo -e "${YELLOW}│  Option 1: Add to .env file                                │${NC}"
-        echo -e "${YELLOW}│    echo 'OPENAI_API_KEY=sk-your-key' >> .env               │${NC}"
+        echo -e "${YELLOW}│    OPENAI_API_KEY=sk-your-key                              │${NC}"
+        echo -e "${YELLOW}│    ANTHROPIC_API_KEY=sk-ant-your-key                       │${NC}"
+        echo -e "${YELLOW}│    GROQ_API_KEY=gsk_your-key                               │${NC}"
         echo -e "${YELLOW}│                                                            │${NC}"
-        echo -e "${YELLOW}│  Option 2: Export environment variable                     │${NC}"
-        echo -e "${YELLOW}│    export OPENAI_API_KEY=sk-your-key                       │${NC}"
+        echo -e "${YELLOW}│  Multiple providers enable automatic failover.             │${NC}"
         echo -e "${YELLOW}└────────────────────────────────────────────────────────────┘${NC}"
         echo ""
         return 1
@@ -278,10 +292,9 @@ build_docker() {
         no_cache_flag="--no-cache"
     fi
 
-    # Build chat agent using workspace Dockerfile (includes local module changes)
-    local GOMIND_ROOT="$(dirname "$EXAMPLES_DIR")"
-    docker build $no_cache_flag -f "$SCRIPT_DIR/Dockerfile.workspace" -t travel-chat-agent:latest "$GOMIND_ROOT"
-    log_success "travel-chat-agent:latest built"
+    # Build chat agent using standalone Dockerfile (fetches dependencies from GitHub v0.9.1)
+    docker build $no_cache_flag -t travel-chat-agent:latest "$SCRIPT_DIR"
+    log_success "travel-chat-agent:latest built (from GitHub v0.9.1)"
 
     # Build chat UI (using nginx)
     if [ -d "$CHAT_UI_DIR" ]; then
@@ -452,26 +465,44 @@ port_forward() {
 port_forward_all() {
     log_info "Setting up port forwards for agent, UI, and monitoring..."
 
-    # Kill only port forwards for this agent's services (preserve jaeger, registry-viewer, etc.)
+    # Only kill this agent's port forwards (preserve shared services for other agents)
     pkill -f "port-forward.*travel-chat-agent" 2>/dev/null || true
     pkill -f "port-forward.*chat-ui" 2>/dev/null || true
-    pkill -f "port-forward.*grafana" 2>/dev/null || true
-    pkill -f "port-forward.*prometheus" 2>/dev/null || true
-    pkill -f "port-forward.*otel-collector.*4318" 2>/dev/null || true
 
-    sleep 2
+    sleep 1
 
-    # Start port forwarding in background
+    # Start agent and UI port forwards
     kubectl port-forward -n $NAMESPACE svc/travel-chat-agent-service $AGENT_PORT:80 >/dev/null 2>&1 &
 
     if kubectl get svc chat-ui-service -n $NAMESPACE &>/dev/null; then
         kubectl port-forward -n $NAMESPACE svc/chat-ui-service $UI_PORT:80 >/dev/null 2>&1 &
     fi
 
-    kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/otel-collector 4318:4318 >/dev/null 2>&1 &
+    # Start shared monitoring forwards ONLY if not already running
+    # This prevents disrupting other agents that may be using these services
+    if ! nc -z localhost 3000 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+    else
+        log_info "Grafana already forwarded on port 3000 (reusing)"
+    fi
+
+    if ! nc -z localhost 9090 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+    else
+        log_info "Prometheus already forwarded on port 9090 (reusing)"
+    fi
+
+    if ! nc -z localhost 16686 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:80 >/dev/null 2>&1 &
+    else
+        log_info "Jaeger already forwarded on port 16686 (reusing)"
+    fi
+
+    if ! nc -z localhost 4318 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/otel-collector 4318:4318 >/dev/null 2>&1 &
+    else
+        log_info "OTEL Collector already forwarded on port 4318 (reusing)"
+    fi
 
     sleep 3
 

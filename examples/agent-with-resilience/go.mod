@@ -4,9 +4,9 @@ go 1.25
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/itsneelabh/gomind/ai v0.8.3
-	github.com/itsneelabh/gomind/core v0.8.3
-	github.com/itsneelabh/gomind/resilience v0.8.3
+	github.com/itsneelabh/gomind/ai v0.9.1
+	github.com/itsneelabh/gomind/core v0.9.1
+	github.com/itsneelabh/gomind/resilience v0.9.1
 )
 
 require (
@@ -18,7 +18,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
-	github.com/itsneelabh/gomind/telemetry v0.8.3 // indirect
+	github.com/itsneelabh/gomind/telemetry v0.9.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.58.0 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect

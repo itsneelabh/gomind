@@ -371,6 +371,10 @@ cmd_forward_all() {
     echo -e "${GREEN}Starting port forwards...${NC}"
     echo ""
 
+    # Only kill this agent's port forward (preserve shared services for other agents)
+    pkill -f "port-forward.*$APP_NAME" 2>/dev/null || true
+    sleep 1
+
     # Port forward agent
     if kubectl get svc $APP_NAME-service -n $NAMESPACE &>/dev/null; then
         kubectl port-forward -n $NAMESPACE svc/$APP_NAME-service 8090:80 >/dev/null 2>&1 &
@@ -379,26 +383,38 @@ cmd_forward_all() {
         print_warning "Agent service not found"
     fi
 
-    # Port forward Grafana
+    # Port forward Grafana - only if not already forwarded
     if kubectl get svc grafana -n $NAMESPACE &>/dev/null; then
-        kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
-        print_success "Grafana: http://localhost:3000"
+        if ! nc -z localhost 3000 2>/dev/null; then
+            kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+            print_success "Grafana: http://localhost:3000"
+        else
+            print_success "Grafana: http://localhost:3000 (already forwarded, reusing)"
+        fi
     else
         print_warning "Grafana service not found"
     fi
 
-    # Port forward Prometheus
+    # Port forward Prometheus - only if not already forwarded
     if kubectl get svc prometheus -n $NAMESPACE &>/dev/null; then
-        kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
-        print_success "Prometheus: http://localhost:9090"
+        if ! nc -z localhost 9090 2>/dev/null; then
+            kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+            print_success "Prometheus: http://localhost:9090"
+        else
+            print_success "Prometheus: http://localhost:9090 (already forwarded, reusing)"
+        fi
     else
         print_warning "Prometheus service not found"
     fi
 
-    # Port forward Jaeger
+    # Port forward Jaeger - only if not already forwarded
     if kubectl get svc jaeger-query -n $NAMESPACE &>/dev/null; then
-        kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
-        print_success "Jaeger: http://localhost:16686"
+        if ! nc -z localhost 16686 2>/dev/null; then
+            kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:80 >/dev/null 2>&1 &
+            print_success "Jaeger: http://localhost:16686"
+        else
+            print_success "Jaeger: http://localhost:16686 (already forwarded, reusing)"
+        fi
     else
         print_warning "Jaeger service not found"
     fi

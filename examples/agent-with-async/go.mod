@@ -4,10 +4,10 @@ go 1.25
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/itsneelabh/gomind/ai v0.8.3
-	github.com/itsneelabh/gomind/core v0.8.3
-	github.com/itsneelabh/gomind/orchestration v0.8.3
-	github.com/itsneelabh/gomind/telemetry v0.8.3
+	github.com/itsneelabh/gomind/ai v0.9.1
+	github.com/itsneelabh/gomind/core v0.9.1
+	github.com/itsneelabh/gomind/orchestration v0.9.1
+	github.com/itsneelabh/gomind/telemetry v0.9.1
 )
 
 require (

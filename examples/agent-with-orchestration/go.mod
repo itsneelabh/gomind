@@ -4,20 +4,11 @@ go 1.25
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/itsneelabh/gomind/ai v0.8.3
-	github.com/itsneelabh/gomind/core v0.8.3
-	github.com/itsneelabh/gomind/orchestration v0.8.3
-	github.com/itsneelabh/gomind/telemetry v0.8.3
+	github.com/itsneelabh/gomind/ai v0.9.1
+	github.com/itsneelabh/gomind/core v0.9.1
+	github.com/itsneelabh/gomind/orchestration v0.9.1
+	github.com/itsneelabh/gomind/telemetry v0.9.1
 	go.opentelemetry.io/otel v1.38.0
-)
-
-// Replace directives for Docker builds using local workspace modules
-// These are used by Dockerfile.workspace which copies local modules into /app/
-replace (
-	github.com/itsneelabh/gomind/ai => ../../ai
-	github.com/itsneelabh/gomind/core => ../../core
-	github.com/itsneelabh/gomind/orchestration => ../../orchestration
-	github.com/itsneelabh/gomind/telemetry => ../../telemetry
 )
 
 require (

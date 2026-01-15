@@ -176,22 +176,38 @@ setup_redis() {
 
 # Check for API keys
 check_api_keys() {
-    local has_key=false
-    local key_source=""
+    local found_keys=""
 
+    # Check OpenAI
     if [ -n "$OPENAI_API_KEY" ]; then
-        has_key=true
-        key_source="environment variable"
+        found_keys="OpenAI (env)"
     elif [ -f .env ] && grep -q "^OPENAI_API_KEY=sk-" .env; then
-        has_key=true
-        key_source=".env file"
+        found_keys="OpenAI (.env)"
     fi
 
-    if [ "$has_key" = true ]; then
-        log_success "OpenAI API key found ($key_source)"
+    # Check Anthropic
+    if [ -n "$ANTHROPIC_API_KEY" ]; then
+        [ -n "$found_keys" ] && found_keys="$found_keys, "
+        found_keys="${found_keys}Anthropic (env)"
+    elif [ -f .env ] && grep -q "^ANTHROPIC_API_KEY=sk-ant-" .env; then
+        [ -n "$found_keys" ] && found_keys="$found_keys, "
+        found_keys="${found_keys}Anthropic (.env)"
+    fi
+
+    # Check Groq
+    if [ -n "$GROQ_API_KEY" ]; then
+        [ -n "$found_keys" ] && found_keys="$found_keys, "
+        found_keys="${found_keys}Groq (env)"
+    elif [ -f .env ] && grep -q "^GROQ_API_KEY=gsk_" .env; then
+        [ -n "$found_keys" ] && found_keys="$found_keys, "
+        found_keys="${found_keys}Groq (.env)"
+    fi
+
+    if [ -n "$found_keys" ]; then
+        log_success "AI provider key(s) found: $found_keys"
         return 0
     else
-        log_warn "No OpenAI API key configured"
+        log_warn "No AI provider API keys configured"
         echo ""
         echo -e "${YELLOW}┌────────────────────────────────────────────────────────────┐${NC}"
         echo -e "${YELLOW}│  AI synthesis requires an API key                          │${NC}"
@@ -199,8 +215,13 @@ check_api_keys() {
         echo -e "${YELLOW}│  Without an API key, task processing works but AI          │${NC}"
         echo -e "${YELLOW}│  synthesis of results will be disabled.                    │${NC}"
         echo -e "${YELLOW}│                                                            │${NC}"
-        echo -e "${YELLOW}│  To add your API key:                                      │${NC}"
-        echo -e "${YELLOW}│    export OPENAI_API_KEY=sk-your-key                       │${NC}"
+        echo -e "${YELLOW}│  Configure at least ONE provider in your .env file:        │${NC}"
+        echo -e "${YELLOW}│                                                            │${NC}"
+        echo -e "${YELLOW}│    OPENAI_API_KEY=sk-your-key                              │${NC}"
+        echo -e "${YELLOW}│    ANTHROPIC_API_KEY=sk-ant-your-key                       │${NC}"
+        echo -e "${YELLOW}│    GROQ_API_KEY=gsk_your-key                               │${NC}"
+        echo -e "${YELLOW}│                                                            │${NC}"
+        echo -e "${YELLOW}│  Multiple providers enable automatic failover.             │${NC}"
         echo -e "${YELLOW}└────────────────────────────────────────────────────────────┘${NC}"
         echo ""
         return 1
@@ -450,16 +471,37 @@ port_forward() {
 port_forward_all() {
     log_info "Setting up port forwards for agent and monitoring..."
 
-    pkill -f "port-forward.*$NAMESPACE" 2>/dev/null || true
+    # Only kill this agent's port forward (preserve shared services for other agents)
+    pkill -f "port-forward.*$APP_NAME" 2>/dev/null || true
+
+    sleep 1
+
+    # Start agent port forward
+    kubectl port-forward -n $NAMESPACE svc/${APP_NAME}-service $AGENT_PORT:80 >/dev/null 2>&1 &
+
+    # Start shared monitoring forwards ONLY if not already running
+    if ! nc -z localhost 3000 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
+        log_success "Grafana: http://localhost:3000"
+    else
+        log_success "Grafana: http://localhost:3000 (already forwarded, reusing)"
+    fi
+
+    if ! nc -z localhost 9090 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
+        log_success "Prometheus: http://localhost:9090"
+    else
+        log_success "Prometheus: http://localhost:9090 (already forwarded, reusing)"
+    fi
+
+    if ! nc -z localhost 16686 2>/dev/null; then
+        kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:80 >/dev/null 2>&1 &
+        log_success "Jaeger: http://localhost:16686"
+    else
+        log_success "Jaeger: http://localhost:16686 (already forwarded, reusing)"
+    fi
 
     sleep 2
-
-    kubectl port-forward -n $NAMESPACE svc/${APP_NAME}-service $AGENT_PORT:80 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/grafana 3000:80 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/prometheus 9090:9090 >/dev/null 2>&1 &
-    kubectl port-forward -n $NAMESPACE svc/jaeger-query 16686:16686 >/dev/null 2>&1 &
-
-    sleep 3
 
     log_success "Port forwards established"
     print_summary

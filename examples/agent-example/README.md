@@ -2,7 +2,670 @@
 
 A comprehensive example demonstrating how to build an **Agent** (active orchestrator) using the GoMind framework. This agent can discover other components, orchestrate complex workflows, and use AI to intelligently coordinate multiple tools.
 
-## 🎯 What This Example Demonstrates
+## Table of Contents
+
+- [How to Run This Example](#how-to-run-this-example)
+  - [Prerequisites](#prerequisites)
+  - [Quick Start (Recommended)](#quick-start-recommended)
+  - [Step-by-Step Deployment](#step-by-step-deployment)
+- [What This Example Demonstrates](#what-this-example-demonstrates)
+- [3-Phase AI-Powered Payload Generation](#3-phase-ai-powered-payload-generation)
+- [Architecture](#architecture)
+- [Agent vs Tool Differences](#agent-vs-tool-differences)
+- [Testing the Agent](#testing-the-agent)
+- [Understanding the Code](#understanding-the-code)
+- [AI Integration Deep Dive](#ai-integration-deep-dive)
+- [Configuration](#configuration)
+- [Production Best Practices](#production-best-practices)
+- [Docker Usage](#docker-usage)
+- [Kubernetes Deployment](#kubernetes-deployment)
+- [Monitoring and Observability](#monitoring-and-observability)
+- [Advanced Usage and Customization](#advanced-usage-and-customization)
+- [Common Issues and Solutions](#common-issues-and-solutions)
+- [Redis Service Registry Example](#redis-service-registry-example)
+- [Next Steps and Extensions](#next-steps-and-extensions)
+- [Key Learnings](#key-learnings)
+
+---
+
+## How to Run This Example
+
+Running this example locally is the best way to understand how the GoMind framework enables agents to discover and orchestrate tools. Follow the steps below to get this example running.
+
+### Prerequisites
+
+Before running this example, you need to install the following tools. Choose the instructions for your operating system.
+
+#### 1. Docker Desktop
+
+Docker is required to build and run containers.
+
+| Platform | Installation Method |
+|----------|---------------------|
+| **macOS** | Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) and drag to Applications |
+| **Windows** | Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) and run the installer |
+| **Linux** | See [docs.docker.com/engine/install](https://docs.docker.com/engine/install/) for your distribution |
+
+<details>
+<summary><strong>macOS Installation Steps</strong></summary>
+
+1. Download Docker Desktop from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
+2. Double-click `Docker.dmg` to open the installer
+3. Drag the Docker icon to the Applications folder
+4. Double-click `Docker.app` in Applications to start Docker
+5. Follow the onboarding tutorial (optional)
+
+**Verify installation:**
+```bash
+docker --version
+# Expected: Docker version 24.x.x or later
+```
+
+**System Requirements:**
+- macOS 12 (Monterey) or later
+- At least 4 GB RAM
+- Apple Silicon (M1/M2/M3) or Intel processor
+
+</details>
+
+<details>
+<summary><strong>Windows Installation Steps</strong></summary>
+
+1. Download Docker Desktop from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
+2. Run the `Docker Desktop Installer.exe`
+3. Follow the installation wizard
+4. Restart your computer when prompted
+5. Start Docker Desktop from the Start menu
+
+**Verify installation:**
+```powershell
+docker --version
+# Expected: Docker version 24.x.x or later
+```
+
+**System Requirements:**
+- Windows 10 64-bit (Build 19041+) or Windows 11
+- WSL 2 backend (recommended) or Hyper-V
+- At least 4 GB RAM
+- BIOS virtualization enabled
+
+**Enable WSL 2 (if not already enabled):**
+```powershell
+wsl --install
+```
+
+</details>
+
+<details>
+<summary><strong>Linux Installation Steps (Ubuntu/Debian)</strong></summary>
+
+```bash
+# Remove old versions
+sudo apt-get remove docker docker-engine docker.io containerd runc
+
+# Install prerequisites
+sudo apt-get update
+sudo apt-get install ca-certificates curl gnupg
+
+# Add Docker's official GPG key
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Add the repository
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker Engine
+sudo apt-get update
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Add your user to the docker group (to run without sudo)
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+**Verify installation:**
+```bash
+docker --version
+docker run hello-world
+```
+
+</details>
+
+<details>
+<summary><strong>Linux Installation Steps (Fedora/RHEL)</strong></summary>
+
+```bash
+# Remove old versions
+sudo dnf remove docker docker-client docker-client-latest docker-common docker-latest
+
+# Install Docker
+sudo dnf -y install dnf-plugins-core
+sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+sudo dnf install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Start Docker
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Add your user to the docker group
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+**Verify installation:**
+```bash
+docker --version
+docker run hello-world
+```
+
+</details>
+
+---
+
+#### 2. Kind (Kubernetes in Docker)
+
+Kind runs local Kubernetes clusters using Docker containers.
+
+| Platform | Recommended Method | Alternative |
+|----------|-------------------|-------------|
+| **macOS** | `brew install kind` | Binary download |
+| **Windows** | `choco install kind` | `winget install Kubernetes.kind` |
+| **Linux** | Binary download | Package manager |
+
+<details>
+<summary><strong>macOS Installation</strong></summary>
+
+**Using Homebrew (recommended):**
+```bash
+brew install kind
+```
+
+**Using MacPorts:**
+```bash
+sudo port selfupdate && sudo port install kind
+```
+
+**Manual binary installation (Apple Silicon):**
+```bash
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-darwin-arm64
+chmod +x ./kind
+sudo mv ./kind /usr/local/bin/kind
+```
+
+**Manual binary installation (Intel):**
+```bash
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-darwin-amd64
+chmod +x ./kind
+sudo mv ./kind /usr/local/bin/kind
+```
+
+**Verify installation:**
+```bash
+kind --version
+# Expected: kind version 0.31.0 or later
+```
+
+</details>
+
+<details>
+<summary><strong>Windows Installation</strong></summary>
+
+**Using Chocolatey (recommended):**
+```powershell
+choco install kind
+```
+
+**Using Winget:**
+```powershell
+winget install Kubernetes.kind
+```
+
+**Using Scoop:**
+```powershell
+scoop bucket add main
+scoop install main/kind
+```
+
+**Manual binary installation:**
+```powershell
+curl.exe -Lo kind-windows-amd64.exe https://kind.sigs.k8s.io/dl/v0.31.0/kind-windows-amd64
+Move-Item .\kind-windows-amd64.exe C:\Windows\System32\kind.exe
+```
+
+**Verify installation:**
+```powershell
+kind --version
+# Expected: kind version 0.31.0 or later
+```
+
+</details>
+
+<details>
+<summary><strong>Linux Installation</strong></summary>
+
+**Binary installation (AMD64/x86_64):**
+```bash
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+chmod +x ./kind
+sudo mv ./kind /usr/local/bin/kind
+```
+
+**Binary installation (ARM64):**
+```bash
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-arm64
+chmod +x ./kind
+sudo mv ./kind /usr/local/bin/kind
+```
+
+**Using Go (if Go is installed):**
+```bash
+go install sigs.k8s.io/kind@v0.31.0
+```
+
+**Verify installation:**
+```bash
+kind --version
+# Expected: kind version 0.31.0 or later
+```
+
+</details>
+
+---
+
+#### 3. kubectl (Kubernetes CLI)
+
+kubectl is the command-line tool for interacting with Kubernetes clusters.
+
+| Platform | Recommended Method | Alternative |
+|----------|-------------------|-------------|
+| **macOS** | `brew install kubectl` | Binary download |
+| **Windows** | `choco install kubernetes-cli` | Binary download |
+| **Linux** | `apt install kubectl` | Binary download |
+
+<details>
+<summary><strong>macOS Installation</strong></summary>
+
+**Using Homebrew (recommended):**
+```bash
+brew install kubectl
+```
+
+**Manual binary installation (Apple Silicon):**
+```bash
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/darwin/arm64/kubectl"
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
+```
+
+**Manual binary installation (Intel):**
+```bash
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/darwin/amd64/kubectl"
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
+```
+
+**Verify installation:**
+```bash
+kubectl version --client
+# Expected: Client Version: v1.31.x or later
+```
+
+</details>
+
+<details>
+<summary><strong>Windows Installation</strong></summary>
+
+**Using Chocolatey (recommended):**
+```powershell
+choco install kubernetes-cli
+```
+
+**Using Winget:**
+```powershell
+winget install -e --id Kubernetes.kubectl
+```
+
+**Manual binary installation:**
+```powershell
+# Download kubectl
+curl.exe -LO "https://dl.k8s.io/release/v1.31.0/bin/windows/amd64/kubectl.exe"
+
+# Move to a directory in your PATH
+Move-Item .\kubectl.exe C:\Windows\System32\kubectl.exe
+```
+
+**Verify installation:**
+```powershell
+kubectl version --client
+# Expected: Client Version: v1.31.x or later
+```
+
+</details>
+
+<details>
+<summary><strong>Linux Installation</strong></summary>
+
+**Using apt (Ubuntu/Debian):**
+```bash
+# Add Kubernetes apt repository
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
+
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+sudo chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo chmod 644 /etc/apt/sources.list.d/kubernetes.list
+
+sudo apt-get update
+sudo apt-get install -y kubectl
+```
+
+**Using snap:**
+```bash
+sudo snap install kubectl --classic
+```
+
+**Manual binary installation:**
+```bash
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
+```
+
+**Verify installation:**
+```bash
+kubectl version --client
+# Expected: Client Version: v1.31.x or later
+```
+
+</details>
+
+---
+
+#### 4. Go Programming Language
+
+Go is required for local development and running without Docker.
+
+| Platform | Recommended Method | Alternative |
+|----------|-------------------|-------------|
+| **macOS** | `brew install go` | Download from go.dev |
+| **Windows** | Download MSI from go.dev | `choco install golang` |
+| **Linux** | Download tarball from go.dev | Package manager |
+
+<details>
+<summary><strong>macOS Installation</strong></summary>
+
+**Using Homebrew (recommended):**
+```bash
+brew install go
+```
+
+**Manual installation:**
+1. Download the macOS installer from [go.dev/dl](https://go.dev/dl/)
+2. Open the downloaded `.pkg` file
+3. Follow the installation prompts
+
+**Verify installation:**
+```bash
+go version
+# Expected: go version go1.25.x darwin/arm64 (or darwin/amd64)
+```
+
+**Set up Go workspace (if not using modules):**
+```bash
+# Add to ~/.zshrc or ~/.bash_profile
+export GOPATH=$HOME/go
+export PATH=$PATH:$GOPATH/bin
+```
+
+</details>
+
+<details>
+<summary><strong>Windows Installation</strong></summary>
+
+**Using the MSI installer (recommended):**
+1. Download the Windows installer from [go.dev/dl](https://go.dev/dl/)
+2. Run the `.msi` installer
+3. Follow the installation wizard
+4. The installer sets PATH automatically
+
+**Using Chocolatey:**
+```powershell
+choco install golang
+```
+
+**Verify installation:**
+```powershell
+go version
+# Expected: go version go1.25.x windows/amd64
+```
+
+</details>
+
+<details>
+<summary><strong>Linux Installation</strong></summary>
+
+**Manual installation (recommended for latest version):**
+```bash
+# Download Go (replace version as needed)
+curl -LO https://go.dev/dl/go1.25.linux-amd64.tar.gz
+
+# Remove any previous installation and extract
+sudo rm -rf /usr/local/go
+sudo tar -C /usr/local -xzf go1.25.linux-amd64.tar.gz
+
+# Add to PATH (add to ~/.bashrc or ~/.profile for persistence)
+export PATH=$PATH:/usr/local/go/bin
+```
+
+**Using apt (may not have latest version):**
+```bash
+sudo apt update
+sudo apt install golang-go
+```
+
+**Using snap:**
+```bash
+sudo snap install go --classic
+```
+
+**Verify installation:**
+```bash
+go version
+# Expected: go version go1.25.x linux/amd64
+```
+
+</details>
+
+---
+
+#### 5. AI Provider API Key (Required)
+
+This agent requires at least one AI provider API key for intelligent orchestration and analysis.
+
+| Provider | Get API Key | Notes |
+|----------|-------------|-------|
+| **OpenAI** | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | GPT-4o recommended |
+| **Anthropic** | [console.anthropic.com](https://console.anthropic.com/) | Claude models |
+| **Groq** | [console.groq.com/keys](https://console.groq.com/keys) | Fast inference, free tier |
+| **Google Gemini** | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Gemini models |
+| **DeepSeek** | [platform.deepseek.com](https://platform.deepseek.com/) | Advanced reasoning |
+
+**Auto-detection priority:** The agent automatically detects and uses the first available provider in this order:
+1. OpenAI (OPENAI_API_KEY)
+2. Groq (GROQ_API_KEY)
+3. DeepSeek (DEEPSEEK_API_KEY)
+4. Anthropic (ANTHROPIC_API_KEY)
+5. Gemini (GEMINI_API_KEY)
+6. Custom OpenAI-compatible (OPENAI_BASE_URL)
+
+**Multiple providers enable automatic failover** - if one provider fails, the agent tries the next.
+
+---
+
+### Verify All Prerequisites
+
+Run this script to verify all tools are installed correctly:
+
+```bash
+echo "Checking prerequisites..."
+echo ""
+
+echo "Docker:"
+docker --version || echo "  ERROR: Docker not found"
+echo ""
+
+echo "Kind:"
+kind --version || echo "  ERROR: Kind not found"
+echo ""
+
+echo "kubectl:"
+kubectl version --client --short 2>/dev/null || kubectl version --client || echo "  ERROR: kubectl not found"
+echo ""
+
+echo "Go:"
+go version || echo "  ERROR: Go not found"
+echo ""
+
+echo "All checks complete!"
+```
+
+> **Important:** This agent requires tools to be deployed to function. The research-agent discovers and orchestrates other tools (weather-tool, geocoding-tool, etc.) to answer queries. You can deploy tools before or after the agent, but the agent won't be able to orchestrate workflows until tools are running.
+
+### Quick Start (Recommended)
+
+The fastest way to get everything running in your local:
+
+```bash
+cd examples/agent-example
+
+# 1. Create .env from the example file (safe - won't overwrite existing)
+[ ! -f .env ] && cp .env.example .env
+```
+
+**⚠️ STOP HERE** - Open `.env` in your editor and configure your API key(s):
+
+```bash
+# Open .env in your preferred editor
+nano .env    # or: code .env / vim .env
+```
+
+At minimum, uncomment and set ONE of these in your `.env` file:
+- `OPENAI_API_KEY=sk-your-key`
+- `ANTHROPIC_API_KEY=sk-ant-your-key`
+- `GROQ_API_KEY=gsk_your-key`
+
+> **Note:** Multiple providers enable automatic failover.
+
+```bash
+# 2. Deploy cluster, infrastructure, and the agent
+./setup.sh full-deploy
+
+# 3. Deploy tools for the agent to discover (each tool has its own setup script)
+cd ../weather-tool-v2 && ./setup.sh deploy && cd ..
+cd ../geocoding-tool && ./setup.sh deploy && cd ..
+cd ../currency-tool && ./setup.sh deploy && cd ..
+```
+
+**What `./setup.sh full-deploy` does:**
+1. Creates a Kind Kubernetes cluster with proper port mappings
+2. Deploys infrastructure (Redis, monitoring)
+3. Builds and deploys the research-agent
+4. Creates AI secrets from environment variables
+5. Sets up port forwarding automatically
+
+**What you need to do separately:**
+- Deploy tools using each tool's setup script (Step 3 above)
+
+Once complete, access the agent at:
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **Agent API** | http://localhost:8090 | REST API for orchestration |
+| **Health Check** | http://localhost:8090/health | Agent health status |
+| **Capabilities** | http://localhost:8090/api/capabilities | List agent capabilities |
+
+### Step-by-Step Deployment
+
+If you prefer to understand each step or need more control:
+
+#### Step 1: Set Up Kind Cluster and Redis
+
+```bash
+cd examples/agent-example
+make setup
+```
+
+This creates a Kind cluster and deploys Redis for service discovery.
+
+#### Step 2: Configure AI Provider
+
+```bash
+# Create .env from example (safe - won't overwrite existing)
+[ ! -f .env ] && cp .env.example .env
+# Edit .env and uncomment/set your AI provider key(s)
+
+# Load environment and create secrets
+source .env
+make create-secrets
+```
+
+#### Step 3: Build and Deploy the Agent
+
+```bash
+make deploy
+```
+
+#### Step 4: Deploy Tools for Discovery
+
+Each tool has its own setup script:
+
+```bash
+# Deploy tools (from the examples directory)
+cd ../weather-tool-v2 && ./setup.sh deploy
+cd ../geocoding-tool && ./setup.sh deploy
+cd ../currency-tool && ./setup.sh deploy
+```
+
+> **Note:** The `k8-deployment` directory contains shared infrastructure (Redis, Prometheus, etc.), not tools.
+
+#### Step 5: Test the Deployment
+
+```bash
+make test
+```
+
+#### Step 6: Access the Agent
+
+```bash
+# Port forward to access locally
+kubectl port-forward -n gomind-examples svc/research-agent-service 8090:80
+
+# In another terminal, test it
+curl http://localhost:8090/health
+curl http://localhost:8090/api/capabilities
+```
+
+### Available Make Commands
+
+```bash
+make setup      # Create Kind cluster, install Redis
+make deploy     # Build and deploy the agent
+make test       # Run automated tests
+make logs       # View agent logs
+make status     # Check deployment status
+make clean      # Delete everything
+make help       # Show all commands
+```
+
+---
+
+## What This Example Demonstrates
 
 - **Agent Pattern**: Active component that can discover and orchestrate other components
 - **AI Integration**: Auto-detecting AI providers (OpenAI, Anthropic, Groq, etc.)
@@ -12,7 +675,9 @@ A comprehensive example demonstrating how to build an **Agent** (active orchestr
 - **Production Patterns**: Resilient HTTP calls, error handling, caching
 - **Kubernetes Deployment**: Complete K8s configuration with AI secrets
 
-## 🤖 3-Phase AI-Powered Payload Generation
+---
+
+## 3-Phase AI-Powered Payload Generation
 
 This example implements the complete 3-phase approach for AI-powered tool payload generation:
 
@@ -56,122 +721,50 @@ r.RegisterCapability(core.Capability{
 
 **Learn More**: See [Tool Schema Discovery Guide](../../docs/TOOL_SCHEMA_DISCOVERY_GUIDE.md) for complete documentation.
 
-## 🧠 Architecture
+---
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│            Research Assistant Agent             │
-│            (Active Orchestrator)                │
-├─────────────────────────────────────────────────┤
-│ AI Capabilities:                                │
-│ • Auto-detect providers (OpenAI/Anthropic/etc) │
-│ • Intelligent analysis and synthesis           │
-│ • Workflow planning                            │
-├─────────────────────────────────────────────────┤
-│ Orchestration Capabilities:                     │
-│ • research_topic (AI + tool coordination)      │
-│ • discover_tools (service discovery)           │
-│ • analyze_data (AI-powered analysis)           │
-│ • orchestrate_workflow (multi-step coordination)│
-├─────────────────────────────────────────────────┤
-│ Framework Features:                             │
-│ • Full Discovery powers                         │
-│ • Redis registry + discovery                   │
-│ • AI client auto-injection                     │
-│ • Context propagation                          │
-└─────────────────────────────────────────────────┘
++---------------------------------------------------+
+|            Research Assistant Agent               |
+|            (Active Orchestrator)                  |
++---------------------------------------------------+
+| AI Capabilities:                                  |
+| - Auto-detect providers (OpenAI/Anthropic/etc)   |
+| - Intelligent analysis and synthesis             |
+| - Workflow planning                              |
++---------------------------------------------------+
+| Orchestration Capabilities:                       |
+| - research_topic (AI + tool coordination)        |
+| - discover_tools (service discovery)             |
+| - analyze_data (AI-powered analysis)             |
+| - orchestrate_workflow (multi-step coordination) |
++---------------------------------------------------+
+| Framework Features:                               |
+| - Full Discovery powers                           |
+| - Redis registry + discovery                     |
+| - AI client auto-injection                       |
+| - Context propagation                            |
++---------------------------------------------------+
 ```
 
 **Key Principle**: Agents are **active** - they can discover other components and orchestrate complex workflows.
 
-## 🚀 Quick Start - Local Kind Cluster (2 minutes)
+---
 
-### Prerequisites
-- Docker Desktop or Docker Engine
-- [kind](https://kind.sigs.k8s.io/) - Kubernetes in Docker
-- [kubectl](https://kubernetes.io/docs/tasks/tools/) - Kubernetes CLI
-- Optional: AI API key (OpenAI, Anthropic, Groq, etc.)
+## Agent vs Tool Differences
 
-### Option 1: Complete Setup (Easiest)
+| Aspect | Tools (Passive) | Agents (Active) |
+|--------|----------------|----------------|
+| Discovery | Cannot discover others, can only register | Full discovery powers |
+| Orchestration | Cannot call others | Can coordinate workflows |
+| AI Integration | Can use AI internally | Can use AI for orchestration |
+| Framework Injection | Registry, Logger, Memory | Discovery, Logger, Memory, AI |
 
-```bash
-# 1. Navigate to the example
-cd examples/agent-example
+---
 
-# 2. (Optional) Configure AI provider
-cp .env.example .env
-# Edit .env and add your API key:
-#   OPENAI_API_KEY=sk-...
-
-# 3. Deploy everything with one command
-make all
-```
-
-That's it! The agent is now running in your local Kind cluster.
-
-### Option 2: Step-by-Step
-
-```bash
-# 1. Set up Kind cluster and Redis
-make setup
-
-# 2. Build and deploy the agent
-make deploy
-
-# 3. Test the deployment
-make test
-```
-
-### Accessing the Agent
-
-```bash
-# Port forward to access locally
-kubectl port-forward -n gomind-examples svc/research-agent-service 8090:80
-
-# In another terminal, test it
-curl http://localhost:8090/health
-curl http://localhost:8090/api/capabilities
-```
-
-### Configuring AI Provider
-
-The agent works without AI but has limited functionality. To enable full AI capabilities:
-
-**Method 1: Using .env file (Recommended)**
-```bash
-# Copy the example file
-cp .env.example .env
-
-# Then load it and recreate secrets
-source .env
-make create-secrets
-
-# Restart the agent to use new keys
-kubectl rollout restart deployment/research-agent -n gomind-examples
-```
-
-**Method 2: Environment Variables**
-```bash
-# Set directly in your shell
-export OPENAI_API_KEY="sk-..."
-
-# Then create secrets
-make create-secrets
-```
-
-### Available Make Commands
-
-```bash
-make setup      # Create Kind cluster, install Redis
-make deploy     # Build and deploy the agent
-make test       # Run automated tests
-make logs       # View agent logs
-make status     # Check deployment status
-make clean      # Delete everything
-make help       # Show all commands
-```
-
-## 🧪 Testing the Agent
+## Testing the Agent
 
 ### Understanding the `ai_synthesis` Parameter
 
@@ -195,7 +788,7 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
     "ai_synthesis": true,
     "max_results": 1
   }'
-# ✓ Works - AI provides recommendations directly
+# Works - AI provides recommendations directly
 
 # Same query without AI
 curl -X POST http://localhost:8090/api/capabilities/research_topic \
@@ -204,7 +797,7 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
     "topic": "Recommend top 3 wifi routers supporting 2 Gbps for home use",
     "ai_synthesis": false
   }'
-# ✗ Returns empty results - no relevant tools
+# Returns empty results - no relevant tools
 ```
 
 ### Basic Testing
@@ -233,11 +826,11 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
 curl -X POST http://localhost:8090/api/capabilities/analyze_data \
   -H "Content-Type: application/json" \
   -d '{
-    "data": "Temperature: 22°C, Humidity: 65%, Wind: 10 km/h, Condition: Partly cloudy"
+    "data": "Temperature: 22C, Humidity: 65%, Wind: 10 km/h, Condition: Partly cloudy"
   }'
 ```
 
-### 4. Expected Response (Research Topic)
+### Expected Response (Research Topic)
 
 ```json
 {
@@ -258,7 +851,7 @@ curl -X POST http://localhost:8090/api/capabilities/analyze_data \
       "duration": "120ms"
     }
   ],
-  "ai_analysis": "Based on the weather data, New York is experiencing pleasant conditions with partly cloudy skies and comfortable temperatures around 22°C...",
+  "ai_analysis": "Based on the weather data, New York is experiencing pleasant conditions with partly cloudy skies and comfortable temperatures around 22C...",
   "confidence": 1.0,
   "processing_time": "342ms",
   "metadata": {
@@ -269,16 +862,9 @@ curl -X POST http://localhost:8090/api/capabilities/analyze_data \
 }
 ```
 
-## 📊 Understanding the Code
+---
 
-### Agent vs Tool Differences
-
-| Aspect | Tools (Passive) | Agents (Active) |
-|--------|----------------|----------------|
-| Discovery | ❌ Can only register | ✅ Full discovery powers |
-| Orchestration | ❌ Cannot call others | ✅ Can coordinate workflows |
-| AI Integration | ✅ Can use AI internally | ✅ Can use AI for orchestration |
-| Framework Injection | Registry, Logger, Memory | Discovery, Logger, Memory, AI |
+## Understanding the Code
 
 ### Core Agent Pattern
 
@@ -309,13 +895,13 @@ func (r *ResearchAgent) handleResearchTopic(w http.ResponseWriter, req *http.Req
     tools, _ := r.Discovery.Discover(ctx, core.DiscoveryFilter{
         Type: core.ComponentTypeTool,
     })
-    
+
     // Orchestrate calls to multiple tools
     for _, tool := range tools {
         result := r.callTool(ctx, tool, query)
         // Process results...
     }
-    
+
     // Use AI to synthesize results
     if r.aiClient != nil {
         analysis := r.generateAIAnalysis(ctx, topic, results)
@@ -330,7 +916,7 @@ The agent automatically detects and configures the best available AI provider:
 ```go
 // Auto-detection priority (in order):
 // 1. OpenAI (OPENAI_API_KEY)
-// 2. Groq (GROQ_API_KEY) - Fast inference, free tier  
+// 2. Groq (GROQ_API_KEY) - Fast inference, free tier
 // 3. DeepSeek (DEEPSEEK_API_KEY) - Advanced reasoning
 // 4. Anthropic (ANTHROPIC_API_KEY)
 // 5. Gemini (GEMINI_API_KEY)
@@ -351,7 +937,7 @@ func (r *ResearchAgent) handleResearchTopic(w http.ResponseWriter, req *http.Req
     tools, err := r.Discovery.Discover(ctx, core.DiscoveryFilter{
         Type: core.ComponentTypeTool, // Only tools
     })
-    
+
     // Step 2: Filter relevant tools for the topic
     var relevantTools []*core.ServiceInfo
     for _, tool := range tools {
@@ -359,14 +945,14 @@ func (r *ResearchAgent) handleResearchTopic(w http.ResponseWriter, req *http.Req
             relevantTools = append(relevantTools, tool)
         }
     }
-    
+
     // Step 3: Call each relevant tool
     var results []ToolResult
     for _, tool := range relevantTools {
         result := r.callTool(ctx, tool, request.Topic)
         results = append(results, result)
     }
-    
+
     // Step 4: Use AI to synthesize (if available)
     if r.aiClient != nil && request.AISynthesis {
         analysis := r.generateAIAnalysis(ctx, request.Topic, results)
@@ -385,14 +971,14 @@ func (r *ResearchAgent) callTool(ctx context.Context, tool *core.ServiceInfo, qu
         endpoint = fmt.Sprintf("/api/capabilities/%s", capability.Name)
     }
     url := fmt.Sprintf("http://%s:%d%s", tool.Address, tool.Port, endpoint)
-    
+
     // Create HTTP request with timeout
     httpCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
     defer cancel()
-    
+
     req, _ := http.NewRequestWithContext(httpCtx, "POST", url, body)
     req.Header.Set("Content-Type", "application/json")
-    
+
     // Make resilient HTTP call
     client := &http.Client{Timeout: 10 * time.Second}
     resp, err := client.Do(req)
@@ -400,12 +986,12 @@ func (r *ResearchAgent) callTool(ctx context.Context, tool *core.ServiceInfo, qu
         return &ToolResult{Success: false, Error: err.Error()}
     }
     defer resp.Body.Close()
-    
+
     // Handle response
     body, _ := io.ReadAll(resp.Body)
     var data interface{}
     json.Unmarshal(body, &data)
-    
+
     return &ToolResult{
         ToolName:   tool.Name,
         Data:       data,
@@ -415,7 +1001,9 @@ func (r *ResearchAgent) callTool(ctx context.Context, tool *core.ServiceInfo, qu
 }
 ```
 
-## 🤖 AI Integration Deep Dive
+---
+
+## AI Integration Deep Dive
 
 ### Supported Providers
 
@@ -447,7 +1035,7 @@ export OPENAI_BASE_URL="http://localhost:8000/v1"  # vLLM
 ```go
 func (r *ResearchAgent) generateAIAnalysis(ctx context.Context, topic string, results []ToolResult) string {
     prompt := fmt.Sprintf(`Analyze research results for: "%s"
-    
+
 Results from tools:
 %s
 
@@ -464,7 +1052,7 @@ Provide a comprehensive summary with key insights.`, topic, formatResults(result
 #### 2. Dynamic Workflow Planning
 ```go
 // Future enhancement: AI plans which tools to call
-prompt := fmt.Sprintf(`I need to research "%s". 
+prompt := fmt.Sprintf(`I need to research "%s".
 Available tools: %s
 Plan the optimal sequence of tool calls.`, topic, availableTools)
 
@@ -479,12 +1067,12 @@ func (r *ResearchAgent) handleAnalyzeData(w http.ResponseWriter, req *http.Reque
         http.Error(w, "AI not available", http.StatusServiceUnavailable)
         return
     }
-    
+
     prompt := fmt.Sprintf(`Analyze this data and provide insights:
 %s
 
 Provide:
-1. Key findings  
+1. Key findings
 2. Patterns/trends
 3. Recommendations
 4. Confidence level`, requestData["data"])
@@ -493,46 +1081,59 @@ Provide:
         Temperature: 0.3, // Analytical mode
         MaxTokens:   1000,
     })
-    
+
     response := map[string]interface{}{
         "analysis":    analysis.Content,
         "model":       analysis.Model,
         "tokens_used": analysis.Usage.TotalTokens,
     }
-    
+
     json.NewEncoder(w).Encode(response)
 }
 ```
 
-## 🔧 Configuration Options
+---
 
-### Environment Variables (Production Best Practice)
+## Configuration
+
+### Environment Variables
+
+Copy `.env.example` to `.env` and configure your settings:
 
 ```bash
-# Core Agent Configuration (v0.6.4+ pattern - no hardcoded values)
-export PORT="8090"                         # Service port
-export NAMESPACE="examples"                # Service namespace
-export DEV_MODE="false"                    # Production mode
-
-# Legacy support (for backward compatibility)
-export GOMIND_PORT="8090"
-export GOMIND_NAMESPACE="examples"
-export GOMIND_DEV_MODE="false"
-
-# Discovery Configuration (REQUIRED - no defaults)
-export REDIS_URL="redis://localhost:6379"  # Must be set explicitly
-export GOMIND_REDIS_URL="redis://localhost:6379"  # Legacy support
-
-# AI Provider Configuration (pick one or multiple)
-export OPENAI_API_KEY="sk-..."
-export GROQ_API_KEY="gsk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-# Production Configuration
-export GOMIND_LOG_LEVEL="info"            # info, debug, error
-export GOMIND_LOG_FORMAT="json"           # json for structured logging
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector.gomind-examples:4318"
+cp .env.example .env
 ```
+
+The `.env.example` file contains comprehensive documentation for all options.
+
+### Core Configuration
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `REDIS_URL` | Redis connection URL | - | Yes |
+| `PORT` | HTTP server port | `8090` | No |
+| `NAMESPACE` | Service namespace | `examples` | No |
+| `DEV_MODE` | Development mode | `false` | No |
+
+### AI Provider Configuration
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `OPENAI_API_KEY` | OpenAI API key | Yes* |
+| `ANTHROPIC_API_KEY` | Anthropic API key | Yes* |
+| `GROQ_API_KEY` | Groq API key | Yes* |
+| `GEMINI_API_KEY` | Gemini API key | Yes* |
+| `DEEPSEEK_API_KEY` | DeepSeek API key | Yes* |
+
+*At least one AI provider key is required for full functionality.
+
+### Production Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GOMIND_LOG_LEVEL` | Log level (info, debug, error) | `info` |
+| `GOMIND_LOG_FORMAT` | Log format (json, text) | `json` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint for telemetry | - |
 
 ### Framework Options (v0.6.4+ Pattern)
 
@@ -578,7 +1179,7 @@ func getCORSFromEnv() []string {
 }
 ```
 
-### AI Configuration
+### AI Configuration Options
 
 ```go
 // Auto-detection (recommended)
@@ -596,22 +1197,24 @@ primary, _ := ai.NewClient(ai.WithProvider("openai"))
 fallback, _ := ai.NewClient(ai.WithProvider("groq"))
 ```
 
-## 🏭 Production Best Practices
+---
+
+## Production Best Practices
 
 ### 1. Environment-Based Configuration
 **NEVER hardcode configuration values** in production code:
 
 ```go
-// ❌ BAD - Hardcoded values
+// BAD - Hardcoded values
 core.WithRedisURL("redis://localhost:6379")
 core.WithPort(8090)
 
-// ✅ GOOD - Environment-based
+// GOOD - Environment-based
 core.WithRedisURL(os.Getenv("REDIS_URL"))
 core.WithPort(getPortFromEnv())
 ```
 
-### 2. Health Checks & Readiness Probes
+### 2. Health Checks and Readiness Probes
 Always implement comprehensive health checks:
 
 ```go
@@ -684,7 +1287,7 @@ func main() {
 }
 ```
 
-### 4. Error Handling & Retries
+### 4. Error Handling and Retries
 Implement resilient error handling with retries:
 
 ```go
@@ -743,7 +1346,7 @@ func setupLogging() {
 }
 ```
 
-### 6. Resource Limits & Monitoring
+### 6. Resource Limits and Monitoring
 Set appropriate resource limits and monitor usage:
 
 ```yaml
@@ -866,7 +1469,9 @@ func main() {
 }
 ```
 
-## 🐳 Docker Usage
+---
+
+## Docker Usage
 
 ### Build and Run
 
@@ -885,7 +1490,9 @@ cd examples/
 docker-compose up
 ```
 
-## ☸️ Kubernetes Deployment  
+---
+
+## Kubernetes Deployment
 
 ### Quick Deploy
 
@@ -933,63 +1540,9 @@ kubectl annotate service research-agent-service \
   service.kubernetes.io/load-balancer-class=nlb -n gomind-examples
 ```
 
-## 🧪 Testing & Verification
+---
 
-### 1. Agent Health & Discovery
-
-```bash
-# Health check
-curl http://localhost:8090/health
-
-# Check AI provider status
-curl http://localhost:8090/api/capabilities
-# Look for AI-related capabilities
-
-# Test service discovery
-curl -X POST http://localhost:8090/api/capabilities/discover_tools \
-  -H "Content-Type: application/json" -d '{}'
-```
-
-### 2. Orchestration Testing
-
-```bash
-# Test with weather tool running on port 8080
-curl -X POST http://localhost:8090/api/capabilities/research_topic \
-  -H "Content-Type: application/json" \
-  -d '{
-    "topic": "weather in San Francisco",
-    "ai_synthesis": true,
-    "max_results": 3
-  }'
-```
-
-### 3. AI Analysis Testing
-
-```bash
-# Test AI-powered analysis
-curl -X POST http://localhost:8090/api/capabilities/analyze_data \
-  -H "Content-Type: application/json" \
-  -d '{
-    "data": "Sales increased 25% in Q4. Customer satisfaction: 94%. New product launches: 3. Market share: 15%."
-  }'
-```
-
-### 4. Workflow Orchestration
-
-```bash  
-# Test complex workflow
-curl -X POST http://localhost:8090/orchestrate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workflow_type": "weather_analysis", 
-    "parameters": {
-      "location": "New York",
-      "include_forecast": true
-    }
-  }'
-```
-
-## 📊 Monitoring & Observability
+## Monitoring and Observability
 
 ### Metrics (Prometheus)
 
@@ -1021,14 +1574,16 @@ The agent creates spans for:
 }
 ```
 
-## 🎨 Advanced Usage & Customization
+---
+
+## Advanced Usage and Customization
 
 ### Multi-Provider AI Strategy
 
 ```go
 type ResilientAIAgent struct {
     primary   core.AIClient
-    fallback  core.AIClient  
+    fallback  core.AIClient
     local     core.AIClient
 }
 
@@ -1036,7 +1591,7 @@ func (a *ResilientAIAgent) ProcessWithAI(ctx context.Context, prompt string, sen
     if sensitive {
         return a.local.GenerateResponse(ctx, prompt, options)
     }
-    
+
     // Try primary first
     response, err := a.primary.GenerateResponse(ctx, prompt, options)
     if err != nil {
@@ -1049,29 +1604,29 @@ func (a *ResilientAIAgent) ProcessWithAI(ctx context.Context, prompt string, sen
 
 ### Custom Orchestration Logic
 
-```go  
+```go
 func (r *ResearchAgent) orchestrateWeatherAnalysis(ctx context.Context, params map[string]interface{}) (interface{}, error) {
     location := params["location"].(string)
-    
+
     // Step 1: Get current weather
     currentWeather := r.callWeatherTool(ctx, "current_weather", location)
-    
+
     // Step 2: Get forecast if requested
     var forecast interface{}
     if params["include_forecast"].(bool) {
         forecast = r.callWeatherTool(ctx, "forecast", location)
     }
-    
+
     // Step 3: Use AI to analyze and correlate
     if r.aiClient != nil {
         analysis := r.generateWeatherInsights(ctx, currentWeather, forecast)
         return map[string]interface{}{
             "current": currentWeather,
-            "forecast": forecast, 
+            "forecast": forecast,
             "insights": analysis,
         }, nil
     }
-    
+
     return map[string]interface{}{
         "current": currentWeather,
         "forecast": forecast,
@@ -1095,7 +1650,9 @@ Ask your AI assistant:
 "Add streaming responses for real-time orchestration updates"
 ```
 
-## 🚨 Common Issues & Solutions
+---
+
+## Common Issues and Solutions
 
 ### Issue: Agent can't discover any tools
 ```bash
@@ -1143,13 +1700,15 @@ for attempts := 0; attempts < 3; attempts++ {
 resources:
   requests:
     memory: "256Mi"  # Increased from 128Mi
-    cpu: "300m"      # Increased from 200m  
+    cpu: "300m"      # Increased from 200m
   limits:
     memory: "512Mi"  # Increased from 256Mi
     cpu: "1000m"     # Increased from 500m
 ```
 
-## 📋 Redis Service Registry Example
+---
+
+## Redis Service Registry Example
 
 When the research-agent is deployed and running, it automatically registers itself in Redis. Here's what the agent's service entry looks like:
 
@@ -1226,7 +1785,7 @@ When the research-agent is deployed and running, it automatically registers itse
           {
             "name": "data",
             "type": "string",
-            "example": "Temperature: 22°C, Humidity: 65%",
+            "example": "Temperature: 22C, Humidity: 65%",
             "description": "Data to analyze"
           }
         ],
@@ -1303,13 +1862,13 @@ When the research-agent is deployed and running, it automatically registers itse
 
 **Redis Index Structure:**
 ```
-gomind:services:research-assistant       → Full service data (30s TTL)
-gomind:types:agent                       → Set of all agents (60s TTL)
-gomind:names:research-assistant          → Name index (60s TTL)
-gomind:capabilities:research_topic       → Capability index (60s TTL)
-gomind:capabilities:discover_tools       → Capability index (60s TTL)
-gomind:capabilities:analyze_data         → Capability index (60s TTL)
-gomind:capabilities:orchestrate_workflow → Capability index (60s TTL)
+gomind:services:research-assistant       -> Full service data (30s TTL)
+gomind:types:agent                       -> Set of all agents (60s TTL)
+gomind:names:research-assistant          -> Name index (60s TTL)
+gomind:capabilities:research_topic       -> Capability index (60s TTL)
+gomind:capabilities:discover_tools       -> Capability index (60s TTL)
+gomind:capabilities:analyze_data         -> Capability index (60s TTL)
+gomind:capabilities:orchestrate_workflow -> Capability index (60s TTL)
 ```
 
 **Phase 2 Input Summary:**
@@ -1358,11 +1917,13 @@ if agent.AI != nil {
 }
 ```
 
-## 📚 Next Steps & Extensions
+---
+
+## Next Steps and Extensions
 
 ### 1. Add More AI Capabilities
 - **Conversation Memory**: Multi-turn interactions
-- **Streaming Responses**: Real-time updates  
+- **Streaming Responses**: Real-time updates
 - **Vision Analysis**: Image processing capabilities
 - **Code Generation**: Dynamic tool creation
 
@@ -1372,9 +1933,9 @@ if agent.AI != nil {
 - **Parallel Execution**: Concurrent tool calls
 - **Circuit Breakers**: Resilience patterns
 
-### 3. Production Enhancements  
+### 3. Production Enhancements
 - **Authentication**: Secure agent APIs
-- **Rate Limiting**: Protect downstream tools  
+- **Rate Limiting**: Protect downstream tools
 - **Caching**: Intelligent response caching
 - **Load Balancing**: Scale across regions
 
@@ -1384,7 +1945,9 @@ if agent.AI != nil {
 - **DevOps Agent**: Infrastructure coordination
 - **Scientific Agent**: Research paper analysis
 
-## 🎓 Key Learnings
+---
+
+## Key Learnings
 
 - **Agents are Active**: They can discover and coordinate other components
 - **AI Amplifies Intelligence**: Auto-detection makes AI integration seamless

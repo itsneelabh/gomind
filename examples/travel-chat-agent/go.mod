@@ -4,19 +4,11 @@ go 1.25
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/itsneelabh/gomind/ai v0.8.3
-	github.com/itsneelabh/gomind/core v0.8.3
-	github.com/itsneelabh/gomind/orchestration v0.8.3
-	github.com/itsneelabh/gomind/telemetry v0.8.3
+	github.com/itsneelabh/gomind/ai v0.9.1
+	github.com/itsneelabh/gomind/core v0.9.1
+	github.com/itsneelabh/gomind/orchestration v0.9.1
+	github.com/itsneelabh/gomind/telemetry v0.9.1
 	go.opentelemetry.io/otel v1.38.0
-)
-
-// Use local modules for workspace builds
-replace (
-	github.com/itsneelabh/gomind/ai => ../../ai
-	github.com/itsneelabh/gomind/core => ../../core
-	github.com/itsneelabh/gomind/orchestration => ../../orchestration
-	github.com/itsneelabh/gomind/telemetry => ../../telemetry
 )
 
 require (
