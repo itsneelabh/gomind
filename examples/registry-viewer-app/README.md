@@ -50,31 +50,48 @@ A standalone, real-time web dashboard for viewing services registered in a Redis
 - Tab-based navigation (Services / LLM Debug)
 - Zero external framework dependencies
 
-## Quick Start
+## 🚀 Quick Start
 
-### Using setup.sh (Recommended)
+### Prerequisites
+
+- **Infrastructure deployed**: This is an add-on app that connects to existing GoMind infrastructure
+- Run any tool/agent example first (e.g., `cd examples/tool-example && ./setup.sh full-deploy`)
+
+### Deploy to Kubernetes (Recommended)
 
 ```bash
 cd examples/registry-viewer-app
 
-# Run locally with mock data (quickest way to see the UI)
-./setup.sh run
-
-# Run connected to Redis
-kubectl port-forward -n gomind-examples svc/redis 6379:6379 &
-./setup.sh run-redis
-
-# Deploy to Kubernetes
+# Deploy to existing Kind cluster
 ./setup.sh deploy
+
+# Set up port forwarding
 ./setup.sh forward
 ```
 
-### Manual Build
+**What `./setup.sh deploy` does:**
+1. Builds the Docker image with Go backend and embedded static files
+2. Loads the image into the Kind cluster
+3. Creates ConfigMap with Redis connection info (auto-extracted from k8-deployment/redis.yaml)
+4. Deploys the app to Kubernetes
+
+Once complete, the dashboard is available at:
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **Registry Viewer** | http://localhost:8100 | Web dashboard for service registry |
+| **API** | http://localhost:8100/api/services | JSON list of registered services |
+| **Health** | http://localhost:8100/api/health | Health check endpoint |
+
+### Run Locally with Mock Data
+
+For quick UI preview without Kubernetes:
 
 ```bash
 cd examples/registry-viewer-app
-go build -o registry-viewer .
-./registry-viewer
+
+# Build and run with mock data
+./setup.sh run
 ```
 
 Open http://localhost:8100 in your browser.
