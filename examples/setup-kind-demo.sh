@@ -248,7 +248,7 @@ setup_port_forwarding() {
     PROMETHEUS_PID=$!
 
     # Jaeger
-    kubectl port-forward -n "${NAMESPACE}" svc/jaeger-query 16686:16686 &
+    kubectl port-forward -n "${NAMESPACE}" svc/jaeger-query 16686:80 &
     JAEGER_PID=$!
 
     # Tool example (if exists)

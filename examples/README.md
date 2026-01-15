@@ -233,7 +233,7 @@ The framework auto-detects available providers and uses the best one available.
 # Manual access to services
 kubectl port-forward -n gomind-examples svc/grafana 3000:80
 kubectl port-forward -n gomind-examples svc/prometheus 9090:9090
-kubectl port-forward -n gomind-examples svc/jaeger-query 16686:16686
+kubectl port-forward -n gomind-examples svc/jaeger-query 16686:80
 ```
 
 ### Cloud Deployment

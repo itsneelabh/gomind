@@ -76,13 +76,15 @@ deploy_component() {
 
     echo -e "${COLOR_YELLOW}🔍 Checking ${component_name}...${COLOR_NC}"
 
-    # Check if service exists
-    check_service_exists "$service_name" "$NAMESPACE"
-    local service_status=$?
+    # Check if service exists (capture exit status without triggering set -e)
+    local service_status=0
+    check_service_exists "$service_name" "$NAMESPACE" && service_status=0 || service_status=$?
 
     if [ $service_status -eq 0 ]; then
         # Service exists and is healthy
-        if check_deployment_ready "$deployment_name" "$NAMESPACE"; then
+        local deployment_ready=0
+        check_deployment_ready "$deployment_name" "$NAMESPACE" && deployment_ready=0 || deployment_ready=$?
+        if [ $deployment_ready -eq 0 ]; then
             echo -e "${COLOR_GREEN}✅ ${component_name} already running and healthy${COLOR_NC}"
             echo -e "${COLOR_BLUE}   Service: ${service_name}, Deployment: ${deployment_name}${COLOR_NC}"
             return 0
@@ -168,6 +170,7 @@ verify_files() {
         "prometheus.yaml"
         "jaeger.yaml"
         "grafana.yaml"
+        "metrics-server.yaml"
     )
 
     local missing=()
@@ -186,6 +189,38 @@ verify_files() {
     echo ""
 }
 
+# Function to deploy metrics-server (in kube-system namespace)
+deploy_metrics_server() {
+    echo -e "${COLOR_YELLOW}🔍 Checking Metrics Server...${COLOR_NC}"
+
+    # Check if metrics-server is already running in kube-system
+    if kubectl get deployment metrics-server -n kube-system &>/dev/null; then
+        local ready=$(kubectl get deployment metrics-server -n kube-system -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)
+        if [ "$ready" = "True" ]; then
+            echo -e "${COLOR_GREEN}✅ Metrics Server already running and healthy${COLOR_NC}"
+            return 0
+        else
+            echo -e "${COLOR_YELLOW}⚠️  Metrics Server exists but not ready, reapplying...${COLOR_NC}"
+        fi
+    else
+        echo -e "${COLOR_BLUE}📦 Metrics Server not found, deploying...${COLOR_NC}"
+    fi
+
+    # Deploy metrics-server
+    kubectl apply -f "$SCRIPT_DIR/metrics-server.yaml"
+
+    # Wait for deployment to be ready
+    echo -e "${COLOR_BLUE}⏳ Waiting for Metrics Server to be ready...${COLOR_NC}"
+    if kubectl wait --for=condition=available --timeout=120s deployment/metrics-server -n kube-system 2>/dev/null; then
+        echo -e "${COLOR_GREEN}✅ Metrics Server is ready${COLOR_NC}"
+        echo -e "${COLOR_BLUE}   kubectl top pods/nodes will be available shortly${COLOR_NC}"
+    else
+        echo -e "${COLOR_YELLOW}⚠️  Metrics Server deployment timeout, but may still be starting${COLOR_NC}"
+    fi
+
+    echo ""
+}
+
 # Main deployment function
 main() {
     check_prerequisites
@@ -193,6 +228,9 @@ main() {
 
     # Create namespace first
     setup_namespace
+
+    # Deploy Metrics Server first (in kube-system, enables kubectl top)
+    deploy_metrics_server
 
     # Deploy components in dependency order
     # Each component is checked before deployment
@@ -237,7 +275,7 @@ main() {
     echo -e "${COLOR_BLUE}💡 To access from outside the cluster:${COLOR_NC}"
     echo -e "   kubectl port-forward -n ${NAMESPACE} svc/grafana 3000:80"
     echo -e "   kubectl port-forward -n ${NAMESPACE} svc/prometheus 9090:9090"
-    echo -e "   kubectl port-forward -n ${NAMESPACE} svc/jaeger-query 16686:16686"
+    echo -e "   kubectl port-forward -n ${NAMESPACE} svc/jaeger-query 16686:80"
     echo ""
 
     echo -e "${COLOR_BLUE}🔧 Useful commands:${COLOR_NC}"

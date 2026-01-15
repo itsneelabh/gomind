@@ -1,8 +1,8 @@
 # GoMind Kubernetes Infrastructure
 
-Welcome to your production-ready GoMind infrastructure! This guide will walk you through deploying a complete Kubernetes setup that supports all GoMind examples and applications. Think of this as the foundation that makes everything else work seamlessly. 🏗️
+Welcome to your production-ready GoMind infrastructure! This guide will walk you through deploying a complete Kubernetes setup that supports all GoMind examples and applications. Think of this as the foundation that makes everything else work seamlessly.
 
-## 🎯 What Is This and Why Should You Care?
+## What Is This and Why Should You Care?
 
 ### The City Infrastructure Analogy
 
@@ -17,13 +17,13 @@ That's exactly what this k8-deployment setup provides for your GoMind applicatio
 
 ### What This Infrastructure Provides
 
-1. **🏠 Shared Namespace** - A dedicated space (`gomind-examples`) for all your components
-2. **📡 Service Discovery** - Redis registry so components can find each other
-3. **📊 Observability** - Complete monitoring stack with metrics, logs, and traces
-4. **🔍 Debugging** - Visual dashboards to understand what's happening
-5. **🚀 Production-Ready** - Persistent storage, security, and scaling configurations
+1. **Shared Namespace** - A dedicated space (`gomind-examples`) for all your components
+2. **Service Discovery** - Redis registry so components can find each other
+3. **Observability** - Complete monitoring stack with metrics, logs, and traces
+4. **Debugging** - Visual dashboards to understand what's happening
+5. **Production-Ready** - Persistent storage, security, and scaling configurations
 
-## 📚 Infrastructure Components
+## Infrastructure Components
 
 | Component | Purpose | Access | Storage |
 |-----------|---------|--------|---------|
@@ -34,7 +34,7 @@ That's exactly what this k8-deployment setup provides for your GoMind applicatio
 | **Jaeger** | Distributed tracing | `jaeger-query:16686` | None |
 | **Grafana** | Visualization dashboard | `grafana:3000` | Persistent volume |
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -70,11 +70,11 @@ cd examples/k8-deployment
 ```
 
 **Safety Features:**
-- ✅ Checks if services already exist before deploying
-- ✅ Skips deployment if service is healthy and running
-- ✅ Never deletes existing resources
-- ✅ Shows clear status of what's new vs existing
-- ✅ Waits for each component to be ready before proceeding
+- Checks if services already exist before deploying
+- Skips deployment if service is healthy and running
+- Never deletes existing resources
+- Shows clear status of what's new vs existing
+- Waits for each component to be ready before proceeding
 
 #### Method 2: One-Command Kustomize (Simple)
 
@@ -127,7 +127,7 @@ kubectl get pods -n gomind-examples
 # grafana-xxx                       1/1     Running   0
 ```
 
-## 🏠 Local Development with Kind
+## Local Development with Kind
 
 Kind (Kubernetes in Docker) is perfect for local development and testing.
 
@@ -186,7 +186,7 @@ With Kind setup above, access services locally:
 # Get service URLs (using port-forward)
 kubectl port-forward -n gomind-examples svc/prometheus 9090:9090 &
 kubectl port-forward -n gomind-examples svc/grafana 3000:3000 &
-kubectl port-forward -n gomind-examples svc/jaeger-query 16686:16686 &
+kubectl port-forward -n gomind-examples svc/jaeger-query 16686:80 &
 
 # Access in browser:
 # - Prometheus: http://localhost:9090
@@ -201,7 +201,7 @@ For Kind clusters, the infrastructure automatically:
 - Configures smaller resource limits
 - Skips ingress setup (use port-forward instead)
 
-## 🌐 Production Server Deployment
+## Production Server Deployment
 
 For production Kubernetes clusters (AWS EKS, Google GKE, Azure AKS, on-premises):
 
@@ -294,7 +294,7 @@ kubectl patch deployment otel-collector -n gomind-examples -p '{"spec":{"replica
 kubectl patch statefulset prometheus -n gomind-examples -p '{"spec":{"replicas":2}}'
 ```
 
-## 📊 Component Configuration Deep Dive
+## Component Configuration Deep Dive
 
 ### Redis Configuration
 
@@ -422,7 +422,7 @@ datasources:
     isDefault: true
 ```
 
-## 🔧 Customization and Advanced Configuration
+## Customization and Advanced Configuration
 
 ### Environment-Specific Kustomization
 
@@ -508,7 +508,7 @@ kubectl patch deployment grafana -n gomind-examples -p '{
 }'
 ```
 
-## 🔍 Troubleshooting Common Issues
+## Troubleshooting Common Issues
 
 ### Pods Not Starting
 
@@ -597,7 +597,7 @@ kubectl port-forward -n gomind-examples svc/prometheus 9090:9090
 kubectl rollout restart deployment/prometheus -n gomind-examples
 ```
 
-## 📈 Monitoring Your Infrastructure
+## Monitoring Your Infrastructure
 
 ### Health Check Commands
 
@@ -605,24 +605,24 @@ kubectl rollout restart deployment/prometheus -n gomind-examples
 # Quick health check script
 cat <<'EOF' > health-check.sh
 #!/bin/bash
-echo "🔍 GoMind Infrastructure Health Check"
-echo "======================================"
+echo "GoMind Infrastructure Health Check"
+echo "==================================="
 
 NAMESPACE="gomind-examples"
 
-echo "📊 Pod Status:"
+echo "Pod Status:"
 kubectl get pods -n $NAMESPACE
 
-echo -e "\n📡 Service Status:"
+echo -e "\nService Status:"
 kubectl get svc -n $NAMESPACE
 
-echo -e "\n💾 Storage Status:"
+echo -e "\nStorage Status:"
 kubectl get pvc -n $NAMESPACE
 
-echo -e "\n🔧 Recent Events:"
+echo -e "\nRecent Events:"
 kubectl get events -n $NAMESPACE --sort-by='.lastTimestamp' | tail -5
 
-echo -e "\n✅ Health Check Complete!"
+echo -e "\nHealth Check Complete!"
 EOF
 
 chmod +x health-check.sh
@@ -642,7 +642,7 @@ kubectl top pod -n gomind-examples -l app=redis
 kubectl describe node | grep -A5 "Allocated resources"
 ```
 
-## 🚀 Production Best Practices
+## Production Best Practices
 
 ### 1. Security Hardening
 
@@ -731,7 +731,7 @@ spec:
 EOF
 ```
 
-## 🔄 Updates and Maintenance
+## Updates and Maintenance
 
 ### Updating Infrastructure
 
@@ -755,15 +755,15 @@ kubectl annotate namespace gomind-examples \
 kubectl rollout undo deployment/redis -n gomind-examples
 ```
 
-## 🎉 Summary
+## Summary
 
 This infrastructure provides the foundation for running GoMind applications at scale. You now have:
 
-1. **🏗️ Complete Infrastructure** - Redis, OTEL Collector, Prometheus, Jaeger, and Grafana
-2. **🔧 Flexible Deployment** - Works on local Kind clusters and production Kubernetes
-3. **📊 Full Observability** - Metrics, logs, traces, and dashboards
-4. **🛡️ Production Ready** - Persistent storage, security, and monitoring
-5. **🔄 Easy Maintenance** - Health checks, updates, and troubleshooting guides
+1. **Complete Infrastructure** - Redis, OTEL Collector, Prometheus, Jaeger, and Grafana
+2. **Flexible Deployment** - Works on local Kind clusters and production Kubernetes
+3. **Full Observability** - Metrics, logs, traces, and dashboards
+4. **Production Ready** - Persistent storage, security, and monitoring
+5. **Easy Maintenance** - Health checks, updates, and troubleshooting guides
 
 ### What's Next?
 
@@ -772,4 +772,4 @@ This infrastructure provides the foundation for running GoMind applications at s
 3. Check out example applications in other folders
 4. Set up custom dashboards and alerts
 
-**🎊 Congratulations!** Your GoMind infrastructure is ready for action. All your applications can now discover each other, export telemetry, and provide rich observability. Happy building! 🚀
+**Congratulations!** Your GoMind infrastructure is ready for action. All your applications can now discover each other, export telemetry, and provide rich observability. Happy building!
