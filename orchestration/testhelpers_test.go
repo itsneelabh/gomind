@@ -49,10 +49,7 @@ func (m *mockCircuitBreaker) Reset() {
 }
 
 func (m *mockCircuitBreaker) CanExecute() bool {
-	if m.state == "open" {
-		return false
-	}
-	return true
+	return m.state != "open"
 }
 
 // mockLogger implements core.Logger for testing

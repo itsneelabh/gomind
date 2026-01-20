@@ -49,6 +49,12 @@ type LLMDebugRecord struct {
 	// RequestID is the orchestration request identifier
 	RequestID string `json:"request_id"`
 
+	// OriginalRequestID links related records across HITL resumes.
+	// For initial requests: same as RequestID
+	// For resume requests: the original conversation's RequestID
+	// This enables finding all LLM calls in a HITL conversation.
+	OriginalRequestID string `json:"original_request_id,omitempty"`
+
 	// TraceID links to distributed tracing (Jaeger)
 	TraceID string `json:"trace_id"`
 
@@ -101,12 +107,13 @@ type LLMInteraction struct {
 // LLMDebugRecordSummary is a lightweight version for listing.
 // Used by the ListRecent API to avoid loading full payloads.
 type LLMDebugRecordSummary struct {
-	RequestID        string    `json:"request_id"`
-	TraceID          string    `json:"trace_id"`
-	CreatedAt        time.Time `json:"created_at"`
-	InteractionCount int       `json:"interaction_count"`
-	TotalTokens      int       `json:"total_tokens"`
-	HasErrors        bool      `json:"has_errors"`
+	RequestID         string    `json:"request_id"`
+	OriginalRequestID string    `json:"original_request_id,omitempty"`
+	TraceID           string    `json:"trace_id"`
+	CreatedAt         time.Time `json:"created_at"`
+	InteractionCount  int       `json:"interaction_count"`
+	TotalTokens       int       `json:"total_tokens"`
+	HasErrors         bool      `json:"has_errors"`
 }
 
 // LLMDebugConfig holds configuration for LLM debug storage.

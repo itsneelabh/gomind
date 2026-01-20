@@ -180,13 +180,21 @@ func (s *RedisLLMDebugStore) RecordInteraction(ctx context.Context, requestID st
 				"request_id": requestID,
 				"error":      err.Error(),
 			})
+			// Capture original_request_id from baggage for HITL correlation
+			originalRequestID := requestID
+			if bag := telemetry.GetBaggage(ctx); bag != nil {
+				if origID := bag["original_request_id"]; origID != "" {
+					originalRequestID = origID
+				}
+			}
 			// Create fresh record on error (don't fail the whole operation)
 			record = &LLMDebugRecord{
-				RequestID:    requestID,
-				TraceID:      telemetry.GetTraceContext(ctx).TraceID,
-				CreatedAt:    time.Now(),
-				Interactions: []LLMInteraction{},
-				Metadata:     make(map[string]string),
+				RequestID:         requestID,
+				OriginalRequestID: originalRequestID,
+				TraceID:           telemetry.GetTraceContext(ctx).TraceID,
+				CreatedAt:         time.Now(),
+				Interactions:      []LLMInteraction{},
+				Metadata:          make(map[string]string),
 			}
 		}
 
@@ -321,12 +329,13 @@ func (s *RedisLLMDebugStore) ListRecent(ctx context.Context, limit int) ([]LLMDe
 		}
 
 		summaries = append(summaries, LLMDebugRecordSummary{
-			RequestID:        record.RequestID,
-			TraceID:          record.TraceID,
-			CreatedAt:        record.CreatedAt,
-			InteractionCount: len(record.Interactions),
-			TotalTokens:      totalTokens,
-			HasErrors:        hasErrors,
+			RequestID:         record.RequestID,
+			OriginalRequestID: record.OriginalRequestID,
+			TraceID:           record.TraceID,
+			CreatedAt:         record.CreatedAt,
+			InteractionCount:  len(record.Interactions),
+			TotalTokens:       totalTokens,
+			HasErrors:         hasErrors,
 		})
 	}
 
@@ -475,14 +484,25 @@ func (s *RedisLLMDebugStore) deserialize(data []byte) (*LLMDebugRecord, error) {
 func (s *RedisLLMDebugStore) getOrCreateRecord(ctx context.Context, key, requestID string) (*LLMDebugRecord, error) {
 	data, err := s.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
+		// Capture original_request_id from baggage for HITL correlation.
+		// For initial requests: original_request_id == requestID
+		// For resume requests: original_request_id is the conversation's first requestID
+		originalRequestID := requestID
+		if bag := telemetry.GetBaggage(ctx); bag != nil {
+			if origID := bag["original_request_id"]; origID != "" {
+				originalRequestID = origID
+			}
+		}
+
 		// Create new record
 		return &LLMDebugRecord{
-			RequestID:    requestID,
-			TraceID:      telemetry.GetTraceContext(ctx).TraceID,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
-			Interactions: []LLMInteraction{},
-			Metadata:     make(map[string]string),
+			RequestID:         requestID,
+			OriginalRequestID: originalRequestID,
+			TraceID:           telemetry.GetTraceContext(ctx).TraceID,
+			CreatedAt:         time.Now(),
+			UpdatedAt:         time.Now(),
+			Interactions:      []LLMInteraction{},
+			Metadata:          make(map[string]string),
 		}, nil
 	}
 	if err != nil {

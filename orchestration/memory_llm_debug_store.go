@@ -31,12 +31,23 @@ func (s *MemoryLLMDebugStore) RecordInteraction(ctx context.Context, requestID s
 
 	record, exists := s.records[requestID]
 	if !exists {
+		// Capture original_request_id from baggage for HITL correlation.
+		// For initial requests: original_request_id == requestID
+		// For resume requests: original_request_id is the conversation's first requestID
+		originalRequestID := requestID
+		if bag := telemetry.GetBaggage(ctx); bag != nil {
+			if origID := bag["original_request_id"]; origID != "" {
+				originalRequestID = origID
+			}
+		}
+
 		record = &LLMDebugRecord{
-			RequestID:    requestID,
-			TraceID:      getTraceIDFromContext(ctx),
-			CreatedAt:    time.Now(),
-			Interactions: []LLMInteraction{},
-			Metadata:     make(map[string]string),
+			RequestID:         requestID,
+			OriginalRequestID: originalRequestID,
+			TraceID:           getTraceIDFromContext(ctx),
+			CreatedAt:         time.Now(),
+			Interactions:      []LLMInteraction{},
+			Metadata:          make(map[string]string),
 		}
 		s.records[requestID] = record
 	}
@@ -133,12 +144,13 @@ func (s *MemoryLLMDebugStore) ListRecent(ctx context.Context, limit int) ([]LLMD
 		}
 
 		summaries[i] = LLMDebugRecordSummary{
-			RequestID:        record.RequestID,
-			TraceID:          record.TraceID,
-			CreatedAt:        record.CreatedAt,
-			InteractionCount: len(record.Interactions),
-			TotalTokens:      totalTokens,
-			HasErrors:        hasErrors,
+			RequestID:         record.RequestID,
+			OriginalRequestID: record.OriginalRequestID,
+			TraceID:           record.TraceID,
+			CreatedAt:         record.CreatedAt,
+			InteractionCount:  len(record.Interactions),
+			TotalTokens:       totalTokens,
+			HasErrors:         hasErrors,
 		}
 	}
 

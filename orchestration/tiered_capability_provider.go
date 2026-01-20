@@ -161,8 +161,8 @@ func (t *TieredCapabilityProvider) recordDebugInteraction(ctx context.Context, i
 	go func() {
 		defer t.debugWg.Done()
 
-		// Use background context to allow completion even if request ctx is cancelled
-		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Use original context with timeout to preserve baggage (original_request_id).
+		recordCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
 		if err := t.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {

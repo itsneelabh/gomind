@@ -21,6 +21,12 @@ type WorkflowEngine struct {
 	stateStore StateStore
 	metrics    *WorkflowMetrics
 	logger     core.Logger // For structured logging
+
+	// HITL (Human-in-the-Loop) support
+	// When set, enables human oversight at workflow step execution points.
+	// Design note: Engine checks controller != nil (not config). The presence
+	// of a controller indicates HITL is active for this workflow.
+	interruptController InterruptController
 }
 
 // WorkflowDefinition defines a complete workflow
@@ -33,6 +39,9 @@ type WorkflowDefinition struct {
 	Outputs     map[string]OutputDef     `yaml:"outputs" json:"outputs"`
 	OnError     *ErrorHandler            `yaml:"on_error" json:"on_error"`
 	Timeout     time.Duration            `yaml:"timeout" json:"timeout"`
+
+	// HITL: Workflow-level configuration
+	HITL *WorkflowHITLConfig `yaml:"hitl,omitempty" json:"hitl,omitempty"`
 }
 
 // WorkflowStepDefinition defines a single workflow step
@@ -49,6 +58,14 @@ type WorkflowStepDefinition struct {
 	Timeout    time.Duration            `yaml:"timeout" json:"timeout"`
 	Parallel   []WorkflowStepDefinition `yaml:"parallel,omitempty" json:"parallel,omitempty"`
 	Condition  *StepCondition           `yaml:"condition,omitempty" json:"condition,omitempty"`
+
+	// HITL: Pre-step approval
+	RequireApproval bool                `yaml:"require_approval" json:"require_approval"`
+	ApprovalConfig  *StepApprovalConfig `yaml:"approval_config,omitempty" json:"approval_config,omitempty"`
+
+	// HITL: Post-step validation
+	ValidateOutput   bool                  `yaml:"validate_output" json:"validate_output"`
+	ValidationConfig *StepValidationConfig `yaml:"validation_config,omitempty" json:"validation_config,omitempty"`
 }
 
 // StepType defines the type of workflow step
@@ -106,6 +123,9 @@ type StepCondition struct {
 	Then string `yaml:"then" json:"then"` // Step to execute if true
 	Else string `yaml:"else" json:"else"` // Step to execute if false
 }
+
+// Note: WorkflowHITLConfig, StepApprovalConfig, and StepValidationConfig
+// are defined in hitl_interfaces.go
 
 // WorkflowExecution represents a running workflow instance
 type WorkflowExecution struct {
@@ -174,6 +194,13 @@ func NewWorkflowEngine(discovery core.Discovery, stateStore StateStore, logger c
 		metrics:    NewWorkflowMetrics(),
 		logger:     logger,
 	}
+}
+
+// SetInterruptController configures HITL support for the workflow engine.
+// When set, the engine will check for required approvals at step execution points
+// based on step-level configuration (RequireApproval, ValidateOutput).
+func (e *WorkflowEngine) SetInterruptController(controller InterruptController) {
+	e.interruptController = controller
 }
 
 // ParseWorkflowYAML parses a workflow definition from YAML
@@ -570,6 +597,61 @@ func (e *WorkflowEngine) executeStep(ctx context.Context, task *WorkflowTask) *T
 	resolvedInputs := e.resolveInputs(stepDef.Inputs, task.Execution)
 	stepExec.Input = resolvedInputs
 
+	// HITL: Pre-step approval check (declarative, from YAML config)
+	// If RequireApproval is set in step definition and controller is available, check for approval
+	if stepDef.RequireApproval && e.interruptController != nil {
+		// Build a RoutingStep from the workflow step definition for the controller
+		routingStep := RoutingStep{
+			StepID:    task.StepID,
+			AgentName: stepDef.Agent,
+			Metadata: map[string]interface{}{
+				"capability":       stepDef.Capability,
+				"workflow_id":      task.Execution.ID,
+				"require_approval": true,
+			},
+		}
+
+		// Use approval config if provided
+		if stepDef.ApprovalConfig != nil {
+			routingStep.Metadata["approval_reason"] = stepDef.ApprovalConfig.Reason
+			routingStep.Metadata["approval_priority"] = stepDef.ApprovalConfig.Priority
+		}
+
+		checkpoint, err := e.interruptController.CheckBeforeStep(ctx, routingStep, nil)
+		if err != nil {
+			// Fail-fast: HITL check failure halts execution
+			// This ensures sensitive operations cannot bypass approval due to HITL system issues
+			e.logger.ErrorWithContext(ctx, "HITL pre-step check failed", map[string]interface{}{
+				"operation":   "hitl_pre_step_check",
+				"step_id":     task.StepID,
+				"workflow_id": task.Execution.ID,
+				"error":       err.Error(),
+			})
+			telemetry.RecordSpanError(ctx, err)
+			return &TaskResult{
+				StepID: task.StepID,
+				Error:  fmt.Errorf("HITL pre-step check failed: %w", err),
+			}
+		}
+		if checkpoint != nil {
+			// Step requires human approval - return interrupt result
+			e.logger.InfoWithContext(ctx, "Workflow step interrupted for human approval", map[string]interface{}{
+				"operation":     "hitl_pre_step_interrupt",
+				"step_id":       task.StepID,
+				"workflow_id":   task.Execution.ID,
+				"checkpoint_id": checkpoint.CheckpointID,
+			})
+			telemetry.AddSpanEvent(ctx, "hitl.workflow_step.interrupted",
+				attribute.String("step_id", task.StepID),
+				attribute.String("checkpoint_id", checkpoint.CheckpointID),
+			)
+			return &TaskResult{
+				StepID: task.StepID,
+				Error:  fmt.Errorf("HITL: awaiting approval (checkpoint: %s)", checkpoint.CheckpointID),
+			}
+		}
+	}
+
 	// Discover the target service
 	var service *core.ServiceRegistration
 	var err error
@@ -656,6 +738,46 @@ func (e *WorkflowEngine) executeStep(ctx context.Context, task *WorkflowTask) *T
 			"error":       err.Error(),
 			"attempts":    stepExec.Attempts,
 		})
+
+		// HITL: Error escalation check
+		// If interrupt controller is available, check if error should be escalated
+		if e.interruptController != nil {
+			routingStep := RoutingStep{
+				StepID:    task.StepID,
+				AgentName: stepDef.Agent,
+				Metadata: map[string]interface{}{
+					"capability":  stepDef.Capability,
+					"workflow_id": task.Execution.ID,
+				},
+			}
+			checkpoint, hitlErr := e.interruptController.CheckOnError(ctx, routingStep, err, stepExec.Attempts)
+			if hitlErr != nil {
+				e.logger.WarnWithContext(ctx, "HITL error escalation check failed", map[string]interface{}{
+					"operation":   "hitl_error_escalation_check",
+					"step_id":     task.StepID,
+					"workflow_id": task.Execution.ID,
+					"error":       hitlErr.Error(),
+				})
+			} else if checkpoint != nil {
+				e.logger.InfoWithContext(ctx, "Workflow step error escalated for human review", map[string]interface{}{
+					"operation":     "hitl_error_escalation",
+					"step_id":       task.StepID,
+					"workflow_id":   task.Execution.ID,
+					"checkpoint_id": checkpoint.CheckpointID,
+					"attempts":      stepExec.Attempts,
+				})
+				telemetry.AddSpanEvent(ctx, "hitl.workflow_step.error_escalated",
+					attribute.String("step_id", task.StepID),
+					attribute.String("checkpoint_id", checkpoint.CheckpointID),
+					attribute.Int("attempts", stepExec.Attempts),
+				)
+				return &TaskResult{
+					StepID: task.StepID,
+					Error:  fmt.Errorf("HITL: error escalated (checkpoint: %s) - original error: %s", checkpoint.CheckpointID, err.Error()),
+				}
+			}
+		}
+
 		return &TaskResult{
 			StepID: task.StepID,
 			Error:  err,
@@ -675,6 +797,61 @@ func (e *WorkflowEngine) executeStep(ctx context.Context, task *WorkflowTask) *T
 		"agent_used":  stepExec.AgentUsed,
 		"attempts":    stepExec.Attempts,
 	})
+
+	// HITL: Post-step output validation check (declarative, from YAML config)
+	// If ValidateOutput is set in step definition and controller is available, check for validation
+	if stepDef.ValidateOutput && e.interruptController != nil {
+		// Build a StepResult-like structure for the controller
+		stepResult := &StepResult{
+			StepID:    task.StepID,
+			AgentName: stepExec.AgentUsed,
+			Success:   true,
+			Response:  fmt.Sprintf("%v", output), // Convert output to string for validation
+		}
+
+		routingStep := RoutingStep{
+			StepID:    task.StepID,
+			AgentName: stepDef.Agent,
+			Metadata: map[string]interface{}{
+				"capability":      stepDef.Capability,
+				"workflow_id":     task.Execution.ID,
+				"validate_output": true,
+			},
+		}
+
+		// Use validation config if provided
+		if stepDef.ValidationConfig != nil {
+			routingStep.Metadata["validation_reason"] = stepDef.ValidationConfig.Reason
+			routingStep.Metadata["validation_priority"] = stepDef.ValidationConfig.Priority
+		}
+
+		checkpoint, hitlErr := e.interruptController.CheckAfterStep(ctx, routingStep, stepResult)
+		if hitlErr != nil {
+			e.logger.WarnWithContext(ctx, "HITL post-step check failed", map[string]interface{}{
+				"operation":   "hitl_post_step_check",
+				"step_id":     task.StepID,
+				"workflow_id": task.Execution.ID,
+				"error":       hitlErr.Error(),
+			})
+			// Non-fatal: continue if HITL check fails
+		} else if checkpoint != nil {
+			// Output requires validation - return interrupt result
+			e.logger.InfoWithContext(ctx, "Workflow step output requires validation", map[string]interface{}{
+				"operation":     "hitl_post_step_interrupt",
+				"step_id":       task.StepID,
+				"workflow_id":   task.Execution.ID,
+				"checkpoint_id": checkpoint.CheckpointID,
+			})
+			telemetry.AddSpanEvent(ctx, "hitl.workflow_step.output_validation",
+				attribute.String("step_id", task.StepID),
+				attribute.String("checkpoint_id", checkpoint.CheckpointID),
+			)
+			return &TaskResult{
+				StepID: task.StepID,
+				Error:  fmt.Errorf("HITL: awaiting output validation (checkpoint: %s)", checkpoint.CheckpointID),
+			}
+		}
+	}
 
 	return &TaskResult{
 		StepID: task.StepID,
@@ -737,6 +914,50 @@ func (e *WorkflowEngine) validateWorkflow(workflow *WorkflowDefinition) error {
 			if !stepNames[dep] {
 				return fmt.Errorf("step %s depends on non-existent step %s", step.Name, dep)
 			}
+		}
+	}
+
+	// Validate HITL configuration
+	if err := e.validateHITLConfig(workflow); err != nil {
+		return fmt.Errorf("HITL configuration error: %w", err)
+	}
+
+	return nil
+}
+
+// validateHITLConfig validates Human-in-the-Loop configuration in the workflow
+func (e *WorkflowEngine) validateHITLConfig(workflow *WorkflowDefinition) error {
+	// Validate workflow-level HITL config
+	if workflow.HITL != nil {
+		if workflow.HITL.DefaultTimeout < 0 {
+			return fmt.Errorf("workflow HITL default_timeout cannot be negative")
+		}
+	}
+
+	// Validate step-level HITL config
+	for _, step := range workflow.Steps {
+		// Validate approval config
+		if step.RequireApproval && step.ApprovalConfig != nil {
+			if step.ApprovalConfig.Timeout < 0 {
+				return fmt.Errorf("step %s: approval_config timeout cannot be negative", step.Name)
+			}
+		}
+
+		// Validate output validation config
+		if step.ValidateOutput && step.ValidationConfig != nil {
+			if step.ValidationConfig.Timeout < 0 {
+				return fmt.Errorf("step %s: validation_config timeout cannot be negative", step.Name)
+			}
+		}
+
+		// Warn (via log) if HITL flags are set but no controller will be available
+		// This is informational, not an error, as controller is set at runtime
+		if (step.RequireApproval || step.ValidateOutput) && e.logger != nil {
+			e.logger.Debug("Step has HITL configuration", map[string]interface{}{
+				"step_name":        step.Name,
+				"require_approval": step.RequireApproval,
+				"validate_output":  step.ValidateOutput,
+			})
 		}
 	}
 

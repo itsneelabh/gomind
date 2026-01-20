@@ -116,6 +116,8 @@ type StepResult struct {
 	Attempts    int           `json:"attempts"`
 	StartTime   time.Time     `json:"start_time"`
 	EndTime     time.Time     `json:"end_time"`
+	// Metadata holds optional step-level data (e.g., HITL checkpoint info)
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // Synthesizer combines multiple agent responses into a coherent result
@@ -311,6 +313,17 @@ type OrchestratorConfig struct {
 	// If nil and LLMDebug.Enabled is true, auto-configures Redis from environment.
 	// Use WithLLMDebugStore() to inject a custom backend (PostgreSQL, S3, etc.).
 	LLMDebugStore LLMDebugStore `json:"-"` // Not serializable
+
+	// HITL (Human-in-the-Loop) configuration
+	// When enabled, allows human oversight at critical decision points.
+	// Disabled by default for backward compatibility.
+	// Enable via GOMIND_HITL_ENABLED=true or config.HITL.Enabled=true.
+	HITL HITLConfig `json:"hitl,omitempty"`
+
+	// RequestIDPrefix is the prefix used for generated request IDs in distributed tracing.
+	// Default: "orch" → generates IDs like "orch-1768510279883440759"
+	// Custom: "awhl" → generates IDs like "awhl-1768510279883440759"
+	RequestIDPrefix string `json:"request_id_prefix,omitempty"`
 }
 
 // SemanticRetryConfig configures Layer 4 contextual re-resolution
@@ -454,6 +467,40 @@ func DefaultConfig() *OrchestratorConfig {
 	if redisDB := os.Getenv("GOMIND_LLM_DEBUG_REDIS_DB"); redisDB != "" {
 		if val, err := strconv.Atoi(redisDB); err == nil && val >= 0 {
 			config.LLMDebug.RedisDB = val
+		}
+	}
+
+	// HITL (Human-in-the-Loop) defaults (disabled by default for backward compatibility)
+	config.HITL = DefaultHITLConfig()
+
+	// HITL configuration from environment
+	if enabled := os.Getenv("GOMIND_HITL_ENABLED"); enabled != "" {
+		config.HITL.Enabled = strings.ToLower(enabled) == "true"
+	}
+	if planApproval := os.Getenv("GOMIND_HITL_REQUIRE_PLAN_APPROVAL"); planApproval != "" {
+		config.HITL.RequirePlanApproval = strings.ToLower(planApproval) == "true"
+	}
+	if capabilities := os.Getenv("GOMIND_HITL_SENSITIVE_CAPABILITIES"); capabilities != "" {
+		config.HITL.SensitiveCapabilities = strings.Split(capabilities, ",")
+	}
+	if agents := os.Getenv("GOMIND_HITL_SENSITIVE_AGENTS"); agents != "" {
+		config.HITL.SensitiveAgents = strings.Split(agents, ",")
+	}
+	// Step-sensitive capabilities/agents (Scenario 2 only - no plan approval)
+	if stepCapabilities := os.Getenv("GOMIND_HITL_STEP_SENSITIVE_CAPABILITIES"); stepCapabilities != "" {
+		config.HITL.StepSensitiveCapabilities = strings.Split(stepCapabilities, ",")
+	}
+	if stepAgents := os.Getenv("GOMIND_HITL_STEP_SENSITIVE_AGENTS"); stepAgents != "" {
+		config.HITL.StepSensitiveAgents = strings.Split(stepAgents, ",")
+	}
+	if timeout := os.Getenv("GOMIND_HITL_DEFAULT_TIMEOUT"); timeout != "" {
+		if duration, err := time.ParseDuration(timeout); err == nil {
+			config.HITL.DefaultTimeout = duration
+		}
+	}
+	if escalateRetries := os.Getenv("GOMIND_HITL_ESCALATE_AFTER_RETRIES"); escalateRetries != "" {
+		if val, err := strconv.Atoi(escalateRetries); err == nil && val >= 0 {
+			config.HITL.EscalateAfterRetries = val
 		}
 	}
 

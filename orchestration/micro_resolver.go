@@ -405,7 +405,8 @@ func (m *MicroResolver) recordDebugInteraction(ctx context.Context, requestID st
 	go func() {
 		defer m.debugWg.Done()
 
-		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Use original context with timeout to preserve baggage (original_request_id).
+		recordCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
 		if err := m.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {

@@ -11,6 +11,24 @@ import (
 	"github.com/itsneelabh/gomind/core"
 )
 
+// findJSONEnd finds the end of JSON in a string (simple version, doesn't handle strings).
+// This is a test helper for testing basic JSON bracket matching.
+func findJSONEnd(s string, start int) int {
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
 // MockAIClient implements core.AIClient for testing
 type MockAIClient struct {
 	responses map[string]string
@@ -800,4 +818,355 @@ func (m *mockAIClientForRetry) GenerateResponse(ctx context.Context, prompt stri
 			TotalTokens:      150,
 		},
 	}, nil
+}
+
+// =============================================================================
+// HITL Resume Context Helpers Tests
+// =============================================================================
+
+func TestWithPlanOverride(t *testing.T) {
+	tests := []struct {
+		name    string
+		plan    *RoutingPlan
+		wantNil bool
+	}{
+		{
+			name: "valid plan",
+			plan: &RoutingPlan{
+				PlanID: "test-plan-1",
+				Steps: []RoutingStep{
+					{StepID: "step-1", AgentName: "agent-1"},
+					{StepID: "step-2", AgentName: "agent-2"},
+				},
+			},
+			wantNil: false,
+		},
+		{
+			name:    "nil plan returns original context",
+			plan:    nil,
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			newCtx := WithPlanOverride(ctx, tt.plan)
+
+			if tt.wantNil {
+				// Should return same context when plan is nil
+				if newCtx != ctx {
+					t.Error("Expected same context when plan is nil")
+				}
+				retrieved := GetPlanOverride(newCtx)
+				if retrieved != nil {
+					t.Error("Expected nil plan from context")
+				}
+			} else {
+				// Should return new context with plan
+				retrieved := GetPlanOverride(newCtx)
+				if retrieved == nil {
+					t.Fatal("Expected plan from context, got nil")
+				}
+				if retrieved.PlanID != tt.plan.PlanID {
+					t.Errorf("Expected PlanID %s, got %s", tt.plan.PlanID, retrieved.PlanID)
+				}
+				if len(retrieved.Steps) != len(tt.plan.Steps) {
+					t.Errorf("Expected %d steps, got %d", len(tt.plan.Steps), len(retrieved.Steps))
+				}
+			}
+		})
+	}
+}
+
+func TestGetPlanOverride_NilContext(t *testing.T) {
+	// Should safely handle nil context
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
+	result := GetPlanOverride(nil)
+	if result != nil {
+		t.Error("Expected nil for nil context")
+	}
+}
+
+func TestGetPlanOverride_NoValue(t *testing.T) {
+	// Should return nil when no plan is set
+	ctx := context.Background()
+	result := GetPlanOverride(ctx)
+	if result != nil {
+		t.Error("Expected nil when no plan override set")
+	}
+}
+
+func TestWithCompletedSteps(t *testing.T) {
+	tests := []struct {
+		name    string
+		results map[string]*StepResult
+		wantNil bool
+	}{
+		{
+			name: "valid completed steps",
+			results: map[string]*StepResult{
+				"step-1": {
+					StepID:    "step-1",
+					AgentName: "agent-1",
+					Success:   true,
+					Response:  `{"data": "result1"}`,
+				},
+				"step-2": {
+					StepID:    "step-2",
+					AgentName: "agent-2",
+					Success:   true,
+					Response:  `{"data": "result2"}`,
+				},
+			},
+			wantNil: false,
+		},
+		{
+			name:    "nil results returns original context",
+			results: nil,
+			wantNil: true,
+		},
+		{
+			name:    "empty map is valid",
+			results: map[string]*StepResult{},
+			wantNil: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			newCtx := WithCompletedSteps(ctx, tt.results)
+
+			if tt.wantNil {
+				// Should return same context when results is nil
+				if newCtx != ctx {
+					t.Error("Expected same context when results is nil")
+				}
+				retrieved := GetCompletedSteps(newCtx)
+				if retrieved != nil {
+					t.Error("Expected nil from context")
+				}
+			} else {
+				// Should return new context with results
+				retrieved := GetCompletedSteps(newCtx)
+				if retrieved == nil {
+					t.Fatal("Expected results from context, got nil")
+				}
+				if len(retrieved) != len(tt.results) {
+					t.Errorf("Expected %d results, got %d", len(tt.results), len(retrieved))
+				}
+				// Verify specific entries
+				for stepID, expected := range tt.results {
+					actual, ok := retrieved[stepID]
+					if !ok {
+						t.Errorf("Missing step result for %s", stepID)
+						continue
+					}
+					if actual.StepID != expected.StepID {
+						t.Errorf("StepID mismatch for %s", stepID)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestGetCompletedSteps_NilContext(t *testing.T) {
+	// Should safely handle nil context
+	//nolint:staticcheck // SA1012: intentionally testing nil context handling
+	result := GetCompletedSteps(nil)
+	if result != nil {
+		t.Error("Expected nil for nil context")
+	}
+}
+
+func TestGetCompletedSteps_NoValue(t *testing.T) {
+	// Should return nil when no completed steps are set
+	ctx := context.Background()
+	result := GetCompletedSteps(ctx)
+	if result != nil {
+		t.Error("Expected nil when no completed steps set")
+	}
+}
+
+// =============================================================================
+// Orchestrator Plan Override Tests
+// =============================================================================
+
+// mockAIClientWithCallTracking tracks whether GenerateResponse was called
+type mockAIClientWithCallTracking struct {
+	called    bool
+	callCount int
+}
+
+func (m *mockAIClientWithCallTracking) GenerateResponse(ctx context.Context, prompt string, opts *core.AIOptions) (*core.AIResponse, error) {
+	m.called = true
+	m.callCount++
+
+	// Return a valid plan response
+	plan := map[string]interface{}{
+		"plan_id":          "llm-generated-plan",
+		"original_request": "test request",
+		"mode":             "autonomous",
+		"steps": []map[string]interface{}{
+			{
+				"step_id":     "step-1",
+				"agent_name":  "test-agent",
+				"namespace":   "default",
+				"instruction": "Do something",
+				"depends_on":  []string{},
+				"metadata":    map[string]interface{}{},
+			},
+		},
+	}
+
+	jsonBytes, _ := json.Marshal(plan)
+	return &core.AIResponse{
+		Content: string(jsonBytes),
+		Usage: core.TokenUsage{
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+		},
+	}, nil
+}
+
+// mockAIClientWithPromptTracking distinguishes between planning and synthesis calls
+type mockAIClientWithPromptTracking struct {
+	planningCallCount  int
+	synthesisCallCount int
+	otherCallCount     int
+}
+
+func (m *mockAIClientWithPromptTracking) GenerateResponse(ctx context.Context, prompt string, opts *core.AIOptions) (*core.AIResponse, error) {
+	// Detect if this is a planning prompt by looking for planning-related keywords
+	// Planning prompts typically contain these patterns
+	isPlanningPrompt := strings.Contains(prompt, "execution plan") ||
+		strings.Contains(prompt, "routing plan") ||
+		strings.Contains(prompt, "analyze the request") ||
+		strings.Contains(prompt, "available agents") ||
+		strings.Contains(prompt, "plan_id")
+
+	// Synthesis prompts contain these patterns
+	isSynthesisPrompt := strings.Contains(prompt, "synthesize") ||
+		strings.Contains(prompt, "combine") ||
+		strings.Contains(prompt, "Agent Responses")
+
+	if isPlanningPrompt && !isSynthesisPrompt {
+		m.planningCallCount++
+	} else if isSynthesisPrompt {
+		m.synthesisCallCount++
+	} else {
+		m.otherCallCount++
+	}
+
+	// Return a valid plan response (works for both planning and synthesis)
+	plan := map[string]interface{}{
+		"plan_id":          "llm-generated-plan",
+		"original_request": "test request",
+		"mode":             "autonomous",
+		"steps": []map[string]interface{}{
+			{
+				"step_id":     "step-1",
+				"agent_name":  "test-agent",
+				"namespace":   "default",
+				"instruction": "Do something",
+				"depends_on":  []string{},
+				"metadata":    map[string]interface{}{},
+			},
+		},
+	}
+
+	jsonBytes, _ := json.Marshal(plan)
+	return &core.AIResponse{
+		Content: string(jsonBytes),
+		Usage: core.TokenUsage{
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+		},
+	}, nil
+}
+
+func TestOrchestrator_SkipsLLMPlanGenerationWhenPlanProvided(t *testing.T) {
+	// This test verifies that when a plan is injected via context,
+	// the LLM is NOT called for plan generation (it may still be called for synthesis).
+	//
+	// We detect plan generation calls by checking if the prompt contains
+	// planning-related keywords like "execution plan" or "routing plan".
+
+	discovery := NewMockDiscovery()
+	aiClientWithOverride := &mockAIClientWithPromptTracking{}
+	aiClientWithoutOverride := &mockAIClientWithPromptTracking{}
+
+	// Register test agent
+	_ = discovery.Register(context.Background(), &core.ServiceRegistration{
+		ID:           "test-1",
+		Name:         "test-agent",
+		Address:      "localhost",
+		Port:         8080,
+		Capabilities: []core.Capability{{Name: "test_capability"}},
+	})
+
+	config := DefaultConfig()
+
+	// Setup catalog (shared)
+	catalog := &AgentCatalog{
+		agents: map[string]*AgentInfo{
+			"test-1": {
+				Registration: &core.ServiceRegistration{
+					ID:      "test-1",
+					Name:    "test-agent",
+					Address: "localhost",
+					Port:    8080,
+				},
+				Capabilities: []EnhancedCapability{
+					{Name: "test_capability", Endpoint: "/api/test"},
+				},
+			},
+		},
+	}
+
+	// Test 1: WITH plan override - LLM should NOT be called for plan GENERATION
+	orchestratorWithOverride := NewAIOrchestrator(config, discovery, aiClientWithOverride)
+	orchestratorWithOverride.catalog = catalog
+
+	injectedPlan := &RoutingPlan{
+		PlanID:          "injected-plan-123",
+		OriginalRequest: "test request",
+		Steps: []RoutingStep{
+			{
+				StepID:      "step-1",
+				AgentName:   "test-agent",
+				Namespace:   "default",
+				Instruction: "Test instruction",
+				Metadata:    map[string]interface{}{"capability": "test_capability"},
+			},
+		},
+	}
+
+	ctx := WithPlanOverride(context.Background(), injectedPlan)
+
+	// Attempt to process - will fail during execution due to no HTTP server,
+	// but plan generation phase should use the override
+	_, _ = orchestratorWithOverride.ProcessRequest(ctx, "test request", nil)
+
+	// With plan override, the LLM should NOT be called for plan GENERATION
+	// (synthesis calls are okay - they use different prompts)
+	if aiClientWithOverride.planningCallCount > 0 {
+		t.Errorf("LLM should NOT be called for plan generation when plan override is provided, but got %d planning calls", aiClientWithOverride.planningCallCount)
+	}
+
+	// Test 2: WITHOUT plan override - LLM SHOULD be called for planning
+	orchestratorWithoutOverride := NewAIOrchestrator(config, discovery, aiClientWithoutOverride)
+	orchestratorWithoutOverride.catalog = catalog
+
+	// Process WITHOUT plan override
+	_, _ = orchestratorWithoutOverride.ProcessRequest(context.Background(), "test request", nil)
+
+	// Without plan override, the LLM SHOULD be called for plan generation
+	if aiClientWithoutOverride.planningCallCount == 0 {
+		t.Error("LLM SHOULD be called for plan generation when no plan override is provided")
+	}
 }

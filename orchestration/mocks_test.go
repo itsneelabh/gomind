@@ -184,6 +184,15 @@ func (m *MockRoundTripper) SetError(url string, err error) {
 	m.errors[url] = err
 }
 
+// GetCallCount returns the total number of HTTP calls made
+func (m *MockRoundTripper) GetCallCount() int {
+	total := 0
+	for _, count := range m.callCount {
+		total += count
+	}
+	return total
+}
+
 // HTTPClient interface for mocking
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)

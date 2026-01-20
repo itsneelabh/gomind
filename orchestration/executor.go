@@ -28,6 +28,16 @@ type executorContextKey string
 const (
 	// dependencyResultsKey stores results from dependent steps for template interpolation
 	dependencyResultsKey executorContextKey = "dependency_results"
+	// planContextKey stores the current routing plan for HITL checks
+	planContextKey executorContextKey = "routing_plan"
+	// resolvedParamsKey stores resolved parameters for HITL checkpoint visibility
+	resolvedParamsKey executorContextKey = "resolved_params"
+	// preResolvedParamsKey stores parameters from checkpoint during resume
+	// These parameters were approved by the user and should be used directly
+	preResolvedParamsKey executorContextKey = "pre_resolved_params"
+	// preResolvedStepIDKey stores the step ID that pre-resolved params are for
+	// Only the step with matching ID should use the pre-resolved params
+	preResolvedStepIDKey executorContextKey = "pre_resolved_step_id"
 )
 
 // Pre-compiled regex patterns for template substitution (performance optimization)
@@ -88,6 +98,15 @@ type SmartExecutor struct {
 
 	// Retry configuration
 	maxAttempts int // Maximum number of retry attempts (default: 2)
+
+	// HITL (Human-in-the-Loop) support
+	// When set, enables human oversight before/after step execution.
+	//
+	// Design note: Executor checks controller != nil, not config.HITL.Enabled.
+	// The presence of a controller indicates HITL is active. The orchestrator
+	// is responsible for only setting the controller when HITL is enabled in config.
+	// This avoids coupling executor to OrchestratorConfig.
+	interruptController InterruptController
 }
 
 // NewSmartExecutor creates a new smart executor
@@ -245,6 +264,12 @@ func (e *SmartExecutor) SetOnStepComplete(cb StepCompleteCallback) {
 	e.onStepComplete = cb
 }
 
+// SetInterruptController sets the HITL interrupt controller.
+// When set, enables human oversight before/after step execution.
+func (e *SmartExecutor) SetInterruptController(controller InterruptController) {
+	e.interruptController = controller
+}
+
 // safeInvokeStepCallback invokes a step callback with panic protection.
 // If the callback panics, the panic is recovered and logged, preventing
 // user callback errors from crashing the executor goroutine.
@@ -342,6 +367,32 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 
 	// Execute steps respecting dependencies
 	executed := make(map[string]bool)
+
+	// Pre-populate with completed steps from HITL checkpoint (resume flow)
+	// This allows the executor to skip steps that were already completed
+	// before the HITL checkpoint was created.
+	completedSteps := GetCompletedSteps(ctx)
+	if completedSteps != nil {
+		for stepID, cachedResult := range completedSteps {
+			executed[stepID] = true
+			stepResults[stepID] = cachedResult
+			result.Steps = append(result.Steps, *cachedResult)
+			if e.logger != nil {
+				e.logger.DebugWithContext(ctx, "Pre-populated completed step from checkpoint", map[string]interface{}{
+					"step_id":   stepID,
+					"operation": "hitl_resume_prepopulate",
+				})
+			}
+		}
+		if e.logger != nil {
+			e.logger.InfoWithContext(ctx, "Executor resuming with completed steps from checkpoint", map[string]interface{}{
+				"operation":       "hitl_resume_executor",
+				"plan_id":         plan.PlanID,
+				"completed_count": len(completedSteps),
+				"remaining_count": len(plan.Steps) - len(completedSteps),
+			})
+		}
+	}
 
 	for len(executed) < len(plan.Steps) {
 		// Find steps that can be executed (all dependencies met)
@@ -482,7 +533,9 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 				}()
 
 				// Build context for step execution
-				stepCtx := e.buildStepContext(ctx, s, stepResults)
+				// Include plan in context for HITL checks
+				stepCtx := context.WithValue(ctx, planContextKey, plan)
+				stepCtx = e.buildStepContext(stepCtx, s, stepResults)
 
 				// Execute the step
 				stepResult := e.executeStep(stepCtx, s)
@@ -505,10 +558,40 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 				// Check both executor-level and context-level callbacks
 				// Callbacks are wrapped with panic protection to prevent user callback
 				// panics from crashing the executor goroutine.
-				e.safeInvokeStepCallback(e.onStepComplete, stepIndex, len(plan.Steps), s, stepResult)
-				// Also check for per-request callback from context
-				if ctxCallback := GetStepCallback(ctx); ctxCallback != nil {
-					e.safeInvokeStepCallback(ctxCallback, stepIndex, len(plan.Steps), s, stepResult)
+				//
+				// IMPORTANT: Skip callback for HITL-interrupted steps. When a step is
+				// paused for human approval, it hasn't actually "failed" - it's just
+				// waiting. Sending a failure callback would confuse the UI.
+				isHITLInterrupt := stepResult.Metadata != nil && stepResult.Metadata["hitl_checkpoint"] != nil
+				if isHITLInterrupt {
+					if e.logger != nil {
+						e.logger.DebugWithContext(ctx, "Skipping step callback for HITL-interrupted step", map[string]interface{}{
+							"operation":     "hitl_step_callback_skip",
+							"step_id":       s.StepID,
+							"agent_name":    s.AgentName,
+							"checkpoint_id": stepResult.Metadata["hitl_checkpoint_id"],
+						})
+					}
+				} else {
+					// Log callback invocation for debugging
+					if e.logger != nil {
+						hasExecutorCallback := e.onStepComplete != nil
+						ctxCallback := GetStepCallback(ctx)
+						hasCtxCallback := ctxCallback != nil
+						e.logger.DebugWithContext(ctx, "Invoking step callbacks", map[string]interface{}{
+							"operation":             "step_callback_invoke",
+							"step_id":               s.StepID,
+							"agent_name":            s.AgentName,
+							"success":               stepResult.Success,
+							"has_executor_callback": hasExecutorCallback,
+							"has_context_callback":  hasCtxCallback,
+						})
+					}
+					e.safeInvokeStepCallback(e.onStepComplete, stepIndex, len(plan.Steps), s, stepResult)
+					// Also check for per-request callback from context
+					if ctxCallback := GetStepCallback(ctx); ctxCallback != nil {
+						e.safeInvokeStepCallback(ctxCallback, stepIndex, len(plan.Steps), s, stepResult)
+					}
 				}
 			}(step)
 		}
@@ -526,6 +609,68 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 				"total_steps":      totalSteps,
 				"progress_percent": float64(completedSteps) / float64(totalSteps) * 100,
 			})
+		}
+
+		// Check for HITL step-level interrupts
+		// If any step in the batch was interrupted for human approval, propagate ErrInterrupted
+		for _, stepResult := range result.Steps {
+			if stepResult.Metadata != nil {
+				if checkpoint, ok := stepResult.Metadata["hitl_checkpoint"].(*ExecutionCheckpoint); ok {
+					// Collect completed steps (steps that finished successfully before the interrupt)
+					completedStepResults := make([]StepResult, 0)
+					for _, sr := range result.Steps {
+						// Include only successful steps that are not the interrupted step
+						if sr.Success && sr.StepID != stepResult.StepID {
+							completedStepResults = append(completedStepResults, sr)
+						}
+					}
+
+					// Update checkpoint with completed steps (if interrupt controller is available)
+					if e.interruptController != nil && len(completedStepResults) > 0 {
+						if err := e.interruptController.UpdateCheckpointProgress(ctx, checkpoint.CheckpointID, completedStepResults); err != nil {
+							if e.logger != nil {
+								e.logger.WarnWithContext(ctx, "Failed to update checkpoint progress", map[string]interface{}{
+									"operation":       "hitl_update_progress",
+									"checkpoint_id":   checkpoint.CheckpointID,
+									"completed_steps": len(completedStepResults),
+									"error":           err.Error(),
+								})
+							}
+							// Non-fatal: continue with interrupt even if update fails
+						}
+					}
+
+					if e.logger != nil {
+						e.logger.InfoWithContext(ctx, "Step-level HITL interrupt detected, returning ErrInterrupted", map[string]interface{}{
+							"operation":        "hitl_step_interrupt_propagate",
+							"checkpoint_id":    checkpoint.CheckpointID,
+							"interrupted_step": stepResult.StepID,
+							"completed_steps":  len(completedStepResults),
+						})
+					}
+
+					// Add span event for step-level HITL propagation (visible in Jaeger)
+					telemetry.AddSpanEvent(ctx, "hitl.step_interrupt.propagating",
+						attribute.String("checkpoint_id", checkpoint.CheckpointID),
+						attribute.String("interrupted_step", stepResult.StepID),
+						attribute.String("interrupt_point", string(checkpoint.InterruptPoint)),
+						attribute.Int("completed_steps", len(completedStepResults)),
+						attribute.Int("total_steps", len(result.Steps)),
+					)
+
+					// Set span attributes for HITL context
+					telemetry.SetSpanAttributes(ctx,
+						attribute.Bool("hitl.interrupted", true),
+						attribute.String("hitl.checkpoint_id", checkpoint.CheckpointID),
+						attribute.String("hitl.interrupt_point", string(checkpoint.InterruptPoint)),
+					)
+
+					return nil, &ErrInterrupted{
+						CheckpointID: checkpoint.CheckpointID,
+						Checkpoint:   checkpoint,
+					}
+				}
+			}
 		}
 
 		// Check for context cancellation
@@ -698,6 +843,56 @@ func (e *SmartExecutor) collectDependencyResults(ctx context.Context, dependsOn 
 	}
 
 	return results
+}
+
+// WithResolvedParams adds resolved parameters to the context for HITL checkpoint visibility.
+// This allows the HITL controller to include actual parameter values in the checkpoint,
+// so users can see real values (e.g., amount: 15000) instead of templates.
+func WithResolvedParams(ctx context.Context, params map[string]interface{}) context.Context {
+	return context.WithValue(ctx, resolvedParamsKey, params)
+}
+
+// GetResolvedParams retrieves resolved parameters from context.
+// Returns nil if no resolved parameters are set.
+func GetResolvedParams(ctx context.Context) map[string]interface{} {
+	if params, ok := ctx.Value(resolvedParamsKey).(map[string]interface{}); ok {
+		return params
+	}
+	return nil
+}
+
+// WithPreResolvedParams adds pre-resolved parameters to the context for HITL resume.
+// When resuming from a checkpoint, these are the parameters that were approved by the user.
+// The executor will use these directly instead of re-resolving from dependencies.
+// IMPORTANT: stepID specifies which step these params are for - only that step should use them.
+//
+// Usage (in agent/orchestrator resume path):
+//
+//	if checkpoint.ResolvedParameters != nil && checkpoint.CurrentStep != nil {
+//	    ctx = WithPreResolvedParams(ctx, checkpoint.ResolvedParameters, checkpoint.CurrentStep.StepID)
+//	}
+func WithPreResolvedParams(ctx context.Context, params map[string]interface{}, stepID string) context.Context {
+	ctx = context.WithValue(ctx, preResolvedParamsKey, params)
+	ctx = context.WithValue(ctx, preResolvedStepIDKey, stepID)
+	return ctx
+}
+
+// GetPreResolvedParams retrieves pre-resolved parameters from context.
+// Returns nil if no pre-resolved parameters are set (not resuming from checkpoint).
+func GetPreResolvedParams(ctx context.Context) map[string]interface{} {
+	if params, ok := ctx.Value(preResolvedParamsKey).(map[string]interface{}); ok {
+		return params
+	}
+	return nil
+}
+
+// GetPreResolvedStepID retrieves the step ID that pre-resolved params are for.
+// Returns empty string if not set.
+func GetPreResolvedStepID(ctx context.Context) string {
+	if stepID, ok := ctx.Value(preResolvedStepIDKey).(string); ok {
+		return stepID
+	}
+	return ""
 }
 
 // interpolateParameters substitutes template placeholders in parameters with values from dependency results.
@@ -1221,7 +1416,10 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		Attempts:    0,
 	}
 
-	// Get agent info from catalog
+	// =========================================================================
+	// PHASE 1: Agent Discovery (before HITL to ensure valid agent)
+	// =========================================================================
+	// Get agent info from catalog FIRST - no point asking for approval if agent doesn't exist
 	agentInfo := e.findAgentByName(step.AgentName)
 	if agentInfo == nil {
 		err := fmt.Errorf("agent %s not found in catalog", step.AgentName)
@@ -1250,6 +1448,9 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		})
 	}
 
+	// =========================================================================
+	// PHASE 2: Parameter Extraction (before HITL to have params for approval)
+	// =========================================================================
 	// Extract capability and parameters from metadata
 	capability := ""
 	var parameters map[string]interface{}
@@ -1261,123 +1462,155 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		parameters = params
 	}
 
-	// Parameter Resolution: Hybrid auto-wiring OR legacy template interpolation
-	// When hybrid resolution is enabled, it uses intelligent name-matching and optional LLM
-	// micro-resolution instead of brittle template substitution.
+	// =========================================================================
+	// PHASE 3: Parameter Resolution (before HITL to show resolved values)
+	// =========================================================================
+	// Check if pre-resolved parameters exist (resuming from HITL checkpoint).
+	// IMPORTANT: Only use pre-resolved params for the SPECIFIC step that was interrupted.
+	// Other steps should resolve their params normally to avoid using wrong parameters.
+	preResolved := GetPreResolvedParams(ctx)
+	preResolvedStepID := GetPreResolvedStepID(ctx)
+	usePreResolved := len(preResolved) > 0 && preResolvedStepID == step.StepID
 
-	// Direct stderr logging for guaranteed visibility (bypasses logger filtering)
-	log.Printf("[GOMIND-EXEC-V2] Step %s: depends=%d, useHybrid=%v, resolverSet=%v",
-		step.StepID, len(step.DependsOn), e.useHybridResolution, e.hybridResolver != nil)
-
-	// Also log via framework logger for structured output
-	if e.logger != nil {
-		e.logger.InfoWithContext(ctx, "Hybrid resolution check", map[string]interface{}{
-			"step_id":               step.StepID,
-			"depends_on_count":      len(step.DependsOn),
-			"use_hybrid_resolution": e.useHybridResolution,
-			"hybrid_resolver_set":   e.hybridResolver != nil,
-			"will_use_hybrid":       len(step.DependsOn) > 0 && e.useHybridResolution && e.hybridResolver != nil,
-		})
-	}
-	if len(step.DependsOn) > 0 && e.useHybridResolution && e.hybridResolver != nil {
-		// Phase 4: Hybrid Parameter Resolution (preferred)
-		// Get the capability schema for target parameter types
-		capabilityForResolution := e.findCapabilitySchema(agentInfo, capability)
+	if usePreResolved {
 		if e.logger != nil {
-			e.logger.InfoWithContext(ctx, "findCapabilitySchema result", map[string]interface{}{
-				"step_id":        step.StepID,
-				"capability":     capability,
-				"schema_found":   capabilityForResolution != nil,
-				"agent_name":     step.AgentName,
-				"agent_info_nil": agentInfo == nil,
-				"agent_cap_count": func() int {
-					if agentInfo != nil {
-						return len(agentInfo.Capabilities)
-					}
-					return 0
-				}(),
+			e.logger.InfoWithContext(ctx, "Using pre-resolved parameters from HITL checkpoint", map[string]interface{}{
+				"operation":            "hitl_resume_params",
+				"step_id":              step.StepID,
+				"pre_resolved_step_id": preResolvedStepID,
+				"pre_resolved":         preResolved,
+				"original_params":      parameters,
 			})
 		}
-		if capabilityForResolution != nil {
-			// Collect step results from dependencies
-			stepResultsMap := e.collectDependencyResults(ctx, step.DependsOn)
+		telemetry.AddSpanEvent(ctx, "hitl.resume.using_approved_params",
+			attribute.String("step_id", step.StepID),
+			attribute.Int("param_count", len(preResolved)),
+		)
+		// Use pre-resolved params directly - these are what the user approved
+		parameters = preResolved
+	} else {
+		// Normal flow: resolve parameters from dependencies
+		// Parameter Resolution: Hybrid auto-wiring OR legacy template interpolation
+		// When hybrid resolution is enabled, it uses intelligent name-matching and optional LLM
+		// micro-resolution instead of brittle template substitution.
 
-			resolved, err := e.hybridResolver.ResolveParameters(ctx, stepResultsMap, capabilityForResolution)
-			if err != nil {
-				if e.logger != nil {
-					e.logger.WarnWithContext(ctx, "Hybrid resolution failed, falling back to template interpolation", map[string]interface{}{
-						"operation": "hybrid_resolution_fallback",
-						"step_id":   step.StepID,
-						"error":     err.Error(),
-					})
-				}
-				// Fall through to template interpolation below
-			} else if len(resolved) > 0 {
-				// Merge resolved parameters with original parameters
-				// Replace template strings with resolved values, preserve hardcoded values
-				if parameters == nil {
-					parameters = make(map[string]interface{})
-				}
-				for key, val := range resolved {
-					existing, exists := parameters[key]
-					if !exists {
-						// Key doesn't exist, add resolved value
-						parameters[key] = val
-					} else if strVal, ok := existing.(string); ok && strings.Contains(strVal, "{{") {
-						// Existing value is a template string - replace with resolved value
-						parameters[key] = val
-					}
-					// Otherwise, preserve the existing hardcoded value
-				}
+		// Direct stderr logging for guaranteed visibility (bypasses logger filtering)
+		log.Printf("[GOMIND-EXEC-V2] Step %s: depends=%d, useHybrid=%v, resolverSet=%v",
+			step.StepID, len(step.DependsOn), e.useHybridResolution, e.hybridResolver != nil)
 
-				if e.logger != nil {
-					e.logger.InfoWithContext(ctx, "HYBRID RESOLUTION APPLIED", map[string]interface{}{
-						"operation":       "hybrid_parameter_resolution",
-						"step_id":         step.StepID,
-						"capability":      capability,
-						"resolved_params": resolved,
-						"final_params":    parameters,
-					})
-				}
-
-				// Add telemetry for hybrid resolution success
-				telemetry.AddSpanEvent(ctx, "hybrid_resolution_applied",
-					attribute.String("step_id", step.StepID),
-					attribute.String("capability", capability),
-					attribute.Int("resolved_count", len(resolved)),
-				)
-				telemetry.Counter("orchestration.hybrid_resolution.success",
-					"capability", capability,
-					"module", telemetry.ModuleOrchestration,
-				)
-			}
+		// Also log via framework logger for structured output
+		if e.logger != nil {
+			e.logger.InfoWithContext(ctx, "Hybrid resolution check", map[string]interface{}{
+				"step_id":               step.StepID,
+				"depends_on_count":      len(step.DependsOn),
+				"use_hybrid_resolution": e.useHybridResolution,
+				"hybrid_resolver_set":   e.hybridResolver != nil,
+				"will_use_hybrid":       len(step.DependsOn) > 0 && e.useHybridResolution && e.hybridResolver != nil,
+			})
 		}
-	}
-
-	// Legacy: Template interpolation (fallback when hybrid resolution is disabled or unavailable)
-	// This enables templates like {{geocode.latitude}} to be replaced with actual values
-	if depResults, ok := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{}); ok && len(depResults) > 0 {
-		interpolated := e.interpolateParameters(parameters, depResults)
-		if interpolated != nil {
+		if len(step.DependsOn) > 0 && e.useHybridResolution && e.hybridResolver != nil {
+			// Phase 4: Hybrid Parameter Resolution (preferred)
+			// Get the capability schema for target parameter types
+			capabilityForResolution := e.findCapabilitySchema(agentInfo, capability)
 			if e.logger != nil {
-				e.logger.DebugWithContext(ctx, "Template parameters interpolated", map[string]interface{}{
-					"operation":    "parameter_interpolation",
-					"step_id":      step.StepID,
-					"original":     parameters,
-					"interpolated": interpolated,
+				e.logger.InfoWithContext(ctx, "findCapabilitySchema result", map[string]interface{}{
+					"step_id":        step.StepID,
+					"capability":     capability,
+					"schema_found":   capabilityForResolution != nil,
+					"agent_name":     step.AgentName,
+					"agent_info_nil": agentInfo == nil,
+					"agent_cap_count": func() int {
+						if agentInfo != nil {
+							return len(agentInfo.Capabilities)
+						}
+						return 0
+					}(),
 				})
 			}
-			parameters = interpolated
+			if capabilityForResolution != nil {
+				// Collect step results from dependencies
+				stepResultsMap := e.collectDependencyResults(ctx, step.DependsOn)
+
+				resolved, err := e.hybridResolver.ResolveParameters(ctx, stepResultsMap, capabilityForResolution)
+				if err != nil {
+					if e.logger != nil {
+						e.logger.WarnWithContext(ctx, "Hybrid resolution failed, falling back to template interpolation", map[string]interface{}{
+							"operation": "hybrid_resolution_fallback",
+							"step_id":   step.StepID,
+							"error":     err.Error(),
+						})
+					}
+					// Fall through to template interpolation below
+				} else if len(resolved) > 0 {
+					// Merge resolved parameters with original parameters
+					// Replace template strings with resolved values, preserve hardcoded values
+					if parameters == nil {
+						parameters = make(map[string]interface{})
+					}
+					for key, val := range resolved {
+						existing, exists := parameters[key]
+						if !exists {
+							// Key doesn't exist, add resolved value
+							parameters[key] = val
+						} else if strVal, ok := existing.(string); ok && strings.Contains(strVal, "{{") {
+							// Existing value is a template string - replace with resolved value
+							parameters[key] = val
+						}
+						// Otherwise, preserve the existing hardcoded value
+					}
+
+					if e.logger != nil {
+						e.logger.InfoWithContext(ctx, "HYBRID RESOLUTION APPLIED", map[string]interface{}{
+							"operation":       "hybrid_parameter_resolution",
+							"step_id":         step.StepID,
+							"capability":      capability,
+							"resolved_params": resolved,
+							"final_params":    parameters,
+						})
+					}
+
+					// Add telemetry for hybrid resolution success
+					telemetry.AddSpanEvent(ctx, "hybrid_resolution_applied",
+						attribute.String("step_id", step.StepID),
+						attribute.String("capability", capability),
+						attribute.Int("resolved_count", len(resolved)),
+					)
+					telemetry.Counter("orchestration.hybrid_resolution.success",
+						"capability", capability,
+						"module", telemetry.ModuleOrchestration,
+					)
+				}
+			}
 		}
 
-		// Semantic Fallback: Resolve any remaining unresolved templates using LLM inference
-		// This handles cases where the template path doesn't exist (e.g., {{step-2.response.data.country.currency}}
-		// when geocoding returns country:"France" as a string, not an object with currency field)
-		if e.hybridResolver != nil && e.useHybridResolution {
-			parameters = e.resolveUnresolvedTemplatesWithLLM(ctx, parameters, depResults, step.StepID)
-		}
-	}
+		// Legacy: Template interpolation (fallback when hybrid resolution is disabled or unavailable)
+		// This enables templates like {{geocode.latitude}} to be replaced with actual values
+		if depResults, ok := ctx.Value(dependencyResultsKey).(map[string]map[string]interface{}); ok && len(depResults) > 0 {
+			interpolated := e.interpolateParameters(parameters, depResults)
+			if interpolated != nil {
+				if e.logger != nil {
+					e.logger.DebugWithContext(ctx, "Template parameters interpolated", map[string]interface{}{
+						"operation":    "parameter_interpolation",
+						"step_id":      step.StepID,
+						"original":     parameters,
+						"interpolated": interpolated,
+					})
+				}
+				parameters = interpolated
+			}
 
+			// Semantic Fallback: Resolve any remaining unresolved templates using LLM inference
+			// This handles cases where the template path doesn't exist (e.g., {{step-2.response.data.country.currency}}
+			// when geocoding returns country:"France" as a string, not an object with currency field)
+			if e.hybridResolver != nil && e.useHybridResolution {
+				parameters = e.resolveUnresolvedTemplatesWithLLM(ctx, parameters, depResults, step.StepID)
+			}
+		}
+	} // End of else block for normal parameter resolution (non-resume path)
+
+	// =========================================================================
+	// PHASE 4: Type Coercion (before HITL to show coerced values)
+	// =========================================================================
 	// Layer 2: Schema-Based Type Coercion
 	// Coerce parameters to match capability schema types.
 	// This fixes LLM-generated parameters that have incorrect types (e.g., "35.6" instead of 35.6).
@@ -1434,6 +1667,70 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		parameters = coerced
 	}
 
+	// =========================================================================
+	// PHASE 5: Store resolved params in context for HITL checkpoint visibility
+	// =========================================================================
+	// This allows users to see actual parameter values (e.g., amount: 15000)
+	// instead of template placeholders when approving step execution.
+	ctx = WithResolvedParams(ctx, parameters)
+
+	// =========================================================================
+	// PHASE 6: HITL Pre-step approval check (NOW has resolved params!)
+	// =========================================================================
+	// If interrupt controller is set and policy triggers, pause for human approval.
+	// Note: We check controller != nil (not config.HITL.Enabled) - see struct field comment.
+	// Parameters are now fully resolved, so checkpoint will contain actual values.
+	if e.interruptController != nil {
+		// Get plan from context for HITL checks
+		var plan *RoutingPlan
+		if p, ok := ctx.Value(planContextKey).(*RoutingPlan); ok {
+			plan = p
+		}
+
+		checkpoint, err := e.interruptController.CheckBeforeStep(ctx, step, plan)
+		if err != nil {
+			if e.logger != nil {
+				e.logger.WarnWithContext(ctx, "HITL pre-step check failed, continuing execution", map[string]interface{}{
+					"operation":  "hitl_pre_step_check",
+					"step_id":    step.StepID,
+					"agent_name": step.AgentName,
+					"error":      err.Error(),
+				})
+			}
+			// Non-fatal: continue if HITL check fails (graceful degradation)
+		} else if checkpoint != nil {
+			// Step requires human approval - return interrupt result
+			if e.logger != nil {
+				e.logger.InfoWithContext(ctx, "Step execution interrupted for human approval", map[string]interface{}{
+					"operation":           "hitl_pre_step_interrupt",
+					"step_id":             step.StepID,
+					"agent_name":          step.AgentName,
+					"checkpoint_id":       checkpoint.CheckpointID,
+					"resolved_params":     parameters,
+					"has_resolved_params": checkpoint.ResolvedParameters != nil,
+				})
+			}
+			telemetry.AddSpanEvent(ctx, "hitl.step.interrupted",
+				attribute.String("step_id", step.StepID),
+				attribute.String("checkpoint_id", checkpoint.CheckpointID),
+			)
+			result.Success = false
+			result.Error = fmt.Sprintf("HITL: awaiting approval (checkpoint: %s)", checkpoint.CheckpointID)
+			result.EndTime = time.Now()
+			result.Duration = time.Since(startTime)
+			// Store checkpoint info in metadata for Execute() to detect and propagate
+			result.Metadata = map[string]interface{}{
+				"hitl_checkpoint_id":   checkpoint.CheckpointID,
+				"hitl_interrupt_point": string(checkpoint.InterruptPoint),
+				"hitl_checkpoint":      checkpoint, // Full checkpoint for ErrInterrupted
+			}
+			return result
+		}
+	}
+
+	// =========================================================================
+	// PHASE 7: Find capability endpoint
+	// =========================================================================
 	// Find the capability endpoint
 	endpoint := e.findCapabilityEndpoint(agentInfo, capability)
 	if endpoint == "" {
@@ -1954,6 +2251,72 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 
 	result.EndTime = time.Now()
 	result.Duration = time.Since(startTime)
+
+	// HITL: Post-step checks
+	if e.interruptController != nil {
+		if result.Success {
+			// Post-step output validation check
+			checkpoint, hitlErr := e.interruptController.CheckAfterStep(ctx, step, &result)
+			if hitlErr != nil {
+				if e.logger != nil {
+					e.logger.WarnWithContext(ctx, "HITL post-step check failed", map[string]interface{}{
+						"operation":  "hitl_post_step_check",
+						"step_id":    step.StepID,
+						"agent_name": step.AgentName,
+						"error":      hitlErr.Error(),
+					})
+				}
+				// Non-fatal: continue if HITL check fails
+			} else if checkpoint != nil {
+				// Output requires validation - return interrupt result
+				if e.logger != nil {
+					e.logger.InfoWithContext(ctx, "Step output requires validation", map[string]interface{}{
+						"operation":     "hitl_post_step_interrupt",
+						"step_id":       step.StepID,
+						"agent_name":    step.AgentName,
+						"checkpoint_id": checkpoint.CheckpointID,
+					})
+				}
+				telemetry.AddSpanEvent(ctx, "hitl.step.output_validation",
+					attribute.String("step_id", step.StepID),
+					attribute.String("checkpoint_id", checkpoint.CheckpointID),
+				)
+				result.Success = false
+				result.Error = fmt.Sprintf("HITL: awaiting output validation (checkpoint: %s)", checkpoint.CheckpointID)
+			}
+		} else {
+			// Error escalation check for failed steps
+			checkpoint, hitlErr := e.interruptController.CheckOnError(ctx, step, fmt.Errorf("%s", result.Error), result.Attempts)
+			if hitlErr != nil {
+				if e.logger != nil {
+					e.logger.WarnWithContext(ctx, "HITL error escalation check failed", map[string]interface{}{
+						"operation":  "hitl_error_escalation_check",
+						"step_id":    step.StepID,
+						"agent_name": step.AgentName,
+						"error":      hitlErr.Error(),
+					})
+				}
+				// Non-fatal: continue if HITL check fails
+			} else if checkpoint != nil {
+				// Error escalated to human
+				if e.logger != nil {
+					e.logger.InfoWithContext(ctx, "Step error escalated for human review", map[string]interface{}{
+						"operation":     "hitl_error_escalation",
+						"step_id":       step.StepID,
+						"agent_name":    step.AgentName,
+						"checkpoint_id": checkpoint.CheckpointID,
+						"attempts":      result.Attempts,
+					})
+				}
+				telemetry.AddSpanEvent(ctx, "hitl.step.error_escalated",
+					attribute.String("step_id", step.StepID),
+					attribute.String("checkpoint_id", checkpoint.CheckpointID),
+					attribute.Int("attempts", result.Attempts),
+				)
+				result.Error = fmt.Sprintf("HITL: error escalated (checkpoint: %s) - original error: %s", checkpoint.CheckpointID, result.Error)
+			}
+		}
+	}
 
 	// Add span event for step completion
 	telemetry.AddSpanEvent(ctx, "step_execution_completed",

@@ -45,6 +45,135 @@ func GetRequestID(ctx context.Context) string {
 	return ""
 }
 
+// resumeModeContextKey holds the checkpoint ID when resuming from a HITL checkpoint.
+// This allows CheckPlanApproval to skip HITL checks during resume execution.
+const resumeModeContextKey orchestratorContextKey = "orchestrator_resume_mode"
+
+// WithResumeMode marks the context as resuming from a HITL checkpoint.
+// When set, HITL checks (CheckPlanApproval, CheckBeforeStep) will be bypassed
+// to prevent infinite loops during resume execution.
+//
+// Usage:
+//
+//	ctx = orchestration.WithResumeMode(ctx, checkpoint.CheckpointID)
+//	result, err := orchestrator.ProcessRequestStreaming(ctx, checkpoint.OriginalRequest, metadata, callback)
+func WithResumeMode(ctx context.Context, checkpointID string) context.Context {
+	return context.WithValue(ctx, resumeModeContextKey, checkpointID)
+}
+
+// IsResumeMode checks if the context is in resume mode.
+// Returns the checkpoint ID and true if resuming, empty string and false otherwise.
+func IsResumeMode(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	if v := ctx.Value(resumeModeContextKey); v != nil {
+		if id, ok := v.(string); ok && id != "" {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// metadataContextKey holds request metadata that should be preserved in checkpoints.
+const metadataContextKey orchestratorContextKey = "orchestrator_metadata"
+
+// WithMetadata attaches metadata to the context for HITL checkpoint preservation.
+// This metadata (e.g., session_id, user_id) will be stored in checkpoint.UserContext
+// and can be retrieved when resuming execution.
+//
+// Usage:
+//
+//	metadata := map[string]interface{}{"session_id": sessionID, "user_id": userID}
+//	ctx = orchestration.WithMetadata(ctx, metadata)
+//	result, err := orchestrator.ProcessRequestStreaming(ctx, query, nil, callback)
+func WithMetadata(ctx context.Context, metadata map[string]interface{}) context.Context {
+	if metadata == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, metadataContextKey, metadata)
+}
+
+// GetMetadata retrieves metadata from the context.
+// Returns nil if no metadata is set.
+func GetMetadata(ctx context.Context) map[string]interface{} {
+	if ctx == nil {
+		return nil
+	}
+	if v := ctx.Value(metadataContextKey); v != nil {
+		if m, ok := v.(map[string]interface{}); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+// planOverrideContextKey holds a pre-approved plan for HITL resume flows.
+// When set, ProcessRequest/ProcessRequestStreaming will skip LLM plan generation.
+const planOverrideContextKey orchestratorContextKey = "orchestrator_plan_override"
+
+// WithPlanOverride injects a pre-approved plan into context for HITL resume.
+// When set, the orchestrator will use this plan instead of generating a new one via LLM.
+// This is critical for HITL resume flows to ensure step IDs remain stable.
+//
+// Usage:
+//
+//	ctx = orchestration.WithPlanOverride(ctx, checkpoint.Plan)
+//	result, err := orchestrator.ProcessRequestStreaming(ctx, checkpoint.OriginalRequest, metadata, callback)
+func WithPlanOverride(ctx context.Context, plan *RoutingPlan) context.Context {
+	if plan == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, planOverrideContextKey, plan)
+}
+
+// GetPlanOverride retrieves the injected plan from context.
+// Returns nil if no plan override is set.
+func GetPlanOverride(ctx context.Context) *RoutingPlan {
+	if ctx == nil {
+		return nil
+	}
+	if v := ctx.Value(planOverrideContextKey); v != nil {
+		if p, ok := v.(*RoutingPlan); ok {
+			return p
+		}
+	}
+	return nil
+}
+
+// completedStepsContextKey holds step results from a HITL checkpoint.
+// The executor will skip these steps and use the cached results.
+const completedStepsContextKey orchestratorContextKey = "orchestrator_completed_steps"
+
+// WithCompletedSteps injects already-completed step results into context.
+// The executor will skip these steps and use the provided results for dependency resolution.
+// This prevents re-execution of steps that were completed before a HITL checkpoint.
+//
+// Usage:
+//
+//	ctx = orchestration.WithCompletedSteps(ctx, checkpoint.StepResults)
+//	result, err := orchestrator.ProcessRequestStreaming(ctx, checkpoint.OriginalRequest, metadata, callback)
+func WithCompletedSteps(ctx context.Context, results map[string]*StepResult) context.Context {
+	if results == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, completedStepsContextKey, results)
+}
+
+// GetCompletedSteps retrieves completed step results from context.
+// Returns nil if no completed steps are set.
+func GetCompletedSteps(ctx context.Context) map[string]*StepResult {
+	if ctx == nil {
+		return nil
+	}
+	if v := ctx.Value(completedStepsContextKey); v != nil {
+		if r, ok := v.(map[string]*StepResult); ok {
+			return r
+		}
+	}
+	return nil
+}
+
 // AIOrchestrator is an AI-powered orchestrator that uses LLM for intelligent routing
 type AIOrchestrator struct {
 	config      *OrchestratorConfig
@@ -82,6 +211,10 @@ type AIOrchestrator struct {
 	// Context for background operations
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// HITL (Human-in-the-Loop) support
+	// When set, enables human oversight at plan/step execution points
+	interruptController InterruptController
 }
 
 // NewAIOrchestrator creates a new AI-powered orchestrator
@@ -298,6 +431,33 @@ func (o *AIOrchestrator) GetLLMDebugStore() LLMDebugStore {
 	return o.debugStore
 }
 
+// SetInterruptController sets the HITL interrupt controller.
+// When set, enables human oversight at plan/step execution points.
+// The controller is propagated to the executor for step-level checks.
+func (o *AIOrchestrator) SetInterruptController(controller InterruptController) {
+	if controller == nil {
+		return
+	}
+
+	o.interruptController = controller
+
+	// Propagate to executor for step-level HITL checks
+	if o.executor != nil {
+		o.executor.SetInterruptController(controller)
+	}
+
+	if o.logger != nil {
+		o.logger.Info("HITL interrupt controller configured", map[string]interface{}{
+			"operation": "set_interrupt_controller",
+		})
+	}
+}
+
+// GetInterruptController returns the configured interrupt controller (for API handlers).
+func (o *AIOrchestrator) GetInterruptController() InterruptController {
+	return o.interruptController
+}
+
 // recordDebugInteraction stores an LLM interaction for debugging.
 // Runs asynchronously to avoid blocking orchestration. Errors are logged, not propagated.
 // Uses WaitGroup to track in-flight recordings for graceful shutdown.
@@ -314,12 +474,10 @@ func (o *AIOrchestrator) recordDebugInteraction(ctx context.Context, requestID s
 	go func() {
 		defer o.debugWg.Done()
 
-		// Use background context with timeout to ensure recording completes
-		// even if the request context is cancelled.
-		// Note: We use background context because the original request context
-		// may be cancelled, but we still want debug recording to complete.
-		// The requestID provides correlation with the original request.
-		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Use original context with timeout to preserve baggage (original_request_id).
+		// This allows LLM debug records from HITL resume requests to be correlated
+		// with the original conversation's request_id.
+		recordCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
 		if err := o.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {
@@ -570,6 +728,17 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	// can access it via telemetry.GetBaggage() and include it in their logs
 	ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
 
+	// Set original_request_id for trace correlation across HITL resumes.
+	// On initial requests: original_request_id = request_id (same value)
+	// On resume requests: original_request_id is already set via header, don't overwrite
+	if bag := telemetry.GetBaggage(ctx); bag == nil || bag["original_request_id"] == "" {
+		ctx = telemetry.WithBaggage(ctx, "original_request_id", requestID)
+	}
+
+	// Store metadata in context for HITL checkpoint creation
+	// This preserves session_id, user_id, etc. when creating checkpoints
+	ctx = WithMetadata(ctx, metadata)
+
 	if o.logger != nil {
 		o.logger.InfoWithContext(ctx, "Starting request processing", map[string]interface{}{
 			"operation":      "process_request",
@@ -582,6 +751,11 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 	if span != nil {
 		span.SetAttribute("request_id", requestID)
 		span.SetAttribute("request_length", len(request))
+		// Set original_request_id for trace correlation - will be same as request_id on initial,
+		// or the original value on resumes (preserved from baggage set by handler)
+		if bag := telemetry.GetBaggage(ctx); bag != nil && bag["original_request_id"] != "" {
+			span.SetAttribute("original_request_id", bag["original_request_id"])
+		}
 	}
 
 	// Record metric for request count if telemetry is available
@@ -591,27 +765,46 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		})
 	}
 
-	// Step 1: Get execution plan from LLM
-	plan, err := o.generateExecutionPlan(ctx, request, requestID)
-	if err != nil {
+	// Step 1: Get execution plan (from override or LLM)
+	// Check for plan override first (HITL resume flow uses stored plan)
+	plan := GetPlanOverride(ctx)
+	if plan != nil {
+		// Resume flow: use stored plan from checkpoint
 		if o.logger != nil {
-			o.logger.ErrorWithContext(ctx, "Plan generation failed", map[string]interface{}{
-				"operation":   "plan_generation",
-				"request_id":  requestID,
-				"error":       err.Error(),
-				"duration_ms": time.Since(startTime).Milliseconds(),
+			o.logger.InfoWithContext(ctx, "Using plan override from checkpoint", map[string]interface{}{
+				"operation":  "hitl_resume_plan_override",
+				"request_id": requestID,
+				"plan_id":    plan.PlanID,
+				"step_count": len(plan.Steps),
 			})
 		}
 		if span != nil {
-			span.RecordError(err)
+			span.SetAttribute("plan_override", true)
 		}
-		if o.telemetry != nil {
-			o.telemetry.RecordMetric("orchestrator.requests.failed", 1, map[string]string{
-				"stage": "planning",
-			})
+	} else {
+		// Normal flow: generate plan via LLM
+		var err error
+		plan, err = o.generateExecutionPlan(ctx, request, requestID)
+		if err != nil {
+			if o.logger != nil {
+				o.logger.ErrorWithContext(ctx, "Plan generation failed", map[string]interface{}{
+					"operation":   "plan_generation",
+					"request_id":  requestID,
+					"error":       err.Error(),
+					"duration_ms": time.Since(startTime).Milliseconds(),
+				})
+			}
+			if span != nil {
+				span.RecordError(err)
+			}
+			if o.telemetry != nil {
+				o.telemetry.RecordMetric("orchestrator.requests.failed", 1, map[string]string{
+					"stage": "planning",
+				})
+			}
+			o.updateMetrics(time.Since(startTime), false)
+			return nil, fmt.Errorf("failed to generate execution plan: %w", err)
 		}
-		o.updateMetrics(time.Since(startTime), false)
-		return nil, fmt.Errorf("failed to generate execution plan: %w", err)
 	}
 
 	if o.logger != nil {
@@ -652,9 +845,80 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		}
 	}
 
+	// Step 2.5: HITL Plan Approval Check
+	// If HITL is enabled and interrupt controller is set, check if plan needs approval
+	if o.config.HITL.Enabled && o.interruptController != nil {
+		// Add request_id to context for HITL controller
+		hitlCtx := WithRequestID(ctx, requestID)
+		checkpoint, err := o.interruptController.CheckPlanApproval(hitlCtx, plan)
+		if err != nil {
+			// Fail-fast: HITL check failure halts execution
+			// This ensures sensitive operations cannot bypass approval due to HITL system issues
+			if o.logger != nil {
+				o.logger.ErrorWithContext(ctx, "HITL plan approval check failed", map[string]interface{}{
+					"operation":  "hitl_plan_approval",
+					"request_id": requestID,
+					"plan_id":    plan.PlanID,
+					"error":      err.Error(),
+				})
+			}
+			if span != nil {
+				span.RecordError(err)
+			}
+			o.updateMetrics(time.Since(startTime), false)
+			return nil, fmt.Errorf("HITL plan check failed: %w", err)
+		}
+		if checkpoint != nil {
+			// Plan requires human approval - return interrupt error
+			if o.logger != nil {
+				o.logger.InfoWithContext(ctx, "Plan execution interrupted for human approval", map[string]interface{}{
+					"operation":     "hitl_plan_approval",
+					"request_id":    requestID,
+					"plan_id":       plan.PlanID,
+					"checkpoint_id": checkpoint.CheckpointID,
+				})
+			}
+			if span != nil {
+				span.SetAttribute("hitl.interrupted", true)
+				span.SetAttribute("hitl.checkpoint_id", checkpoint.CheckpointID)
+			}
+			return nil, &ErrInterrupted{
+				CheckpointID: checkpoint.CheckpointID,
+				Checkpoint:   checkpoint,
+			}
+		}
+	}
+
 	// Step 3: Execute the plan
 	result, err := o.executor.Execute(ctx, plan)
 	if err != nil {
+		// Check for step-level HITL interrupt - propagate directly without wrapping
+		if IsInterrupted(err) {
+			if o.logger != nil {
+				checkpoint := GetCheckpoint(err)
+				logFields := map[string]interface{}{
+					"operation":     "plan_execution_hitl_interrupt",
+					"request_id":    requestID,
+					"checkpoint_id": GetCheckpointID(err),
+				}
+				if checkpoint != nil && checkpoint.CurrentStep != nil {
+					logFields["step_id"] = checkpoint.CurrentStep.StepID
+				}
+				o.logger.InfoWithContext(ctx, "Step-level HITL interrupt, returning to agent", logFields)
+			}
+			// Add span event and attributes for step-level HITL (visible in Jaeger)
+			checkpoint := GetCheckpoint(err)
+			if checkpoint != nil {
+				telemetry.AddSpanEvent(ctx, "hitl.step_interrupt.orchestrator_propagating",
+					attribute.String("checkpoint_id", GetCheckpointID(err)),
+					attribute.String("interrupt_point", string(checkpoint.InterruptPoint)),
+				)
+				span.SetAttribute("hitl.interrupted", true)
+				span.SetAttribute("hitl.checkpoint_id", GetCheckpointID(err))
+				span.SetAttribute("hitl.interrupt_point", string(checkpoint.InterruptPoint))
+			}
+			return nil, err // Return ErrInterrupted directly
+		}
 		if o.logger != nil {
 			o.logger.ErrorWithContext(ctx, "Plan execution failed", map[string]interface{}{
 				"operation":   "plan_execution",
@@ -757,11 +1021,31 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 	callback core.StreamCallback,
 ) (*StreamingOrchestratorResponse, error) {
 	startTime := time.Now()
-	requestID := fmt.Sprintf("orch-%d", time.Now().UnixNano())
+	// Use custom prefix if configured, otherwise default to "orch"
+	prefix := "orch"
+	if o.config.RequestIDPrefix != "" {
+		prefix = o.config.RequestIDPrefix
+	}
+	requestID := fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 
 	// Add request_id to context baggage so downstream components (AI client, etc.)
 	// can access it via telemetry.GetBaggage() and include it in their logs
 	ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
+	// Set original_request_id for trace correlation across HITL resumes.
+	// On initial requests: original_request_id = request_id (same value)
+	// On resume requests: original_request_id is already set via header, don't overwrite
+	if bag := telemetry.GetBaggage(ctx); bag == nil || bag["original_request_id"] == "" {
+		ctx = telemetry.WithBaggage(ctx, "original_request_id", requestID)
+	}
+
+	// Add request_id to context for GetRequestID() - used by HITL controller
+	// when creating checkpoints during execution (e.g., step-level interrupts)
+	ctx = WithRequestID(ctx, requestID)
+
+	// Store metadata in context for HITL checkpoint creation
+	// This preserves session_id, user_id, etc. when creating checkpoints
+	ctx = WithMetadata(ctx, metadata)
 
 	// Start tracing span (nil-safe per FRAMEWORK_DESIGN_PRINCIPLES.md)
 	var span core.Span
@@ -774,6 +1058,11 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 
 	span.SetAttribute("request_id", requestID)
 	span.SetAttribute("streaming", true)
+	// Set original_request_id for trace correlation - will be same as request_id on initial,
+	// or the original value on resumes (preserved from baggage set by handler)
+	if bag := telemetry.GetBaggage(ctx); bag != nil && bag["original_request_id"] != "" {
+		span.SetAttribute("original_request_id", bag["original_request_id"])
+	}
 
 	// Check if AI client supports streaming
 	streamingClient, ok := o.aiClient.(core.StreamingAIClient)
@@ -846,22 +1135,104 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 		}, nil
 	}
 
-	// Generate execution plan
-	plan, err := o.generateExecutionPlan(ctx, request, requestID)
-	if err != nil {
+	// Generate execution plan (or use override from HITL resume)
+	plan := GetPlanOverride(ctx)
+	if plan != nil {
+		// Resume flow: use stored plan from checkpoint
 		if o.logger != nil {
-			o.logger.ErrorWithContext(ctx, "Plan generation failed", map[string]interface{}{
-				"operation":  "streaming_plan_error",
+			o.logger.InfoWithContext(ctx, "Using plan override from checkpoint", map[string]interface{}{
+				"operation":  "hitl_resume_plan_override",
 				"request_id": requestID,
-				"error":      err.Error(),
+				"plan_id":    plan.PlanID,
+				"step_count": len(plan.Steps),
 			})
 		}
-		return nil, fmt.Errorf("failed to generate execution plan: %w", err)
+		span.SetAttribute("plan_override", true)
+	} else {
+		// Normal flow: generate plan via LLM
+		var err error
+		plan, err = o.generateExecutionPlan(ctx, request, requestID)
+		if err != nil {
+			if o.logger != nil {
+				o.logger.ErrorWithContext(ctx, "Plan generation failed", map[string]interface{}{
+					"operation":  "streaming_plan_error",
+					"request_id": requestID,
+					"error":      err.Error(),
+				})
+			}
+			return nil, fmt.Errorf("failed to generate execution plan: %w", err)
+		}
+	}
+
+	// HITL Plan Approval Check (streaming mode)
+	// Mirror of ProcessRequest HITL check - ensures streaming requests also respect human oversight
+	if o.config.HITL.Enabled && o.interruptController != nil {
+		// Add request_id to context for HITL controller
+		hitlCtx := WithRequestID(ctx, requestID)
+		checkpoint, err := o.interruptController.CheckPlanApproval(hitlCtx, plan)
+		if err != nil {
+			// Fail-fast: HITL check failure halts execution
+			// This ensures sensitive operations cannot bypass approval due to HITL system issues
+			if o.logger != nil {
+				o.logger.ErrorWithContext(ctx, "HITL plan approval check failed", map[string]interface{}{
+					"operation":  "streaming_hitl_plan_approval",
+					"request_id": requestID,
+					"plan_id":    plan.PlanID,
+					"error":      err.Error(),
+				})
+			}
+			span.RecordError(err)
+			return nil, fmt.Errorf("HITL plan check failed: %w", err)
+		}
+		if checkpoint != nil {
+			// Plan requires human approval - return interrupt error
+			if o.logger != nil {
+				o.logger.InfoWithContext(ctx, "Streaming execution interrupted for human approval", map[string]interface{}{
+					"operation":     "streaming_hitl_plan_approval",
+					"request_id":    requestID,
+					"plan_id":       plan.PlanID,
+					"checkpoint_id": checkpoint.CheckpointID,
+				})
+			}
+			span.SetAttribute("hitl.interrupted", true)
+			span.SetAttribute("hitl.checkpoint_id", checkpoint.CheckpointID)
+			return nil, &ErrInterrupted{
+				CheckpointID: checkpoint.CheckpointID,
+				Checkpoint:   checkpoint,
+			}
+		}
 	}
 
 	// Execute the plan
 	result, err := o.executor.Execute(ctx, plan)
 	if err != nil {
+		// Check for step-level HITL interrupt - propagate directly without wrapping
+		if IsInterrupted(err) {
+			if o.logger != nil {
+				checkpoint := GetCheckpoint(err)
+				logFields := map[string]interface{}{
+					"operation":     "streaming_execution_hitl_interrupt",
+					"request_id":    requestID,
+					"checkpoint_id": GetCheckpointID(err),
+				}
+				if checkpoint != nil && checkpoint.CurrentStep != nil {
+					logFields["step_id"] = checkpoint.CurrentStep.StepID
+				}
+				o.logger.InfoWithContext(ctx, "Step-level HITL interrupt, returning to agent", logFields)
+			}
+			// Add span event and attributes for step-level HITL (visible in Jaeger)
+			checkpoint := GetCheckpoint(err)
+			if checkpoint != nil {
+				telemetry.AddSpanEvent(ctx, "hitl.step_interrupt.orchestrator_propagating",
+					attribute.String("checkpoint_id", GetCheckpointID(err)),
+					attribute.String("interrupt_point", string(checkpoint.InterruptPoint)),
+				)
+				span.SetAttribute("hitl.interrupted", true)
+				span.SetAttribute("hitl.checkpoint_id", GetCheckpointID(err))
+				span.SetAttribute("hitl.interrupt_point", string(checkpoint.InterruptPoint))
+			}
+			return nil, err // Return ErrInterrupted directly
+		}
 		if o.logger != nil {
 			o.logger.ErrorWithContext(ctx, "Plan execution failed", map[string]interface{}{
 				"operation":  "streaming_execution_error",
@@ -1684,23 +2055,6 @@ func findJSONStart(s string) int {
 	for i := 0; i < len(s); i++ {
 		if s[i] == '{' {
 			return i
-		}
-	}
-	return -1
-}
-
-// findJSONEnd finds the end of JSON in a string (simple version, doesn't handle strings)
-func findJSONEnd(s string, start int) int {
-	depth := 0
-	for i := start; i < len(s); i++ {
-		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i + 1
-			}
 		}
 	}
 	return -1
