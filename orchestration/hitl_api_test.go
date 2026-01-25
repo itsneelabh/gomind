@@ -130,6 +130,19 @@ func (m *mockCheckpointStore) DeleteCheckpoint(ctx context.Context, checkpointID
 	return nil
 }
 
+// Expiry processor methods (no-op for mock)
+func (m *mockCheckpointStore) StartExpiryProcessor(ctx context.Context, config ExpiryProcessorConfig) error {
+	return nil
+}
+
+func (m *mockCheckpointStore) StopExpiryProcessor(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockCheckpointStore) SetExpiryCallback(callback ExpiryCallback) error {
+	return nil
+}
+
 // =============================================================================
 // HITLHandler Tests
 // =============================================================================
@@ -148,6 +161,13 @@ func TestHITLHandler_HandleCommand(t *testing.T) {
 			method:      http.MethodPost,
 			requestBody: `{"checkpoint_id": "cp-123", "type": "approve", "user_id": "user1"}`,
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-123"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-123",
+					RequestID:         "req-123",
+					OriginalRequestID: "orig-req-123",
+					Status:            CheckpointStatusPending,
+				}
 				ctrl.processCommandResult = &ResumeResult{
 					CheckpointID: "cp-123",
 					Action:       CommandApprove,
@@ -173,6 +193,13 @@ func TestHITLHandler_HandleCommand(t *testing.T) {
 			method:      http.MethodPost,
 			requestBody: `{"checkpoint_id": "cp-456", "type": "reject", "feedback": "Not approved"}`,
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-456"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-456",
+					RequestID:         "req-456",
+					OriginalRequestID: "orig-req-456",
+					Status:            CheckpointStatusPending,
+				}
 				ctrl.processCommandResult = &ResumeResult{
 					CheckpointID: "cp-456",
 					Action:       CommandReject,
@@ -196,6 +223,13 @@ func TestHITLHandler_HandleCommand(t *testing.T) {
 			method:      http.MethodPost,
 			requestBody: `{"checkpoint_id": "cp-789", "type": "abort"}`,
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-789"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-789",
+					RequestID:         "req-789",
+					OriginalRequestID: "orig-req-789",
+					Status:            CheckpointStatusPending,
+				}
 				ctrl.processCommandResult = &ResumeResult{
 					CheckpointID: "cp-789",
 					Action:       CommandAbort,
@@ -254,6 +288,13 @@ func TestHITLHandler_HandleCommand(t *testing.T) {
 			method:      http.MethodPost,
 			requestBody: `{"checkpoint_id": "cp-123", "type": "approve"}`,
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-123"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-123",
+					RequestID:         "req-123",
+					OriginalRequestID: "orig-req-123",
+					Status:            CheckpointStatusApproved, // Already processed
+				}
 				ctrl.processCommandErr = &ErrInvalidCommand{CommandType: CommandApprove, Reason: "already processed"}
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -263,6 +304,13 @@ func TestHITLHandler_HandleCommand(t *testing.T) {
 			method:      http.MethodPost,
 			requestBody: `{"checkpoint_id": "cp-123", "type": "approve"}`,
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-123"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-123",
+					RequestID:         "req-123",
+					OriginalRequestID: "orig-req-123",
+					Status:            CheckpointStatusPending,
+				}
 				ctrl.processCommandErr = errors.New("database connection failed")
 			},
 			expectedStatus: http.StatusInternalServerError,
@@ -676,6 +724,13 @@ func TestHITLHandler_HandleResume(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/hitl/resume/cp-123",
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-123"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-123",
+					RequestID:         "req-123",
+					OriginalRequestID: "orig-req-123",
+					Status:            CheckpointStatusApproved,
+				}
 				ctrl.resumeResult = &ExecutionResult{
 					PlanID:  "plan-123",
 					Success: true,
@@ -708,6 +763,13 @@ func TestHITLHandler_HandleResume(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/hitl/resume/cp-456",
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-456"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-456",
+					RequestID:         "req-456",
+					OriginalRequestID: "orig-req-456",
+					Status:            CheckpointStatusApproved,
+				}
 				ctrl.resumeResult = &ExecutionResult{
 					PlanID:  "plan-456",
 					Success: false,
@@ -733,6 +795,7 @@ func TestHITLHandler_HandleResume(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/hitl/resume/cp-nonexistent",
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// No checkpoint in store - handler returns 404 from store lookup
 				ctrl.resumeErr = &ErrCheckpointNotFound{CheckpointID: "cp-nonexistent"}
 			},
 			expectedStatus: http.StatusNotFound,
@@ -742,6 +805,13 @@ func TestHITLHandler_HandleResume(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/hitl/resume/cp-expired",
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-expired"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-expired",
+					RequestID:         "req-expired",
+					OriginalRequestID: "orig-req-expired",
+					Status:            CheckpointStatusExpiredRejected,
+				}
 				ctrl.resumeErr = &ErrCheckpointExpired{CheckpointID: "cp-expired"}
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -751,6 +821,13 @@ func TestHITLHandler_HandleResume(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/hitl/resume/cp-invalid",
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-invalid"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-invalid",
+					RequestID:         "req-invalid",
+					OriginalRequestID: "orig-req-invalid",
+					Status:            CheckpointStatusPending,
+				}
 				ctrl.resumeErr = &ErrInvalidCommand{CommandType: CommandApprove, Reason: "checkpoint not approved"}
 			},
 			expectedStatus: http.StatusBadRequest,
@@ -760,6 +837,13 @@ func TestHITLHandler_HandleResume(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/hitl/resume/cp-error",
 			setupMocks: func(ctrl *mockInterruptController, store *mockCheckpointStore) {
+				// Pre-populate checkpoint in store (handler loads it for trace correlation)
+				store.checkpoints["cp-error"] = &ExecutionCheckpoint{
+					CheckpointID:      "cp-error",
+					RequestID:         "req-error",
+					OriginalRequestID: "orig-req-error",
+					Status:            CheckpointStatusApproved,
+				}
 				ctrl.resumeErr = errors.New("execution engine failed")
 			},
 			expectedStatus: http.StatusInternalServerError,
@@ -820,6 +904,14 @@ func TestHITLHandler_HandleResume(t *testing.T) {
 func TestHITLHandler_RegisterRoutes_IncludesResume(t *testing.T) {
 	ctrl := newMockInterruptController()
 	store := newMockCheckpointStore()
+
+	// Pre-populate checkpoint in store (handler loads it for trace correlation)
+	store.checkpoints["cp-123"] = &ExecutionCheckpoint{
+		CheckpointID:      "cp-123",
+		RequestID:         "req-123",
+		OriginalRequestID: "orig-req-123",
+		Status:            CheckpointStatusApproved,
+	}
 
 	// Setup controller to return a successful result for resume
 	ctrl.resumeResult = &ExecutionResult{

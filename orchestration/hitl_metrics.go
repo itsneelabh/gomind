@@ -27,9 +27,20 @@ const (
 	MetricCommandPublished   = "orchestration.hitl.command_published_total"
 	MetricNotificationFailed = "orchestration.hitl.notification_failed_total"
 
+	// Expiry processor counters
+	MetricCheckpointExpired = "orchestration.hitl.checkpoint_expired_total"
+	MetricExpiryScanSkipped = "orchestration.hitl.expiry_scan_skipped_total"
+	MetricCallbackPanic     = "orchestration.hitl.callback_panic_total"
+	MetricClaimSuccess      = "orchestration.hitl.claim_success_total"
+	MetricClaimSkipped      = "orchestration.hitl.claim_skipped_total"
+
 	// Histograms
 	MetricApprovalLatency = "orchestration.hitl.approval_latency_seconds"
 	MetricWebhookDuration = "orchestration.hitl.webhook_duration_seconds"
+
+	// Expiry processor histograms/gauges
+	MetricExpiryScanDuration = "orchestration.hitl.expiry_scan_duration_seconds"
+	MetricExpiryBatchSize    = "orchestration.hitl.expiry_batch_size"
 )
 
 // =============================================================================
@@ -116,6 +127,74 @@ func RecordWebhookDuration(durationSeconds float64, success bool) {
 	telemetry.Histogram(MetricWebhookDuration,
 		durationSeconds,
 		"success", fmt.Sprintf("%t", success),
+		"module", telemetry.ModuleOrchestration,
+	)
+}
+
+// =============================================================================
+// Expiry Processor Helper Functions
+// =============================================================================
+
+// RecordCheckpointExpired records when a checkpoint is auto-processed on expiry.
+// Labels: action (approve, reject, abort, or empty string for implicit_deny), request_mode, interrupt_point, module
+func RecordCheckpointExpired(action string, requestMode string, interruptPoint InterruptPoint) {
+	telemetry.Counter(MetricCheckpointExpired,
+		"action", action,
+		"request_mode", requestMode,
+		"interrupt_point", string(interruptPoint),
+		"module", telemetry.ModuleOrchestration,
+	)
+}
+
+// RecordExpiryScanDuration records time taken for each expiry scan.
+// Labels: module
+func RecordExpiryScanDuration(durationSeconds float64) {
+	telemetry.Histogram(MetricExpiryScanDuration, durationSeconds,
+		"module", telemetry.ModuleOrchestration,
+	)
+}
+
+// RecordExpiryBatchSize records number of checkpoints processed per scan.
+// Labels: module
+func RecordExpiryBatchSize(count int) {
+	telemetry.Gauge(MetricExpiryBatchSize, float64(count),
+		"module", telemetry.ModuleOrchestration,
+	)
+}
+
+// RecordExpiryScanSkipped records when an expiry scan is skipped due to errors.
+// Labels: reason, module
+func RecordExpiryScanSkipped(reason string) {
+	telemetry.Counter(MetricExpiryScanSkipped,
+		"reason", reason,
+		"module", telemetry.ModuleOrchestration,
+	)
+}
+
+// RecordCallbackPanic records when a callback panics during expiry processing.
+// Note: checkpoint_id is NOT included as a label to avoid high cardinality.
+// Use structured logging to capture checkpoint_id for debugging.
+// Labels: module
+func RecordCallbackPanic() {
+	telemetry.Counter(MetricCallbackPanic,
+		"module", telemetry.ModuleOrchestration,
+	)
+}
+
+// RecordClaimSuccess records when this instance successfully claims an expired checkpoint.
+// This means this pod will process the checkpoint (no other pod claimed it first).
+// Labels: module
+func RecordClaimSuccess() {
+	telemetry.Counter(MetricClaimSuccess,
+		"module", telemetry.ModuleOrchestration,
+	)
+}
+
+// RecordClaimSkipped records when an expired checkpoint was already claimed by another instance.
+// This is normal in multi-pod deployments and indicates proper distributed coordination.
+// Labels: module
+func RecordClaimSkipped() {
+	telemetry.Counter(MetricClaimSkipped,
 		"module", telemetry.ModuleOrchestration,
 	)
 }

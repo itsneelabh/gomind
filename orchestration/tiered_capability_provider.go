@@ -310,7 +310,7 @@ func (t *TieredCapabilityProvider) selectRelevantTools(
 		requestID = tc.TraceID
 	}
 
-	// Telemetry: Record LLM request for visibility in Jaeger
+	// Telemetry: Record LLM request for visibility in distributed traces
 	telemetry.AddSpanEvent(ctx, "llm.tiered_selection.request",
 		attribute.String("request_id", requestID),
 		attribute.String("user_request", truncateRequest(request, 200)),
@@ -339,7 +339,7 @@ func (t *TieredCapabilityProvider) selectRelevantTools(
 	// LLM Debug: Record interaction (success or failure)
 	// Per LLM_DEBUG_PAYLOAD_DESIGN.md - this is the 7th recording site: "tiered_selection"
 	if err != nil {
-		// Telemetry: Record error for visibility in Jaeger
+		// Telemetry: Record error for visibility in distributed traces
 		telemetry.AddSpanEvent(ctx, "llm.tiered_selection.error",
 			attribute.String("request_id", requestID),
 			attribute.String("error", err.Error()),
@@ -363,7 +363,7 @@ func (t *TieredCapabilityProvider) selectRelevantTools(
 			truncateRequest(request, 50), err)
 	}
 
-	// Telemetry: Record LLM response for visibility in Jaeger
+	// Telemetry: Record LLM response for visibility in distributed traces
 	telemetry.AddSpanEvent(ctx, "llm.tiered_selection.response",
 		attribute.String("request_id", requestID),
 		attribute.String("response", truncateRequest(response.Content, 500)),

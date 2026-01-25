@@ -77,14 +77,69 @@ type CheckpointStore interface {
 
 	// DeleteCheckpoint removes a checkpoint after completion
 	DeleteCheckpoint(ctx context.Context, checkpointID string) error
+
+	// Expiry processor methods (agent calls these during setup)
+
+	// StartExpiryProcessor starts the background goroutine that processes expired checkpoints.
+	// The agent calls this method during setup - the framework provides the implementation.
+	StartExpiryProcessor(ctx context.Context, config ExpiryProcessorConfig) error
+
+	// StopExpiryProcessor stops the expiry processor gracefully.
+	StopExpiryProcessor(ctx context.Context) error
+
+	// SetExpiryCallback sets the callback for expired checkpoints.
+	// Must be called before StartExpiryProcessor.
+	SetExpiryCallback(callback ExpiryCallback) error
 }
+
+// DeliverySemantics controls callback invocation timing relative to status update.
+// This determines retry behavior when callbacks fail.
+type DeliverySemantics string
+
+const (
+	// DeliveryAtMostOnce updates status BEFORE invoking callback.
+	// If callback fails, checkpoint is already marked processed - no retry.
+	// Use for: Notifications, idempotent operations, fire-and-forget scenarios.
+	// This is the DEFAULT and safest option for most use cases.
+	DeliveryAtMostOnce DeliverySemantics = "at_most_once"
+
+	// DeliveryAtLeastOnce invokes callback BEFORE updating status.
+	// If callback fails, status remains "pending" and will be retried on next scan.
+	// Use for: Critical operations that must complete.
+	// WARNING: Callback MUST be idempotent - it may be called multiple times!
+	DeliveryAtLeastOnce DeliverySemantics = "at_least_once"
+)
+
+// ExpiryProcessorConfig configures the background expiry processor.
+// The agent passes this when calling StartExpiryProcessor().
+type ExpiryProcessorConfig struct {
+	Enabled      bool          // Whether to run the processor (default: true)
+	ScanInterval time.Duration // How often to scan (default: 10s)
+	BatchSize    int           // Max checkpoints per scan (default: 100)
+
+	// DeliverySemantics controls callback timing relative to status update.
+	// Default: DeliveryAtMostOnce (status updated before callback).
+	// Use DeliveryAtLeastOnce only with idempotent callbacks.
+	DeliverySemantics DeliverySemantics
+}
+
+// ExpiryCallback is called when a checkpoint expires.
+// The agent provides this callback to define what happens on expiry.
+// This is where the agent decides whether to auto-resume, notify users, etc.
+//
+// Parameters:
+//   - ctx: Context for the callback (may have timeout)
+//   - checkpoint: The expired checkpoint with updated status
+//   - appliedAction: The action that was applied (empty string for implicit deny)
+type ExpiryCallback func(ctx context.Context, checkpoint *ExecutionCheckpoint, appliedAction CommandType)
 
 // CheckpointFilter for querying checkpoints
 type CheckpointFilter struct {
-	Status    CheckpointStatus `json:"status,omitempty"`
-	RequestID string           `json:"request_id,omitempty"`
-	Limit     int              `json:"limit,omitempty"`
-	Offset    int              `json:"offset,omitempty"`
+	Status        CheckpointStatus `json:"status,omitempty"`
+	RequestID     string           `json:"request_id,omitempty"`
+	ExpiredBefore *time.Time       `json:"expired_before,omitempty"` // For expiry processor queries
+	Limit         int              `json:"limit,omitempty"`
+	Offset        int              `json:"offset,omitempty"`
 }
 
 // -----------------------------------------------------------------------------
@@ -190,7 +245,9 @@ type InterruptController interface {
 // Interrupt Decision
 // -----------------------------------------------------------------------------
 
-// InterruptDecision contains the decision and context for an interrupt
+// InterruptDecision contains the decision and context for an interrupt.
+// All expiry behavior settings are copied from the policy config so that
+// the expiry processor knows how to handle this specific checkpoint.
 type InterruptDecision struct {
 	ShouldInterrupt bool                   `json:"should_interrupt"`
 	Reason          InterruptReason        `json:"reason"`
@@ -199,6 +256,22 @@ type InterruptDecision struct {
 	Timeout         time.Duration          `json:"timeout,omitempty"`        // Auto-approve after timeout
 	DefaultAction   CommandType            `json:"default_action,omitempty"` // Action to take on timeout
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+
+	// StreamingExpiryBehavior controls what happens when a STREAMING request expires.
+	//   - "implicit_deny" (default): No action applied, user must resume
+	//   - "apply_default": Apply DefaultAction
+	StreamingExpiryBehavior StreamingExpiryBehavior `json:"streaming_expiry_behavior,omitempty"`
+
+	// NonStreamingExpiryBehavior controls what happens when a NON-STREAMING request expires.
+	//   - "apply_default" (default): Apply DefaultAction
+	//   - "implicit_deny": No action applied, user must resume
+	NonStreamingExpiryBehavior NonStreamingExpiryBehavior `json:"non_streaming_expiry_behavior,omitempty"`
+
+	// DefaultRequestMode is used when RequestMode is not set in the context.
+	//   - "non_streaming" (default): Treat as async request
+	//   - "streaming": Treat as live connection
+	// NOTE: When this default is used, a WARN log is emitted and a trace event is added.
+	DefaultRequestMode RequestMode `json:"default_request_mode,omitempty"`
 }
 
 // InterruptReason categorizes why an interrupt was triggered
@@ -232,6 +305,13 @@ type ExecutionCheckpoint struct {
 	CheckpointID string `json:"checkpoint_id"`
 	RequestID    string `json:"request_id"`
 
+	// OriginalRequestID is the request_id from the first request in a HITL conversation.
+	// For initial requests: OriginalRequestID == RequestID
+	// For resume requests: OriginalRequestID is preserved from the original request
+	// Use this field to correlate all checkpoints in a conversation and to search
+	// distributed traces using the original_request_id tag.
+	OriginalRequestID string `json:"original_request_id,omitempty"`
+
 	// Interrupt context
 	InterruptPoint InterruptPoint     `json:"interrupt_point"`
 	Decision       *InterruptDecision `json:"decision"`
@@ -251,6 +331,12 @@ type ExecutionCheckpoint struct {
 	// Metadata
 	OriginalRequest string                 `json:"original_request"`
 	UserContext     map[string]interface{} `json:"user_context,omitempty"`
+
+	// RequestMode indicates how the original request was submitted.
+	// This determines expiry behavior:
+	// - "streaming": Implicit deny on expiry (user saw the dialog)
+	// - "non_streaming": Apply DefaultAction on expiry
+	RequestMode RequestMode `json:"request_mode,omitempty"`
 
 	// Timing
 	CreatedAt time.Time        `json:"created_at"`
@@ -273,13 +359,68 @@ const (
 type CheckpointStatus string
 
 const (
+	// Human-initiated statuses (explicit user action)
 	CheckpointStatusPending   CheckpointStatus = "pending"   // Awaiting human response
 	CheckpointStatusApproved  CheckpointStatus = "approved"  // Human approved, ready to resume
 	CheckpointStatusRejected  CheckpointStatus = "rejected"  // Human rejected
 	CheckpointStatusEdited    CheckpointStatus = "edited"    // Human edited, ready to resume
-	CheckpointStatusExpired   CheckpointStatus = "expired"   // Timeout reached
 	CheckpointStatusCompleted CheckpointStatus = "completed" // Execution completed
 	CheckpointStatusAborted   CheckpointStatus = "aborted"   // User aborted
+
+	// Expiry status for STREAMING requests (implicit deny - no action applied)
+	// User must manually resume if desired
+	CheckpointStatusExpired CheckpointStatus = "expired"
+
+	// Expiry statuses for NON-STREAMING requests (policy-driven)
+	// DefaultAction from policy was auto-applied on timeout
+	CheckpointStatusExpiredApproved CheckpointStatus = "expired_approved" // Auto-approved on timeout
+	CheckpointStatusExpiredRejected CheckpointStatus = "expired_rejected" // Auto-rejected on timeout
+	CheckpointStatusExpiredAborted  CheckpointStatus = "expired_aborted"  // Auto-aborted on timeout
+)
+
+// RequestMode indicates how the original request was submitted.
+// This determines expiry behavior for checkpoints.
+type RequestMode string
+
+const (
+	// RequestModeStreaming indicates the user is actively connected (SSE/WebSocket).
+	// On expiry: Implicit deny - checkpoint marked as "expired", no action applied.
+	// Rationale: User saw the approval dialog but didn't act.
+	RequestModeStreaming RequestMode = "streaming"
+
+	// RequestModeNonStreaming indicates async submission (HTTP 202 + polling).
+	// On expiry: Apply configured DefaultAction from policy.
+	// Rationale: User may expect autonomous processing.
+	RequestModeNonStreaming RequestMode = "non_streaming"
+)
+
+// StreamingExpiryBehavior controls what happens when a STREAMING request's
+// checkpoint expires without a response.
+type StreamingExpiryBehavior string
+
+const (
+	// StreamingExpiryImplicitDeny marks the checkpoint as "expired" with no action applied.
+	// The user must manually resume if they want to proceed.
+	// This is the DEFAULT for streaming requests.
+	StreamingExpiryImplicitDeny StreamingExpiryBehavior = "implicit_deny"
+
+	// StreamingExpiryApplyDefault applies the policy's DefaultAction.
+	// Use this when you want consistent behavior regardless of request mode.
+	StreamingExpiryApplyDefault StreamingExpiryBehavior = "apply_default"
+)
+
+// NonStreamingExpiryBehavior controls what happens when a NON-STREAMING request's
+// checkpoint expires without a response.
+type NonStreamingExpiryBehavior string
+
+const (
+	// NonStreamingExpiryApplyDefault applies the policy's DefaultAction.
+	// This is the DEFAULT for non-streaming requests.
+	NonStreamingExpiryApplyDefault NonStreamingExpiryBehavior = "apply_default"
+
+	// NonStreamingExpiryImplicitDeny marks the checkpoint as "expired" with no action applied.
+	// Use this when you want all expired checkpoints to require manual intervention.
+	NonStreamingExpiryImplicitDeny NonStreamingExpiryBehavior = "implicit_deny"
 )
 
 // -----------------------------------------------------------------------------
@@ -360,18 +501,90 @@ type HITLConfig struct {
 	// Storage configuration
 	CheckpointTTL  time.Duration `json:"checkpoint_ttl"`
 	RedisKeyPrefix string        `json:"redis_key_prefix"`
+
+	// Expiry processor configuration
+	// Controls how expired checkpoints are processed in the background.
+	// See HITL_EXPIRY_PROCESSOR_DESIGN.md for details.
+	ExpiryProcessor ExpiryProcessorConfig `json:"expiry_processor"`
 }
 
-// DefaultHITLConfig returns sensible defaults for HITL configuration
+// HITLOption configures HITLConfig using the functional options pattern.
+// Per FRAMEWORK_DESIGN_PRINCIPLES.md "Intelligent Configuration Over Convention".
+type HITLOption func(*HITLConfig)
+
+// DefaultHITLConfig returns sensible defaults for HITL configuration.
+// Per FRAMEWORK_DESIGN_PRINCIPLES.md: "Smart Defaults - Framework should work with minimal configuration"
 func DefaultHITLConfig() HITLConfig {
 	return HITLConfig{
 		Enabled:              false, // Opt-in for backward compatibility
 		RequirePlanApproval:  false,
 		EscalateAfterRetries: 3,
 		DefaultTimeout:       5 * time.Minute,
-		DefaultAction:        CommandApprove,
+		DefaultAction:        CommandReject, // HITL enabled = require explicit approval
 		CheckpointTTL:        24 * time.Hour,
 		RedisKeyPrefix:       "gomind:hitl",
+		ExpiryProcessor: ExpiryProcessorConfig{
+			Enabled:           true,             // Expiry processing enabled by default
+			ScanInterval:      10 * time.Second, // Scan every 10 seconds
+			BatchSize:         100,              // Process up to 100 checkpoints per scan
+			DeliverySemantics: DeliveryAtMostOnce,
+		},
+	}
+}
+
+// WithExpiryProcessor configures the expiry processor with smart defaults.
+// Per FRAMEWORK_DESIGN_PRINCIPLES.md "Intelligent Configuration Over Convention":
+// - Auto-configure related settings when intent is clear
+// - Always allow explicit configuration to override defaults
+//
+// Example:
+//
+//	config := DefaultHITLConfig()
+//	WithExpiryProcessor(ExpiryProcessorConfig{
+//	    Enabled:      true,
+//	    ScanInterval: 5 * time.Second,
+//	})(&config)
+func WithExpiryProcessor(config ExpiryProcessorConfig) HITLOption {
+	return func(h *HITLConfig) {
+		// Apply smart defaults when intent is clear
+		if config.Enabled && config.ScanInterval == 0 {
+			config.ScanInterval = 10 * time.Second
+		}
+		if config.Enabled && config.BatchSize == 0 {
+			config.BatchSize = 100
+		}
+		if config.DeliverySemantics == "" {
+			config.DeliverySemantics = DeliveryAtMostOnce
+		}
+
+		h.ExpiryProcessor = config
+	}
+}
+
+// NewHITLConfig creates a HITLConfig with sensible defaults and applies the given options.
+// This is the recommended way to create a HITLConfig.
+//
+// Example:
+//
+//	config := NewHITLConfig(
+//	    WithExpiryProcessor(ExpiryProcessorConfig{
+//	        Enabled:      true,
+//	        ScanInterval: 5 * time.Second,
+//	    }),
+//	)
+func NewHITLConfig(opts ...HITLOption) HITLConfig {
+	config := DefaultHITLConfig()
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return config
+}
+
+// ApplyHITLOptions applies the given options to an existing HITLConfig.
+// Useful when you need to modify an existing config.
+func ApplyHITLOptions(config *HITLConfig, opts ...HITLOption) {
+	for _, opt := range opts {
+		opt(config)
 	}
 }
 

@@ -155,17 +155,46 @@ func (h *HITLHandler) HandleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load checkpoint to get OriginalRequestID for trace correlation.
+	// This allows searching all traces in a HITL conversation by original_request_id.
+	checkpoint, err := h.store.LoadCheckpoint(ctx, command.CheckpointID)
+	if err != nil {
+		if IsCheckpointNotFound(err) {
+			h.writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		telemetry.RecordSpanError(ctx, err)
+		if h.logger != nil {
+			h.logger.ErrorWithContext(ctx, "Failed to load checkpoint for command", map[string]interface{}{
+				"operation":     "hitl_api_command",
+				"checkpoint_id": command.CheckpointID,
+				"error":         err.Error(),
+			})
+		}
+		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load checkpoint: %s", err.Error()))
+		return
+	}
+
+	// Set original_request_id for distributed trace correlation.
+	// 1. Set baggage so child spans (Redis, controller operations) inherit the attribute
+	// 2. Set span attribute on current span for direct searchability
+	if checkpoint.OriginalRequestID != "" {
+		ctx = telemetry.WithBaggage(ctx, "original_request_id", checkpoint.OriginalRequestID)
+		telemetry.SetSpanAttributes(ctx, attribute.String("original_request_id", checkpoint.OriginalRequestID))
+	}
+
 	// Log command receipt
 	if h.logger != nil {
 		h.logger.InfoWithContext(ctx, "Processing command", map[string]interface{}{
-			"operation":     "hitl_api_command",
-			"checkpoint_id": command.CheckpointID,
-			"command_type":  command.Type,
-			"user_id":       command.UserID,
+			"operation":           "hitl_api_command",
+			"checkpoint_id":       command.CheckpointID,
+			"command_type":        command.Type,
+			"user_id":             command.UserID,
+			"original_request_id": checkpoint.OriginalRequestID,
 		})
 	}
 
-	// Process the command via controller
+	// Process the command via controller (uses ctx with baggage for child span correlation)
 	result, err := h.controller.ProcessCommand(ctx, &command)
 	if err != nil {
 		telemetry.RecordSpanError(ctx, err)
@@ -358,6 +387,30 @@ func (h *HITLHandler) HandleResume(w http.ResponseWriter, r *http.Request) {
 		attribute.String("checkpoint_id", checkpointID),
 	)
 
+	// Load checkpoint to get OriginalRequestID for trace correlation.
+	// This allows searching all traces in a HITL conversation by original_request_id.
+	checkpoint, loadErr := h.store.LoadCheckpoint(ctx, checkpointID)
+	if loadErr != nil {
+		if IsCheckpointNotFound(loadErr) {
+			h.writeError(w, http.StatusNotFound, loadErr.Error())
+			return
+		}
+		// Log warning but continue - ResumeExecution will handle the error
+		if h.logger != nil {
+			h.logger.WarnWithContext(ctx, "Failed to load checkpoint for trace correlation", map[string]interface{}{
+				"operation":     "hitl_api_resume",
+				"checkpoint_id": checkpointID,
+				"error":         loadErr.Error(),
+			})
+		}
+	} else if checkpoint.OriginalRequestID != "" {
+		// Set original_request_id for distributed trace correlation.
+		// 1. Set baggage so child spans (controller operations) inherit the attribute
+		// 2. Set span attribute on current span for direct searchability
+		ctx = telemetry.WithBaggage(ctx, "original_request_id", checkpoint.OriginalRequestID)
+		telemetry.SetSpanAttributes(ctx, attribute.String("original_request_id", checkpoint.OriginalRequestID))
+	}
+
 	// Log request
 	if h.logger != nil {
 		h.logger.InfoWithContext(ctx, "Resuming execution", map[string]interface{}{
@@ -366,7 +419,7 @@ func (h *HITLHandler) HandleResume(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Resume execution via controller
+	// Resume execution via controller (uses ctx with baggage for child span correlation)
 	result, err := h.controller.ResumeExecution(ctx, checkpointID)
 	if err != nil {
 		telemetry.RecordSpanError(ctx, err)
@@ -480,6 +533,14 @@ func (h *HITLHandler) HandleGetCheckpoint(w http.ResponseWriter, r *http.Request
 		}
 		h.writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load checkpoint: %s", err.Error()))
 		return
+	}
+
+	// Set original_request_id for distributed trace correlation.
+	// 1. Set baggage for consistency with other handlers (though no significant child spans here)
+	// 2. Set span attribute on current span for direct searchability
+	if checkpoint.OriginalRequestID != "" {
+		ctx = telemetry.WithBaggage(ctx, "original_request_id", checkpoint.OriginalRequestID)
+		telemetry.SetSpanAttributes(ctx, attribute.String("original_request_id", checkpoint.OriginalRequestID))
 	}
 
 	// Add span event for successful load

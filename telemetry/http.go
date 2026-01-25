@@ -50,6 +50,15 @@ type TracingMiddlewareConfig struct {
 	// Example: []string{"/health", "/metrics", "/ready"}
 	ExcludedPaths []string
 
+	// RequestFilter provides custom logic to exclude requests from tracing.
+	// Return false to exclude a request from tracing.
+	// This is evaluated AFTER ExcludedPaths, allowing fine-grained control.
+	// Example: exclude polling requests with ?poll=true query parameter
+	//   RequestFilter: func(r *http.Request) bool {
+	//       return r.URL.Query().Get("poll") != "true"
+	//   }
+	RequestFilter func(r *http.Request) bool
+
 	// SpanNameFormatter customizes how span names are generated.
 	// If nil, uses "HTTP {method} {path}" format.
 	SpanNameFormatter func(operation string, r *http.Request) string
@@ -110,15 +119,22 @@ func TracingMiddlewareWithConfig(serviceName string, config *TracingMiddlewareCo
 	// Build otelhttp options
 	var opts []otelhttp.Option
 
-	// Add path filter if configured
-	if config != nil && len(config.ExcludedPaths) > 0 {
+	// Add combined filter if any filtering is configured
+	if config != nil && (len(config.ExcludedPaths) > 0 || config.RequestFilter != nil) {
 		pathSet := make(map[string]bool)
 		for _, path := range config.ExcludedPaths {
 			pathSet[path] = true
 		}
 		opts = append(opts, otelhttp.WithFilter(func(r *http.Request) bool {
-			// Return false to exclude from tracing
-			return !pathSet[r.URL.Path]
+			// Check excluded paths first
+			if len(pathSet) > 0 && pathSet[r.URL.Path] {
+				return false // Exclude from tracing
+			}
+			// Check custom filter
+			if config.RequestFilter != nil {
+				return config.RequestFilter(r)
+			}
+			return true // Include in tracing
 		}))
 	}
 

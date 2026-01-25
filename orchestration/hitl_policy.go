@@ -94,7 +94,7 @@ func (p *RuleBasedPolicy) ShouldApprovePlan(ctx context.Context, plan *RoutingPl
 			Message:         fmt.Sprintf("Plan contains sensitive operations requiring approval: %v", sensitiveDetails),
 			Priority:        PriorityHigh,
 			Timeout:         p.config.DefaultTimeout,
-			DefaultAction:   p.config.DefaultAction,
+			DefaultAction:   p.getDefaultAction(), // Uses config (default: reject, override via GOMIND_HITL_DEFAULT_ACTION)
 			Metadata: map[string]interface{}{
 				"plan_id":           plan.PlanID,
 				"step_count":        len(plan.Steps),
@@ -119,7 +119,7 @@ func (p *RuleBasedPolicy) ShouldApprovePlan(ctx context.Context, plan *RoutingPl
 			Message:         fmt.Sprintf("Plan approval required for request: %s", truncateString(plan.OriginalRequest, 100)),
 			Priority:        PriorityNormal,
 			Timeout:         p.config.DefaultTimeout,
-			DefaultAction:   p.config.DefaultAction,
+			DefaultAction:   p.getDefaultAction(), // Uses config (default: reject, override via GOMIND_HITL_DEFAULT_ACTION)
 			Metadata: map[string]interface{}{
 				"plan_id":           plan.PlanID,
 				"step_count":        len(plan.Steps),
@@ -162,7 +162,7 @@ func (p *RuleBasedPolicy) ShouldApproveBeforeStep(ctx context.Context, step Rout
 			Message:         fmt.Sprintf("Step approval required for agent: %s", step.AgentName),
 			Priority:        PriorityHigh,
 			Timeout:         p.config.DefaultTimeout,
-			DefaultAction:   p.config.DefaultAction,
+			DefaultAction:   p.getDefaultAction(), // Uses config (default: reject, override via GOMIND_HITL_DEFAULT_ACTION)
 			Metadata: map[string]interface{}{
 				"step_id":    step.StepID,
 				"agent_name": step.AgentName,
@@ -194,7 +194,7 @@ func (p *RuleBasedPolicy) ShouldApproveBeforeStep(ctx context.Context, step Rout
 				Message:         fmt.Sprintf("Step approval required for operation: %s.%s", step.AgentName, capability),
 				Priority:        PriorityHigh,
 				Timeout:         p.config.DefaultTimeout,
-				DefaultAction:   p.config.DefaultAction,
+				DefaultAction:   p.getDefaultAction(), // Uses config (default: reject, override via GOMIND_HITL_DEFAULT_ACTION)
 				Metadata: map[string]interface{}{
 					"step_id":    step.StepID,
 					"agent_name": step.AgentName,
@@ -219,7 +219,7 @@ func (p *RuleBasedPolicy) ShouldApproveAfterStep(ctx context.Context, step Routi
 				Message:         fmt.Sprintf("Output validation required for: %s.%s", step.AgentName, capability),
 				Priority:        PriorityNormal,
 				Timeout:         p.config.DefaultTimeout,
-				DefaultAction:   p.config.DefaultAction,
+				DefaultAction:   p.getDefaultAction(), // Uses config (default: reject, override via GOMIND_HITL_DEFAULT_ACTION)
 				Metadata: map[string]interface{}{
 					"step_id":         step.StepID,
 					"agent_name":      step.AgentName,
@@ -312,6 +312,15 @@ func (p *RuleBasedPolicy) requiresOutputValidation(capability string) bool {
 	// This could be configured via HITLConfig.ValidateOutputCapabilities
 	// For now, we return false (no automatic output validation)
 	return false
+}
+
+// getDefaultAction returns the configured default action, falling back to CommandReject.
+// This ensures fail-safe behavior even if HITLConfig.DefaultAction is not explicitly set.
+func (p *RuleBasedPolicy) getDefaultAction() CommandType {
+	if p.config.DefaultAction != "" {
+		return p.config.DefaultAction
+	}
+	return CommandReject // Fail-safe: HITL enabled = require explicit approval
 }
 
 // Note: truncateString is already defined in orchestrator.go

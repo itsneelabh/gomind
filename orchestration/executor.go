@@ -649,7 +649,7 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 						})
 					}
 
-					// Add span event for step-level HITL propagation (visible in Jaeger)
+					// Add span event for step-level HITL propagation (visible in distributed traces)
 					telemetry.AddSpanEvent(ctx, "hitl.step_interrupt.propagating",
 						attribute.String("checkpoint_id", checkpoint.CheckpointID),
 						attribute.String("interrupted_step", stepResult.StepID),
@@ -1638,7 +1638,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 		coerced, coercionLog := coerceParameterTypes(parameters, capabilitySchema.Parameters)
 		if len(coercionLog) > 0 {
 			// Telemetry: Add span event for distributed tracing visibility
-			// This allows operators to see coercion events in Jaeger/Grafana traces
+			// This allows operators to see coercion events in trace visualization tools
 			telemetry.AddSpanEvent(ctx, "type_coercion_applied",
 				attribute.Int("coercions_count", len(coercionLog)),
 				attribute.String("capability", capability),
@@ -1870,7 +1870,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				validationRetries++
 
 				// Telemetry: Add span event for LLM error analysis
-				// Include error details and suggested changes for complete visibility in Jaeger
+				// Include error details and suggested changes for complete visibility in distributed traces
 				suggestedChangesJSON, _ := json.Marshal(analysisResult.SuggestedChanges)
 				telemetry.AddSpanEvent(ctx, "llm_error_analysis_retry",
 					attribute.String("step_id", step.StepID),
@@ -2092,7 +2092,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			validationRetries++
 
 			// Telemetry: Add span event for validation feedback attempt
-			// Include error details for complete visibility in Jaeger
+			// Include error details for complete visibility in distributed traces
 			telemetry.AddSpanEvent(ctx, "validation_feedback_started",
 				attribute.String("step_id", step.StepID),
 				attribute.String("capability", capability),
@@ -2123,7 +2123,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 			correctedParams, corrErr := e.correctionCallback(ctx, step, parameters, err.Error(), capabilitySchema)
 			if corrErr == nil && correctedParams != nil {
 				// Telemetry: Record successful correction with corrected parameters
-				// Serialize corrected params for visibility in Jaeger
+				// Serialize corrected params for visibility in distributed traces
 				correctedParamsJSON, _ := json.Marshal(correctedParams)
 				telemetry.AddSpanEvent(ctx, "validation_feedback_success",
 					attribute.String("step_id", step.StepID),

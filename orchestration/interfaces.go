@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -501,6 +502,21 @@ func DefaultConfig() *OrchestratorConfig {
 	if escalateRetries := os.Getenv("GOMIND_HITL_ESCALATE_AFTER_RETRIES"); escalateRetries != "" {
 		if val, err := strconv.Atoi(escalateRetries); err == nil && val >= 0 {
 			config.HITL.EscalateAfterRetries = val
+		}
+	}
+	// Override default action for all checkpoint types on expiry
+	// Values: "approve", "reject", "abort"
+	// Default is "reject" (HITL enabled = require explicit approval)
+	if defaultAction := os.Getenv("GOMIND_HITL_DEFAULT_ACTION"); defaultAction != "" {
+		switch strings.ToLower(defaultAction) {
+		case "approve":
+			config.HITL.DefaultAction = CommandApprove
+		case "reject":
+			config.HITL.DefaultAction = CommandReject
+		case "abort":
+			config.HITL.DefaultAction = CommandAbort
+		default:
+			log.Printf("[WARN] Invalid GOMIND_HITL_DEFAULT_ACTION value: %q (valid: approve, reject, abort). Using default: reject", defaultAction)
 		}
 	}
 

@@ -785,6 +785,16 @@ func (c *DefaultInterruptController) createCheckpoint(
 	// Get request_id from context (set by orchestrator via WithRequestID)
 	requestID := GetRequestID(ctx)
 
+	// Get original_request_id from baggage for HITL conversation correlation.
+	// For initial requests: original_request_id == request_id (set by orchestrator)
+	// For resume requests: original_request_id is preserved from the first request
+	originalRequestID := requestID // Default to current request_id
+	if bag := telemetry.GetBaggage(ctx); bag != nil {
+		if origID := bag["original_request_id"]; origID != "" {
+			originalRequestID = origID
+		}
+	}
+
 	// Get metadata from context for UserContext (set via WithMetadata)
 	// This preserves session_id, user_id, etc. for resume operations
 	userContext := GetMetadata(ctx)
@@ -807,17 +817,18 @@ func (c *DefaultInterruptController) createCheckpoint(
 	}
 
 	checkpoint := &ExecutionCheckpoint{
-		CheckpointID:   fmt.Sprintf("cp-%s", uuid.New().String()[:16]),
-		RequestID:      requestID,
-		InterruptPoint: point,
-		Decision:       decision,
-		Plan:           plan,
-		CurrentStep:    step,
-		CreatedAt:      time.Now(),
-		ExpiresAt:      expiresAt,
-		Status:         CheckpointStatusPending,
-		StepResults:    make(map[string]*StepResult),
-		UserContext:    userContext,
+		CheckpointID:      fmt.Sprintf("cp-%s", uuid.New().String()[:16]),
+		RequestID:         requestID,
+		OriginalRequestID: originalRequestID,
+		InterruptPoint:    point,
+		Decision:          decision,
+		Plan:              plan,
+		CurrentStep:       step,
+		CreatedAt:         time.Now(),
+		ExpiresAt:         expiresAt,
+		Status:            CheckpointStatusPending,
+		StepResults:       make(map[string]*StepResult),
+		UserContext:       userContext,
 	}
 
 	if result != nil {
@@ -832,6 +843,34 @@ func (c *DefaultInterruptController) createCheckpoint(
 	// This allows users to see actual values (e.g., amount: 15000) instead of templates
 	if resolvedParams := GetResolvedParams(ctx); resolvedParams != nil {
 		checkpoint.ResolvedParameters = resolvedParams
+	}
+
+	// Get request mode from context for expiry behavior determination
+	// This is set by the application's HTTP handlers via WithRequestMode()
+	// See HITL_EXPIRY_PROCESSOR_DESIGN.md for mode-aware expiry behavior
+	if requestMode := GetRequestMode(ctx); requestMode != "" {
+		checkpoint.RequestMode = requestMode
+		// Record that RequestMode was found in context (helps debug expiry behavior issues)
+		telemetry.AddSpanEvent(ctx, "hitl.checkpoint.request_mode_set",
+			attribute.String("checkpoint_id", checkpoint.CheckpointID),
+			attribute.String("request_id", requestID),
+			attribute.String("request_mode", string(requestMode)),
+		)
+	} else {
+		// Log warning when RequestMode is not set - this affects expiry behavior
+		// Streaming requests should set RequestModeStreaming for implicit_deny behavior
+		if c.logger != nil {
+			c.logger.WarnWithContext(ctx, "RequestMode not set in context - expiry will use default behavior", map[string]interface{}{
+				"operation":     "hitl_checkpoint_create",
+				"checkpoint_id": checkpoint.CheckpointID,
+				"request_id":    requestID,
+				"hint":          "Call orchestration.WithRequestMode(ctx, RequestModeStreaming) for streaming requests",
+			})
+		}
+		telemetry.AddSpanEvent(ctx, "hitl.checkpoint.request_mode_missing",
+			attribute.String("checkpoint_id", checkpoint.CheckpointID),
+			attribute.String("request_id", requestID),
+		)
 	}
 
 	// Record checkpoint creation metric (Phase 4 - Metrics Integration)

@@ -711,16 +711,6 @@ func (o *AIOrchestrator) catalogRefreshLoop() {
 
 // ProcessRequest handles a natural language request using AI-powered orchestration
 func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, metadata map[string]interface{}) (*OrchestratorResponse, error) {
-	// Start telemetry span if telemetry is available
-	var span core.Span
-	if o.telemetry != nil {
-		ctx, span = o.telemetry.StartSpan(ctx, "orchestrator.process_request")
-		defer span.End()
-	} else {
-		// Create a no-op span
-		span = &core.NoOpSpan{}
-	}
-
 	startTime := time.Now()
 	requestID := generateRequestID()
 
@@ -735,9 +725,37 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		ctx = telemetry.WithBaggage(ctx, "original_request_id", requestID)
 	}
 
+	// Add request_id to context for GetRequestID() - used by HITL controller
+	// when creating checkpoints during execution (e.g., step-level interrupts)
+	ctx = WithRequestID(ctx, requestID)
+
 	// Store metadata in context for HITL checkpoint creation
 	// This preserves session_id, user_id, etc. when creating checkpoints
 	ctx = WithMetadata(ctx, metadata)
+
+	// CRITICAL: Add request_id to the PARENT span (HTTP span) for trace searchability
+	// This must be done BEFORE creating the child orchestrator span, while the HTTP span
+	// is still the current span in context. This enables searching by request_id in distributed
+	// tracing tools to show the correct root operation name (e.g., "HTTP POST /chat/stream")
+	telemetry.SetSpanAttributes(ctx,
+		attribute.String("request_id", requestID),
+	)
+	// Also set original_request_id on parent span for trace correlation
+	if bag := telemetry.GetBaggage(ctx); bag != nil && bag["original_request_id"] != "" {
+		telemetry.SetSpanAttributes(ctx,
+			attribute.String("original_request_id", bag["original_request_id"]),
+		)
+	}
+
+	// Start telemetry span if telemetry is available
+	var span core.Span
+	if o.telemetry != nil {
+		ctx, span = o.telemetry.StartSpan(ctx, "orchestrator.process_request")
+		defer span.End()
+	} else {
+		// Create a no-op span
+		span = &core.NoOpSpan{}
+	}
 
 	if o.logger != nil {
 		o.logger.InfoWithContext(ctx, "Starting request processing", map[string]interface{}{
@@ -906,7 +924,7 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 				}
 				o.logger.InfoWithContext(ctx, "Step-level HITL interrupt, returning to agent", logFields)
 			}
-			// Add span event and attributes for step-level HITL (visible in Jaeger)
+			// Add span event and attributes for step-level HITL (visible in distributed traces)
 			checkpoint := GetCheckpoint(err)
 			if checkpoint != nil {
 				telemetry.AddSpanEvent(ctx, "hitl.step_interrupt.orchestrator_propagating",
@@ -1046,6 +1064,20 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 	// Store metadata in context for HITL checkpoint creation
 	// This preserves session_id, user_id, etc. when creating checkpoints
 	ctx = WithMetadata(ctx, metadata)
+
+	// CRITICAL: Add request_id to the PARENT span (HTTP span) for trace searchability
+	// This must be done BEFORE creating the child orchestrator span, while the HTTP span
+	// is still the current span in context. This enables searching by request_id in distributed
+	// tracing tools to show the correct root operation name (e.g., "HTTP POST /chat/stream")
+	telemetry.SetSpanAttributes(ctx,
+		attribute.String("request_id", requestID),
+	)
+	// Also set original_request_id on parent span for trace correlation
+	if bag := telemetry.GetBaggage(ctx); bag != nil && bag["original_request_id"] != "" {
+		telemetry.SetSpanAttributes(ctx,
+			attribute.String("original_request_id", bag["original_request_id"]),
+		)
+	}
 
 	// Start tracing span (nil-safe per FRAMEWORK_DESIGN_PRINCIPLES.md)
 	var span core.Span
@@ -1220,7 +1252,7 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 				}
 				o.logger.InfoWithContext(ctx, "Step-level HITL interrupt, returning to agent", logFields)
 			}
-			// Add span event and attributes for step-level HITL (visible in Jaeger)
+			// Add span event and attributes for step-level HITL (visible in distributed traces)
 			checkpoint := GetCheckpoint(err)
 			if checkpoint != nil {
 				telemetry.AddSpanEvent(ctx, "hitl.step_interrupt.orchestrator_propagating",
@@ -1459,7 +1491,7 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 			})
 		}
 
-		// Telemetry: Record LLM prompt for visibility in Jaeger
+		// Telemetry: Record LLM prompt for visibility in distributed traces
 		telemetry.AddSpanEvent(ctx, "llm.plan_generation.request",
 			attribute.String("request_id", requestID),
 			attribute.String("prompt", truncateString(prompt, 2000)),
@@ -1513,7 +1545,7 @@ func (o *AIOrchestrator) generateExecutionPlan(ctx context.Context, request stri
 
 		totalTokensUsed += aiResponse.Usage.TotalTokens
 
-		// Telemetry: Record LLM response for visibility in Jaeger
+		// Telemetry: Record LLM response for visibility in distributed traces
 		telemetry.AddSpanEvent(ctx, "llm.plan_generation.response",
 			attribute.String("request_id", requestID),
 			attribute.String("response", truncateString(aiResponse.Content, 2000)),

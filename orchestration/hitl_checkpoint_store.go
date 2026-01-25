@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 	"github.com/itsneelabh/gomind/core"
 	"github.com/itsneelabh/gomind/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -48,16 +51,27 @@ type RedisCheckpointStore struct {
 	// Optional dependencies (injected per framework patterns)
 	logger    core.Logger    // Defaults to NoOp
 	telemetry core.Telemetry // Defaults to NoOp
+
+	// Expiry processor state
+	expiryCtx      context.Context
+	expiryCancel   context.CancelFunc
+	expiryCallback ExpiryCallback
+	expiryWg       sync.WaitGroup
+	expiryStarted  bool
+	expiryMu       sync.Mutex // Protects expiry processor state
+	instanceID     string     // For distributed claim mechanism
+	config         ExpiryProcessorConfig
 }
 
 // redisCheckpointConfig holds configuration for the checkpoint store
 type redisCheckpointConfig struct {
-	redisURL  string
-	redisDB   int
-	keyPrefix string
-	ttl       time.Duration
-	logger    core.Logger
-	telemetry core.Telemetry
+	redisURL   string
+	redisDB    int
+	keyPrefix  string
+	ttl        time.Duration
+	logger     core.Logger
+	telemetry  core.Telemetry
+	instanceID string // For distributed claim mechanism
 }
 
 // RedisCheckpointStoreOption configures the checkpoint store
@@ -88,6 +102,17 @@ func WithCheckpointKeyPrefix(prefix string) RedisCheckpointStoreOption {
 func WithCheckpointTTL(ttl time.Duration) RedisCheckpointStoreOption {
 	return func(c *redisCheckpointConfig) {
 		c.ttl = ttl
+	}
+}
+
+// WithInstanceID sets a custom instance ID for the distributed claim mechanism.
+// If not set, defaults to hostname + random suffix.
+//
+// Use this for testing or when you need deterministic instance IDs.
+// In production, the auto-generated ID is recommended.
+func WithInstanceID(id string) RedisCheckpointStoreOption {
+	return func(c *redisCheckpointConfig) {
+		c.instanceID = id
 	}
 }
 
@@ -154,13 +179,20 @@ func NewRedisCheckpointStore(opts ...interface{}) (*RedisCheckpointStore, error)
 		return nil, fmt.Errorf("failed to connect to Redis at %s: %w (check REDIS_URL and Redis connectivity)", config.redisURL, err)
 	}
 
+	// Generate instance ID if not provided
+	instanceID := config.instanceID
+	if instanceID == "" {
+		instanceID = generateInstanceID()
+	}
+
 	return &RedisCheckpointStore{
-		client:    client,
-		keyPrefix: config.keyPrefix,
-		ttl:       config.ttl,
-		redisURL:  config.redisURL,
-		logger:    config.logger,
-		telemetry: config.telemetry,
+		client:     client,
+		keyPrefix:  config.keyPrefix,
+		ttl:        config.ttl,
+		redisURL:   config.redisURL,
+		logger:     config.logger,
+		telemetry:  config.telemetry,
+		instanceID: instanceID,
 	}, nil
 }
 
@@ -487,106 +519,751 @@ func parseInt(s string) (int, error) {
 	return i, err
 }
 
+func getEnvBoolOrDefault(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		switch value {
+		case "true", "1", "yes", "on":
+			return true
+		case "false", "0", "no", "off":
+			return false
+		}
+	}
+	return defaultValue
+}
+
+func getEnvDurationOrDefault(key string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if duration, err := time.ParseDuration(value); err == nil {
+			return duration
+		}
+	}
+	return defaultValue
+}
+
+// ExpiryProcessorConfigFromEnv loads ExpiryProcessorConfig from environment variables.
+// This enables deployment-specific configuration without code changes.
+//
+// Per FRAMEWORK_DESIGN_PRINCIPLES.md "Environment Variable Precedence":
+//
+//	Priority 1: Explicitly set configuration options
+//	Priority 2: Environment variables (this function)
+//	Priority 3: Sensible defaults
+//
+// Environment variables:
+//
+//	GOMIND_HITL_EXPIRY_ENABLED   - Enable/disable expiry processor (default: true)
+//	GOMIND_HITL_EXPIRY_INTERVAL  - Scan interval (default: 10s)
+//	GOMIND_HITL_EXPIRY_BATCH_SIZE - Max checkpoints per scan (default: 100)
+//	GOMIND_HITL_EXPIRY_DELIVERY  - Delivery semantics: "at_most_once" or "at_least_once" (default: at_most_once)
+//
+// Usage:
+//
+//	// Load from environment variables
+//	config := ExpiryProcessorConfigFromEnv()
+//
+//	// Or use as a base and override specific values
+//	config := ExpiryProcessorConfigFromEnv()
+//	config.ScanInterval = 5 * time.Second  // Override
+//
+//	checkpointStore.StartExpiryProcessor(ctx, config)
+func ExpiryProcessorConfigFromEnv() ExpiryProcessorConfig {
+	// Parse delivery semantics with validation
+	deliverySemantics := DeliveryAtMostOnce
+	if envValue := os.Getenv("GOMIND_HITL_EXPIRY_DELIVERY"); envValue != "" {
+		switch envValue {
+		case "at_most_once":
+			deliverySemantics = DeliveryAtMostOnce
+		case "at_least_once":
+			deliverySemantics = DeliveryAtLeastOnce
+			// Invalid values are silently ignored - will use default
+			// This aligns with FRAMEWORK_DESIGN_PRINCIPLES.md: "Fail-Safe Defaults"
+		}
+	}
+
+	return ExpiryProcessorConfig{
+		Enabled:           getEnvBoolOrDefault("GOMIND_HITL_EXPIRY_ENABLED", true),
+		ScanInterval:      getEnvDurationOrDefault("GOMIND_HITL_EXPIRY_INTERVAL", 10*time.Second),
+		BatchSize:         getEnvIntOrDefault("GOMIND_HITL_EXPIRY_BATCH_SIZE", 100),
+		DeliverySemantics: deliverySemantics,
+	}
+}
+
 // Close closes the Redis connection
 func (s *RedisCheckpointStore) Close() error {
 	return s.client.Close()
 }
 
 // =============================================================================
-// InMemoryCheckpointStore - For Testing
+// Expiry Processor Implementation (RedisCheckpointStore)
 // =============================================================================
 
-// InMemoryCheckpointStore implements CheckpointStore in memory for testing.
-type InMemoryCheckpointStore struct {
-	checkpoints map[string]*ExecutionCheckpoint
-	pending     map[string]bool
-}
-
-// NewInMemoryCheckpointStore creates a new in-memory checkpoint store.
-func NewInMemoryCheckpointStore() *InMemoryCheckpointStore {
-	return &InMemoryCheckpointStore{
-		checkpoints: make(map[string]*ExecutionCheckpoint),
-		pending:     make(map[string]bool),
-	}
-}
-
-// SaveCheckpoint saves a checkpoint in memory
-func (s *InMemoryCheckpointStore) SaveCheckpoint(ctx context.Context, cp *ExecutionCheckpoint) error {
-	// Deep copy to avoid mutation issues
-	data, err := json.Marshal(cp)
-	if err != nil {
-		return fmt.Errorf("failed to marshal checkpoint for deep copy: %w", err)
-	}
-	var copy ExecutionCheckpoint
-	if err := json.Unmarshal(data, &copy); err != nil {
-		return fmt.Errorf("failed to unmarshal checkpoint for deep copy: %w", err)
+// validateExpiryConfig validates the expiry processor configuration.
+// Per FRAMEWORK_DESIGN_PRINCIPLES.md: fail-fast for configuration errors.
+func validateExpiryConfig(config ExpiryProcessorConfig) error {
+	if !config.Enabled {
+		return nil // Disabled config is always valid
 	}
 
-	s.checkpoints[cp.CheckpointID] = &copy
-	if cp.Status == CheckpointStatusPending {
-		s.pending[cp.CheckpointID] = true
-	} else {
-		delete(s.pending, cp.CheckpointID)
+	if config.ScanInterval > 0 && config.ScanInterval < 1*time.Second {
+		return fmt.Errorf("ExpiryProcessorConfig.ScanInterval must be at least 1s, got %v "+
+			"(use 0 for default of 10s, or set explicit value >= 1s)", config.ScanInterval)
 	}
+
+	if config.BatchSize < 0 {
+		return fmt.Errorf("ExpiryProcessorConfig.BatchSize cannot be negative, got %d "+
+			"(use 0 for default of 100, or set explicit positive value)", config.BatchSize)
+	}
+
+	if config.BatchSize > 10000 {
+		return fmt.Errorf("ExpiryProcessorConfig.BatchSize exceeds maximum of 10000, got %d "+
+			"(large batch sizes can cause memory issues and Redis timeouts)", config.BatchSize)
+	}
+
+	// Validate DeliverySemantics
+	switch config.DeliverySemantics {
+	case "", DeliveryAtMostOnce, DeliveryAtLeastOnce:
+		// Valid (empty defaults to at_most_once)
+	default:
+		return fmt.Errorf("ExpiryProcessorConfig.DeliverySemantics has invalid value %q "+
+			"(valid values: %q, %q)", config.DeliverySemantics, DeliveryAtMostOnce, DeliveryAtLeastOnce)
+	}
+
 	return nil
 }
 
-// LoadCheckpoint loads a checkpoint from memory
-func (s *InMemoryCheckpointStore) LoadCheckpoint(ctx context.Context, checkpointID string) (*ExecutionCheckpoint, error) {
-	cp, ok := s.checkpoints[checkpointID]
-	if !ok {
-		return nil, &ErrCheckpointNotFound{CheckpointID: checkpointID}
+// StartExpiryProcessor starts the background goroutine that processes expired checkpoints.
+// The AGENT calls this method during setup - the framework just provides the implementation.
+func (s *RedisCheckpointStore) StartExpiryProcessor(ctx context.Context, config ExpiryProcessorConfig) error {
+	// Fail-fast for configuration errors
+	if err := validateExpiryConfig(config); err != nil {
+		return fmt.Errorf("invalid expiry processor configuration: %w", err)
 	}
 
-	// Deep copy to avoid mutation issues
-	data, err := json.Marshal(cp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal checkpoint for deep copy: %w", err)
-	}
-	var copy ExecutionCheckpoint
-	if err := json.Unmarshal(data, &copy); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal checkpoint for deep copy: %w", err)
-	}
-	return &copy, nil
-}
+	s.expiryMu.Lock()
+	defer s.expiryMu.Unlock()
 
-// UpdateCheckpointStatus updates checkpoint status in memory
-func (s *InMemoryCheckpointStore) UpdateCheckpointStatus(ctx context.Context, checkpointID string, status CheckpointStatus) error {
-	cp, ok := s.checkpoints[checkpointID]
-	if !ok {
-		return &ErrCheckpointNotFound{CheckpointID: checkpointID}
+	if s.expiryStarted {
+		return fmt.Errorf("expiry processor already started")
 	}
 
-	cp.Status = status
-	if status != CheckpointStatusPending {
-		delete(s.pending, checkpointID)
+	if !config.Enabled {
+		return nil
 	}
+
+	// Apply defaults
+	if config.ScanInterval == 0 {
+		config.ScanInterval = 10 * time.Second
+	}
+	if config.BatchSize == 0 {
+		config.BatchSize = 100
+	}
+
+	s.config = config
+	s.expiryCtx, s.expiryCancel = context.WithCancel(ctx)
+	s.expiryStarted = true
+
+	// Only generate instance ID if not already set (e.g., via WithInstanceID)
+	if s.instanceID == "" {
+		s.instanceID = generateInstanceID()
+	}
+
+	s.expiryWg.Add(1)
+	go s.expiryProcessorLoop()
+
+	if s.logger != nil {
+		s.logger.Info("HITL expiry processor started", map[string]interface{}{
+			"operation":     "hitl_expiry_processor_start",
+			"scan_interval": config.ScanInterval.String(),
+			"batch_size":    config.BatchSize,
+			"key_prefix":    s.keyPrefix,
+			"instance_id":   s.instanceID,
+		})
+	}
+
 	return nil
 }
 
-// ListPendingCheckpoints returns pending checkpoints from memory
-func (s *InMemoryCheckpointStore) ListPendingCheckpoints(ctx context.Context, filter CheckpointFilter) ([]*ExecutionCheckpoint, error) {
-	var result []*ExecutionCheckpoint
-	for id := range s.pending {
-		if cp, ok := s.checkpoints[id]; ok {
-			if filter.RequestID != "" && cp.RequestID != filter.RequestID {
-				continue
-			}
-			result = append(result, cp)
+// StopExpiryProcessor stops the expiry processor gracefully.
+func (s *RedisCheckpointStore) StopExpiryProcessor(ctx context.Context) error {
+	s.expiryMu.Lock()
+	cancel := s.expiryCancel
+	s.expiryMu.Unlock()
+
+	if cancel == nil {
+		return nil
+	}
+
+	cancel()
+
+	// Wait with context timeout
+	done := make(chan struct{})
+	go func() {
+		s.expiryWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if s.logger != nil {
+			s.logger.Info("HITL expiry processor stopped", map[string]interface{}{
+				"operation": "hitl_expiry_processor_stop",
+			})
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("expiry processor shutdown cancelled: %w", ctx.Err())
+	}
+}
+
+// SetExpiryCallback sets the callback for expired checkpoints.
+// Must be called before StartExpiryProcessor.
+func (s *RedisCheckpointStore) SetExpiryCallback(callback ExpiryCallback) error {
+	s.expiryMu.Lock()
+	defer s.expiryMu.Unlock()
+
+	if s.expiryStarted {
+		return fmt.Errorf("SetExpiryCallback must be called before StartExpiryProcessor")
+	}
+	s.expiryCallback = callback
+	return nil
+}
+
+// expiryProcessorLoop runs the background expiry processor.
+func (s *RedisCheckpointStore) expiryProcessorLoop() {
+	defer s.expiryWg.Done()
+
+	ticker := time.NewTicker(s.config.ScanInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.processExpiredCheckpoints()
+		case <-s.expiryCtx.Done():
+			return
 		}
 	}
-	return result, nil
 }
 
-// DeleteCheckpoint deletes a checkpoint from memory
-func (s *InMemoryCheckpointStore) DeleteCheckpoint(ctx context.Context, checkpointID string) error {
-	delete(s.checkpoints, checkpointID)
-	delete(s.pending, checkpointID)
+// processExpiredCheckpoints processes all expired checkpoints.
+func (s *RedisCheckpointStore) processExpiredCheckpoints() {
+	// Track scan duration for metrics
+	scanStartTime := time.Now()
+
+	ctx, cancel := context.WithTimeout(s.expiryCtx, 30*time.Second)
+	defer cancel()
+
+	// Get all checkpoint IDs from pending index
+	pendingKey := fmt.Sprintf("%s:pending", s.keyPrefix)
+	checkpointIDs, err := s.client.SMembers(ctx, pendingKey).Result()
+	if err != nil {
+		telemetry.RecordSpanError(ctx, err)
+		if s.logger != nil {
+			s.logger.WarnWithContext(ctx, "Failed to read pending index", map[string]interface{}{
+				"operation": "hitl_expiry_processor",
+				"error":     err.Error(),
+			})
+		}
+		RecordExpiryScanSkipped("read_pending_index_failed")
+		return
+	}
+
+	now := time.Now()
+	processed := 0
+
+	for _, cpID := range checkpointIDs {
+		if processed >= s.config.BatchSize {
+			break
+		}
+
+		checkpoint, err := s.LoadCheckpoint(ctx, cpID)
+		if err != nil {
+			// Checkpoint may have been deleted (TTL) - remove from index
+			s.client.SRem(ctx, pendingKey, cpID)
+			continue
+		}
+
+		// Check if expired
+		if checkpoint.Status != CheckpointStatusPending || checkpoint.ExpiresAt.After(now) {
+			continue
+		}
+
+		// ┌────────────────────────────────────────────────────────────────┐
+		// │  DISTRIBUTED CLAIM MECHANISM                                   │
+		// │                                                                │
+		// │  In multi-pod deployments, multiple expiry processors may be   │
+		// │  running. We use Redis SETNX to ensure only ONE pod processes  │
+		// │  each checkpoint. Per FRAMEWORK_DESIGN_PRINCIPLES.md, this is  │
+		// │  built-in reliability, not a documented limitation.            │
+		// └────────────────────────────────────────────────────────────────┘
+
+		claimed, err := s.claimExpiredCheckpoint(ctx, cpID)
+		if err != nil {
+			telemetry.RecordSpanError(ctx, err)
+			if s.logger != nil {
+				s.logger.WarnWithContext(ctx, "Failed to claim checkpoint", map[string]interface{}{
+					"operation":     "hitl_expiry_processor",
+					"checkpoint_id": cpID,
+					"error":         err.Error(),
+				})
+			}
+			continue
+		}
+
+		if !claimed {
+			// Another instance is processing this checkpoint
+			if s.logger != nil {
+				s.logger.DebugWithContext(ctx, "Checkpoint claimed by another instance", map[string]interface{}{
+					"operation":     "hitl_expiry_skip",
+					"checkpoint_id": cpID,
+				})
+			}
+			continue
+		}
+
+		// Process this expired checkpoint
+		s.processExpiredCheckpoint(ctx, checkpoint)
+
+		// Release claim after processing
+		if err := s.releaseExpiredCheckpointClaim(ctx, cpID); err != nil {
+			// Non-fatal - claim will expire via TTL
+			telemetry.RecordSpanError(ctx, err)
+		}
+
+		processed++
+	}
+
+	// Record scan metrics
+	scanDuration := time.Since(scanStartTime).Seconds()
+	RecordExpiryScanDuration(scanDuration)
+	RecordExpiryBatchSize(processed)
+
+	if processed > 0 && s.logger != nil {
+		s.logger.DebugWithContext(ctx, "Expiry processor scan complete", map[string]interface{}{
+			"operation":     "hitl_expiry_processor",
+			"processed":     processed,
+			"total_pending": len(checkpointIDs),
+			"duration_ms":   scanDuration * 1000,
+		})
+	}
+}
+
+// processExpiredCheckpoint handles a single expired checkpoint.
+func (s *RedisCheckpointStore) processExpiredCheckpoint(ctx context.Context, checkpoint *ExecutionCheckpoint) {
+	var newStatus CheckpointStatus
+	var appliedAction CommandType
+
+	// ┌────────────────────────────────────────────────────────────────────┐
+	// │  TRACE CORRELATION: Extract original trace context from checkpoint │
+	// │  The framework stores these in UserContext during checkpoint save  │
+	// │  (see hitl_controller.go:798-799)                                  │
+	// └────────────────────────────────────────────────────────────────────┘
+	var originalTraceID, originalSpanID string
+	if checkpoint.UserContext != nil {
+		if tid, ok := checkpoint.UserContext["original_trace_id"].(string); ok {
+			originalTraceID = tid
+		}
+		if sid, ok := checkpoint.UserContext["original_span_id"].(string); ok {
+			originalSpanID = sid
+		}
+	}
+
+	// Create linked span for cross-trace correlation in distributed tracing backends
+	// This allows searching by original_trace_id or original_request_id to find both
+	// the original request and all expiry-related processing
+	ctx, endLinkedSpan := telemetry.StartLinkedSpan(
+		ctx,
+		"hitl.expiry_process",
+		originalTraceID,
+		originalSpanID,
+		map[string]string{
+			"checkpoint_id":       checkpoint.CheckpointID,
+			"request_id":          checkpoint.RequestID,
+			"original_request_id": checkpoint.OriginalRequestID,
+			"original_trace_id":   originalTraceID,
+			"link.type":           "hitl_expiry",
+			"trigger":             "expiry_processor",
+		},
+	)
+	defer endLinkedSpan()
+
+	// Get effective request mode (with observable default behavior)
+	effectiveMode := s.getEffectiveRequestMode(ctx, checkpoint)
+
+	// Determine expiry behavior based on mode
+	shouldApplyDefault := s.shouldApplyDefaultAction(checkpoint, effectiveMode)
+
+	if !shouldApplyDefault {
+		// IMPLICIT DENY: No action applied
+		newStatus = CheckpointStatusExpired
+		appliedAction = "" // Explicitly no action
+
+		if s.logger != nil {
+			s.logger.InfoWithContext(ctx, "Checkpoint expired (implicit deny)", map[string]interface{}{
+				"operation":         "hitl_expiry_processor",
+				"checkpoint_id":     checkpoint.CheckpointID,
+				"request_id":        checkpoint.RequestID,
+				"original_trace_id": originalTraceID,
+				"request_mode":      string(effectiveMode),
+				"expired_at":        checkpoint.ExpiresAt.Format(time.RFC3339),
+			})
+		}
+
+		telemetry.AddSpanEvent(ctx, "hitl.checkpoint.expired",
+			attribute.String("request_id", checkpoint.RequestID),
+			attribute.String("checkpoint_id", checkpoint.CheckpointID),
+			attribute.String("original_trace_id", originalTraceID),
+			attribute.String("request_mode", string(effectiveMode)),
+			attribute.String("action", "implicit_deny"),
+			attribute.String("new_status", string(newStatus)),
+		)
+
+		RecordCheckpointExpired("implicit_deny", string(effectiveMode), checkpoint.InterruptPoint)
+	} else {
+		// APPLY DEFAULT ACTION
+		appliedAction = s.determineExpiryAction(checkpoint)
+		newStatus = s.actionToExpiredStatus(appliedAction)
+
+		if s.logger != nil {
+			s.logger.InfoWithContext(ctx, "Checkpoint expired, applied default action", map[string]interface{}{
+				"operation":         "hitl_expiry_processor",
+				"checkpoint_id":     checkpoint.CheckpointID,
+				"request_id":        checkpoint.RequestID,
+				"original_trace_id": originalTraceID,
+				"request_mode":      string(effectiveMode),
+				"default_action":    string(appliedAction),
+				"new_status":        string(newStatus),
+				"expired_at":        checkpoint.ExpiresAt.Format(time.RFC3339),
+			})
+		}
+
+		telemetry.AddSpanEvent(ctx, "hitl.checkpoint.expired",
+			attribute.String("request_id", checkpoint.RequestID),
+			attribute.String("checkpoint_id", checkpoint.CheckpointID),
+			attribute.String("original_trace_id", originalTraceID),
+			attribute.String("request_mode", string(effectiveMode)),
+			attribute.String("action", string(appliedAction)),
+			attribute.String("new_status", string(newStatus)),
+		)
+
+		RecordCheckpointExpired(string(appliedAction), string(effectiveMode), checkpoint.InterruptPoint)
+	}
+
+	// Get callback (if set)
+	s.expiryMu.Lock()
+	callback := s.expiryCallback
+	deliverySemantics := s.config.DeliverySemantics
+	s.expiryMu.Unlock()
+
+	// Handle delivery semantics
+	// Default to at-most-once if not specified
+	if deliverySemantics == "" {
+		deliverySemantics = DeliveryAtMostOnce
+	}
+
+	switch deliverySemantics {
+	case DeliveryAtLeastOnce:
+		// ┌────────────────────────────────────────────────────────────────┐
+		// │  AT-LEAST-ONCE: Callback FIRST, then update status             │
+		// │                                                                │
+		// │  If callback panics, checkpoint remains "pending" and will be  │
+		// │  retried on next scan. Use for critical operations.            │
+		// │  WARNING: Callback MUST be idempotent!                         │
+		// └────────────────────────────────────────────────────────────────┘
+
+		if callback != nil {
+			// Create a copy for the callback so we don't mutate the original
+			callbackCp := *checkpoint
+			callbackCp.Status = newStatus
+			callbackSuccess := s.invokeCallbackSafely(ctx, &callbackCp, appliedAction, callback)
+
+			if !callbackSuccess {
+				// Callback panicked - don't update status, will retry on next scan
+				if s.logger != nil {
+					s.logger.WarnWithContext(ctx, "Callback failed, checkpoint will be retried", map[string]interface{}{
+						"operation":          "hitl_expiry_at_least_once",
+						"checkpoint_id":      checkpoint.CheckpointID,
+						"request_id":         checkpoint.RequestID,
+						"delivery_semantics": string(deliverySemantics),
+					})
+				}
+				return
+			}
+		}
+
+		// Callback succeeded (or no callback) - now update status
+		if err := s.UpdateCheckpointStatus(ctx, checkpoint.CheckpointID, newStatus); err != nil {
+			telemetry.RecordSpanError(ctx, err)
+			if s.logger != nil {
+				s.logger.WarnWithContext(ctx, "Failed to update expired checkpoint after successful callback", map[string]interface{}{
+					"operation":     "hitl_expiry_processor",
+					"checkpoint_id": checkpoint.CheckpointID,
+					"request_id":    checkpoint.RequestID,
+					"error":         err.Error(),
+				})
+			}
+		}
+
+	default: // DeliveryAtMostOnce (default)
+		// ┌────────────────────────────────────────────────────────────────┐
+		// │  AT-MOST-ONCE: Update status FIRST, then callback              │
+		// │                                                                │
+		// │  If callback panics, checkpoint is already marked processed.   │
+		// │  Safest option for notifications and fire-and-forget.          │
+		// └────────────────────────────────────────────────────────────────┘
+
+		// Update checkpoint status (removes from pending index)
+		if err := s.UpdateCheckpointStatus(ctx, checkpoint.CheckpointID, newStatus); err != nil {
+			telemetry.RecordSpanError(ctx, err)
+			if s.logger != nil {
+				s.logger.WarnWithContext(ctx, "Failed to update expired checkpoint", map[string]interface{}{
+					"operation":     "hitl_expiry_processor",
+					"checkpoint_id": checkpoint.CheckpointID,
+					"request_id":    checkpoint.RequestID,
+					"error":         err.Error(),
+				})
+			}
+			return
+		}
+
+		// Invoke callback if set (with panic recovery)
+		if callback != nil {
+			checkpoint.Status = newStatus
+			s.invokeCallbackSafely(ctx, checkpoint, appliedAction, callback)
+		}
+	}
+}
+
+// invokeCallbackSafely invokes the expiry callback with panic recovery.
+// Returns true if callback completed without panic, false if it panicked.
+// For at-least-once delivery, this return value determines if status should be updated.
+func (s *RedisCheckpointStore) invokeCallbackSafely(ctx context.Context, checkpoint *ExecutionCheckpoint, appliedAction CommandType, callback ExpiryCallback) (success bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			success = false
+			RecordCallbackPanic()
+			if s.logger != nil {
+				s.logger.ErrorWithContext(ctx, "Expiry callback panicked", map[string]interface{}{
+					"operation":     "hitl_expiry_callback",
+					"checkpoint_id": checkpoint.CheckpointID,
+					"request_id":    checkpoint.RequestID,
+					"panic":         fmt.Sprintf("%v", r),
+					"stack":         string(debug.Stack()),
+				})
+			}
+		}
+	}()
+
+	callback(ctx, checkpoint, appliedAction)
+	return true
+}
+
+// getEffectiveRequestMode returns the request mode, using default if not set.
+func (s *RedisCheckpointStore) getEffectiveRequestMode(ctx context.Context, checkpoint *ExecutionCheckpoint) RequestMode {
+	if checkpoint.RequestMode != "" {
+		return checkpoint.RequestMode
+	}
+
+	// Use configured default
+	defaultMode := s.getDefaultRequestMode(checkpoint)
+
+	// Log warning when using default
+	if s.logger != nil {
+		s.logger.WarnWithContext(ctx, "RequestMode not set, using default behavior", map[string]interface{}{
+			"operation":            "hitl_expiry_processor",
+			"checkpoint_id":        checkpoint.CheckpointID,
+			"request_id":           checkpoint.RequestID,
+			"default_request_mode": string(defaultMode),
+		})
+	}
+
+	telemetry.AddSpanEvent(ctx, "hitl.request_mode.default_used",
+		attribute.String("request_id", checkpoint.RequestID),
+		attribute.String("checkpoint_id", checkpoint.CheckpointID),
+		attribute.String("default_request_mode", string(defaultMode)),
+	)
+
+	return defaultMode
+}
+
+// getDefaultRequestMode returns the configured default request mode.
+func (s *RedisCheckpointStore) getDefaultRequestMode(checkpoint *ExecutionCheckpoint) RequestMode {
+	// Check checkpoint's decision first
+	if checkpoint.Decision != nil && checkpoint.Decision.DefaultRequestMode != "" {
+		return checkpoint.Decision.DefaultRequestMode
+	}
+
+	// Check environment variable
+	if envMode := os.Getenv("GOMIND_HITL_DEFAULT_REQUEST_MODE"); envMode != "" {
+		switch envMode {
+		case "streaming":
+			return RequestModeStreaming
+		case "non_streaming":
+			return RequestModeNonStreaming
+		}
+	}
+
+	// Default to non_streaming
+	return RequestModeNonStreaming
+}
+
+// shouldApplyDefaultAction determines whether to apply DefaultAction or use implicit deny.
+func (s *RedisCheckpointStore) shouldApplyDefaultAction(checkpoint *ExecutionCheckpoint, mode RequestMode) bool {
+	if mode == RequestModeStreaming {
+		behavior := s.getStreamingExpiryBehavior(checkpoint)
+		return behavior == StreamingExpiryApplyDefault
+	}
+	behavior := s.getNonStreamingExpiryBehavior(checkpoint)
+	return behavior == NonStreamingExpiryApplyDefault
+}
+
+// getStreamingExpiryBehavior returns the configured streaming expiry behavior.
+func (s *RedisCheckpointStore) getStreamingExpiryBehavior(checkpoint *ExecutionCheckpoint) StreamingExpiryBehavior {
+	// Check checkpoint's decision first
+	if checkpoint.Decision != nil && checkpoint.Decision.StreamingExpiryBehavior != "" {
+		return checkpoint.Decision.StreamingExpiryBehavior
+	}
+
+	// Check environment variable
+	if envBehavior := os.Getenv("GOMIND_HITL_STREAMING_EXPIRY"); envBehavior != "" {
+		switch envBehavior {
+		case "apply_default":
+			return StreamingExpiryApplyDefault
+		case "implicit_deny":
+			return StreamingExpiryImplicitDeny
+		}
+	}
+
+	// Default to implicit_deny for streaming
+	return StreamingExpiryImplicitDeny
+}
+
+// getNonStreamingExpiryBehavior returns the configured non-streaming expiry behavior.
+func (s *RedisCheckpointStore) getNonStreamingExpiryBehavior(checkpoint *ExecutionCheckpoint) NonStreamingExpiryBehavior {
+	// Check checkpoint's decision first
+	if checkpoint.Decision != nil && checkpoint.Decision.NonStreamingExpiryBehavior != "" {
+		return checkpoint.Decision.NonStreamingExpiryBehavior
+	}
+
+	// Check environment variable
+	if envBehavior := os.Getenv("GOMIND_HITL_NON_STREAMING_EXPIRY"); envBehavior != "" {
+		switch envBehavior {
+		case "implicit_deny":
+			return NonStreamingExpiryImplicitDeny
+		case "apply_default":
+			return NonStreamingExpiryApplyDefault
+		}
+	}
+
+	// Default to apply_default for non-streaming
+	return NonStreamingExpiryApplyDefault
+}
+
+// determineExpiryAction determines what action to apply on expiry.
+// Design Decision (2026-01-24): HITL enabled = require explicit approval.
+// All checkpoints default to reject on expiry (fail-safe), except errors which abort.
+func (s *RedisCheckpointStore) determineExpiryAction(checkpoint *ExecutionCheckpoint) CommandType {
+	// Use DefaultAction from the checkpoint's decision (set by policy)
+	if checkpoint.Decision != nil && checkpoint.Decision.DefaultAction != "" {
+		return checkpoint.Decision.DefaultAction
+	}
+
+	// Fallback: HITL enabled = require explicit approval, so reject on expiry
+	switch checkpoint.InterruptPoint {
+	case InterruptPointOnError:
+		return CommandAbort // Errors require human attention
+	default:
+		return CommandReject // All other checkpoints fail-safe to reject
+	}
+}
+
+// actionToExpiredStatus converts an action to the appropriate expired status.
+func (s *RedisCheckpointStore) actionToExpiredStatus(action CommandType) CheckpointStatus {
+	switch action {
+	case CommandApprove:
+		return CheckpointStatusExpiredApproved
+	case CommandReject:
+		return CheckpointStatusExpiredRejected
+	case CommandAbort:
+		return CheckpointStatusExpiredAborted
+	default:
+		return CheckpointStatusExpiredRejected
+	}
+}
+
+// generateInstanceID creates a unique identifier for this instance.
+func generateInstanceID() string {
+	hostname, _ := os.Hostname()
+	return fmt.Sprintf("%s-%s", hostname, uuid.New().String()[:8])
+}
+
+// -----------------------------------------------------------------------------
+// Distributed Claim Mechanism (Multi-Pod Safety)
+// -----------------------------------------------------------------------------
+
+// claimExpiredCheckpoint attempts to claim exclusive processing rights for a checkpoint.
+// Returns true if this instance successfully claimed it, false if another instance claimed it.
+//
+// Uses Redis SETNX with TTL for distributed locking:
+//   - Key: {keyPrefix}:expiry:claim:{checkpointID}
+//   - Value: instanceID (unique per pod)
+//   - TTL: 30 seconds (prevents orphaned claims if pod crashes)
+//
+// This ensures that in a multi-pod deployment, only ONE pod processes each expired checkpoint.
+func (s *RedisCheckpointStore) claimExpiredCheckpoint(ctx context.Context, checkpointID string) (bool, error) {
+	claimKey := fmt.Sprintf("%s:expiry:claim:%s", s.keyPrefix, checkpointID)
+	claimTTL := 30 * time.Second
+
+	// SETNX with TTL - only succeeds if key doesn't exist
+	success, err := s.client.SetNX(ctx, claimKey, s.instanceID, claimTTL).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to claim checkpoint %s via Redis SETNX at key %s: %w (check Redis connectivity and permissions)",
+			checkpointID, claimKey, err)
+	}
+
+	if success {
+		RecordClaimSuccess()
+		if s.logger != nil {
+			s.logger.DebugWithContext(ctx, "Claimed expired checkpoint", map[string]interface{}{
+				"operation":     "hitl_expiry_claim",
+				"checkpoint_id": checkpointID,
+				"instance_id":   s.instanceID,
+			})
+		}
+	} else {
+		RecordClaimSkipped()
+	}
+
+	return success, nil
+}
+
+// releaseExpiredCheckpointClaim releases the claim after processing.
+// Only releases if this instance holds the claim (atomic check-and-delete using Lua script).
+func (s *RedisCheckpointStore) releaseExpiredCheckpointClaim(ctx context.Context, checkpointID string) error {
+	claimKey := fmt.Sprintf("%s:expiry:claim:%s", s.keyPrefix, checkpointID)
+
+	// Use Lua script for atomic check-and-delete
+	// Only delete if the value matches our instance ID
+	script := `
+		if redis.call("GET", KEYS[1]) == ARGV[1] then
+			return redis.call("DEL", KEYS[1])
+		end
+		return 0
+	`
+	_, err := s.client.Eval(ctx, script, []string{claimKey}, s.instanceID).Result()
+	if err != nil {
+		if s.logger != nil {
+			s.logger.WarnWithContext(ctx, "Failed to release checkpoint claim", map[string]interface{}{
+				"operation":     "hitl_expiry_claim_release",
+				"checkpoint_id": checkpointID,
+				"instance_id":   s.instanceID,
+				"error":         err.Error(),
+			})
+		}
+		return fmt.Errorf("failed to release claim for checkpoint %s: %w", checkpointID, err)
+	}
 	return nil
 }
 
-// Compile-time interface compliance checks
-var (
-	_ CheckpointStore = (*RedisCheckpointStore)(nil)
-	_ CheckpointStore = (*InMemoryCheckpointStore)(nil)
-)
+// Compile-time interface compliance check
+var _ CheckpointStore = (*RedisCheckpointStore)(nil)

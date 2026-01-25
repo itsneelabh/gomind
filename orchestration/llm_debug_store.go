@@ -55,7 +55,7 @@ type LLMDebugRecord struct {
 	// This enables finding all LLM calls in a HITL conversation.
 	OriginalRequestID string `json:"original_request_id,omitempty"`
 
-	// TraceID links to distributed tracing (Jaeger)
+	// TraceID links to distributed tracing backends (e.g., via OTLP)
 	TraceID string `json:"trace_id"`
 
 	// CreatedAt is when the first interaction was recorded

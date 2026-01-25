@@ -24,6 +24,15 @@ func TestMetricConstants(t *testing.T) {
 		"MetricNotificationFailed": MetricNotificationFailed,
 		"MetricApprovalLatency":    MetricApprovalLatency,
 		"MetricWebhookDuration":    MetricWebhookDuration,
+		// Expiry processor metrics
+		"MetricCheckpointExpired":  MetricCheckpointExpired,
+		"MetricExpiryScanSkipped":  MetricExpiryScanSkipped,
+		"MetricCallbackPanic":      MetricCallbackPanic,
+		"MetricExpiryScanDuration": MetricExpiryScanDuration,
+		"MetricExpiryBatchSize":    MetricExpiryBatchSize,
+		// Claim mechanism metrics (distributed concurrency)
+		"MetricClaimSuccess": MetricClaimSuccess,
+		"MetricClaimSkipped": MetricClaimSkipped,
 	}
 
 	for name, value := range constants {
@@ -324,4 +333,141 @@ func TestRecordWebhookDuration(t *testing.T) {
 			RecordWebhookDuration(tc.duration, tc.success)
 		})
 	}
+}
+
+// =============================================================================
+// Expiry Processor Metrics Tests
+// =============================================================================
+
+func TestRecordCheckpointExpired(t *testing.T) {
+	testCases := []struct {
+		name           string
+		action         string
+		requestMode    string
+		interruptPoint InterruptPoint
+	}{
+		{
+			name:           "implicit deny streaming",
+			action:         "",
+			requestMode:    "streaming",
+			interruptPoint: InterruptPointPlanGenerated,
+		},
+		{
+			name:           "approve non-streaming",
+			action:         "approve",
+			requestMode:    "non_streaming",
+			interruptPoint: InterruptPointBeforeStep,
+		},
+		{
+			name:           "reject streaming",
+			action:         "reject",
+			requestMode:    "streaming",
+			interruptPoint: InterruptPointAfterStep,
+		},
+		{
+			name:           "abort non-streaming",
+			action:         "abort",
+			requestMode:    "non_streaming",
+			interruptPoint: InterruptPointOnError,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Should not panic
+			RecordCheckpointExpired(tc.action, tc.requestMode, tc.interruptPoint)
+		})
+	}
+}
+
+func TestRecordExpiryScanDuration(t *testing.T) {
+	testCases := []struct {
+		name     string
+		duration float64
+	}{
+		{
+			name:     "fast scan",
+			duration: 0.001,
+		},
+		{
+			name:     "normal scan",
+			duration: 0.5,
+		},
+		{
+			name:     "slow scan",
+			duration: 5.0,
+		},
+		{
+			name:     "zero duration",
+			duration: 0.0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Should not panic
+			RecordExpiryScanDuration(tc.duration)
+		})
+	}
+}
+
+func TestRecordExpiryBatchSize(t *testing.T) {
+	testCases := []struct {
+		name  string
+		count int
+	}{
+		{
+			name:  "no checkpoints",
+			count: 0,
+		},
+		{
+			name:  "single checkpoint",
+			count: 1,
+		},
+		{
+			name:  "small batch",
+			count: 10,
+		},
+		{
+			name:  "large batch",
+			count: 100,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Should not panic
+			RecordExpiryBatchSize(tc.count)
+		})
+	}
+}
+
+func TestRecordExpiryScanSkipped(t *testing.T) {
+	reasons := []string{
+		"read_pending_index_failed",
+		"context_canceled",
+		"store_unavailable",
+	}
+
+	for _, reason := range reasons {
+		t.Run(reason, func(t *testing.T) {
+			// Should not panic
+			RecordExpiryScanSkipped(reason)
+		})
+	}
+}
+
+func TestRecordCallbackPanic(t *testing.T) {
+	// Should not panic
+	RecordCallbackPanic()
+}
+
+func TestRecordClaimSuccess(t *testing.T) {
+	// Should not panic
+	RecordClaimSuccess()
+}
+
+func TestRecordClaimSkipped(t *testing.T) {
+	// Should not panic
+	RecordClaimSkipped()
 }
