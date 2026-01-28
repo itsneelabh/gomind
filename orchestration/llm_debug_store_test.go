@@ -2,9 +2,12 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/itsneelabh/gomind/core"
 )
 
 // =============================================================================
@@ -494,6 +497,337 @@ func TestContextualReResolver_recordDebugInteraction_WithStore(t *testing.T) {
 	if record.Interactions[0].Attempt != 2 {
 		t.Errorf("Expected attempt 2, got %d", record.Interactions[0].Attempt)
 	}
+}
+
+// =============================================================================
+// StepID Propagation Tests (Phase 5b: DAG Visualization)
+// =============================================================================
+
+// TestMicroResolver_ResolveParameters_StepID_Propagation verifies that StepID
+// is correctly propagated to LLMInteraction when MicroResolver.ResolveParameters is called.
+// This is critical for DAG visualization to associate LLM calls with execution steps.
+func TestMicroResolver_ResolveParameters_StepID_Propagation(t *testing.T) {
+	// Create mock AI client that returns valid JSON for micro-resolution
+	aiClient := &stepIDTestMockAI{
+		response: `{"lat": 48.85}`,
+	}
+	resolver := NewMicroResolver(aiClient, nil)
+
+	store := NewMemoryLLMDebugStore()
+	resolver.SetLLMDebugStore(store)
+
+	// Source data with different name than target (triggers micro-resolution)
+	sourceData := map[string]interface{}{"latitude": 48.85}
+	targetCap := &EnhancedCapability{
+		Name: "get_weather",
+		Parameters: []Parameter{
+			{Name: "lat", Type: "number", Required: true},
+		},
+	}
+
+	// Call with specific stepID
+	expectedStepID := "step-5-get_weather"
+	_, err := resolver.ResolveParameters(context.Background(), sourceData, targetCap, "extract lat", expectedStepID)
+	if err != nil {
+		t.Fatalf("ResolveParameters failed: %v", err)
+	}
+
+	// Wait for async recording using Shutdown (fast, no Sleep)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := resolver.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// Get the recorded interaction
+	summaries, err := store.ListRecent(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("ListRecent failed: %v", err)
+	}
+	if len(summaries) == 0 {
+		t.Fatal("No interactions recorded")
+	}
+
+	record, err := store.GetRecord(context.Background(), summaries[0].RequestID)
+	if err != nil {
+		t.Fatalf("GetRecord failed: %v", err)
+	}
+
+	// Verify StepID was propagated
+	if len(record.Interactions) == 0 {
+		t.Fatal("No interactions in record")
+	}
+
+	if record.Interactions[0].StepID != expectedStepID {
+		t.Errorf("Expected StepID '%s', got '%s'", expectedStepID, record.Interactions[0].StepID)
+	}
+
+	// Also verify type is correct
+	if record.Interactions[0].Type != "micro_resolution" {
+		t.Errorf("Expected type 'micro_resolution', got '%s'", record.Interactions[0].Type)
+	}
+}
+
+// TestContextualReResolver_ReResolve_StepID_Propagation verifies that StepID
+// from ExecutionContext is correctly propagated to LLMInteraction.
+func TestContextualReResolver_ReResolve_StepID_Propagation(t *testing.T) {
+	// Create mock AI client that returns valid re-resolution response
+	aiClient := &stepIDTestMockAI{
+		response: `{"should_retry": true, "analysis": "Fixed parameter", "corrected_parameters": {"symbol": "AAPL"}}`,
+	}
+	resolver := NewContextualReResolver(aiClient, nil)
+
+	store := NewMemoryLLMDebugStore()
+	resolver.SetLLMDebugStore(store)
+
+	// Create execution context with specific StepID
+	expectedStepID := "step-3-get_stock_quote"
+	execCtx := &ExecutionContext{
+		UserQuery:  "Get stock price for Apple",
+		SourceData: map[string]interface{}{"company": "Apple Inc."},
+		StepID:     expectedStepID,
+		Capability: &EnhancedCapability{
+			Name: "get_stock_quote",
+			Parameters: []Parameter{
+				{Name: "symbol", Type: "string", Required: true, Description: "Stock ticker symbol"},
+			},
+		},
+		AttemptedParams: map[string]interface{}{"symbol": "Apple"},
+		ErrorResponse:   "Invalid symbol: Apple",
+		HTTPStatus:      400,
+		RetryCount:      0,
+	}
+
+	// Call ReResolve
+	_, err := resolver.ReResolve(context.Background(), execCtx)
+	if err != nil {
+		t.Fatalf("ReResolve failed: %v", err)
+	}
+
+	// Wait for async recording using Shutdown (fast, no Sleep)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := resolver.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// Get the recorded interaction
+	summaries, err := store.ListRecent(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("ListRecent failed: %v", err)
+	}
+	if len(summaries) == 0 {
+		t.Fatal("No interactions recorded")
+	}
+
+	record, err := store.GetRecord(context.Background(), summaries[0].RequestID)
+	if err != nil {
+		t.Fatalf("GetRecord failed: %v", err)
+	}
+
+	// Verify StepID was propagated
+	if len(record.Interactions) == 0 {
+		t.Fatal("No interactions in record")
+	}
+
+	if record.Interactions[0].StepID != expectedStepID {
+		t.Errorf("Expected StepID '%s', got '%s'", expectedStepID, record.Interactions[0].StepID)
+	}
+
+	// Also verify type is correct
+	if record.Interactions[0].Type != "semantic_retry" {
+		t.Errorf("Expected type 'semantic_retry', got '%s'", record.Interactions[0].Type)
+	}
+}
+
+// TestMicroResolver_ResolveParameters_EmptyStepID verifies that empty StepID
+// is correctly handled (for orchestrator-level calls).
+func TestMicroResolver_ResolveParameters_EmptyStepID(t *testing.T) {
+	aiClient := &stepIDTestMockAI{
+		response: `{"lat": 48.85}`,
+	}
+	resolver := NewMicroResolver(aiClient, nil)
+
+	store := NewMemoryLLMDebugStore()
+	resolver.SetLLMDebugStore(store)
+
+	sourceData := map[string]interface{}{"latitude": 48.85}
+	targetCap := &EnhancedCapability{
+		Name: "get_weather",
+		Parameters: []Parameter{
+			{Name: "lat", Type: "number", Required: true},
+		},
+	}
+
+	// Call with empty stepID (orchestrator-level call)
+	_, err := resolver.ResolveParameters(context.Background(), sourceData, targetCap, "extract lat", "")
+	if err != nil {
+		t.Fatalf("ResolveParameters failed: %v", err)
+	}
+
+	// Wait for async recording
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := resolver.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// Get the recorded interaction
+	summaries, _ := store.ListRecent(context.Background(), 1)
+	if len(summaries) == 0 {
+		t.Fatal("No interactions recorded")
+	}
+
+	record, _ := store.GetRecord(context.Background(), summaries[0].RequestID)
+
+	// Verify StepID is empty (as expected for orchestrator-level calls)
+	if record.Interactions[0].StepID != "" {
+		t.Errorf("Expected empty StepID, got '%s'", record.Interactions[0].StepID)
+	}
+}
+
+// TestMicroResolver_ResolveParameters_StepID_OnError verifies that StepID
+// is correctly propagated even when the LLM call fails.
+func TestMicroResolver_ResolveParameters_StepID_OnError(t *testing.T) {
+	// Create mock AI client that returns an error
+	aiClient := &stepIDTestMockAI{
+		err: errors.New("LLM service unavailable"),
+	}
+	resolver := NewMicroResolver(aiClient, nil)
+
+	store := NewMemoryLLMDebugStore()
+	resolver.SetLLMDebugStore(store)
+
+	sourceData := map[string]interface{}{"latitude": 48.85}
+	targetCap := &EnhancedCapability{
+		Name: "get_weather",
+		Parameters: []Parameter{
+			{Name: "lat", Type: "number", Required: true},
+		},
+	}
+
+	// Call with specific stepID - should fail but still record
+	expectedStepID := "step-5-get_weather"
+	_, err := resolver.ResolveParameters(context.Background(), sourceData, targetCap, "extract lat", expectedStepID)
+
+	// Expect error from LLM
+	if err == nil {
+		t.Fatal("Expected error from ResolveParameters")
+	}
+
+	// Wait for async recording
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := resolver.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// Get the recorded interaction
+	summaries, _ := store.ListRecent(context.Background(), 1)
+	if len(summaries) == 0 {
+		t.Fatal("No interactions recorded")
+	}
+
+	record, _ := store.GetRecord(context.Background(), summaries[0].RequestID)
+
+	// Verify StepID was still propagated in error case
+	if record.Interactions[0].StepID != expectedStepID {
+		t.Errorf("Expected StepID '%s', got '%s'", expectedStepID, record.Interactions[0].StepID)
+	}
+
+	// Verify it's marked as failed
+	if record.Interactions[0].Success {
+		t.Error("Expected Success=false for error case")
+	}
+
+	// Verify error is recorded
+	if record.Interactions[0].Error == "" {
+		t.Error("Expected error message to be recorded")
+	}
+}
+
+// TestContextualReResolver_ReResolve_StepID_OnError verifies that StepID
+// is correctly propagated even when the LLM call fails.
+func TestContextualReResolver_ReResolve_StepID_OnError(t *testing.T) {
+	// Create mock AI client that returns an error
+	aiClient := &stepIDTestMockAI{
+		err: errors.New("LLM service unavailable"),
+	}
+	resolver := NewContextualReResolver(aiClient, nil)
+
+	store := NewMemoryLLMDebugStore()
+	resolver.SetLLMDebugStore(store)
+
+	expectedStepID := "step-3-get_stock_quote"
+	execCtx := &ExecutionContext{
+		UserQuery:  "Get stock price for Apple",
+		SourceData: map[string]interface{}{"company": "Apple Inc."},
+		StepID:     expectedStepID,
+		Capability: &EnhancedCapability{
+			Name: "get_stock_quote",
+			Parameters: []Parameter{
+				{Name: "symbol", Type: "string", Required: true},
+			},
+		},
+		AttemptedParams: map[string]interface{}{"symbol": "Apple"},
+		ErrorResponse:   "Invalid symbol",
+		HTTPStatus:      400,
+	}
+
+	// Call ReResolve - should fail but still record
+	_, err := resolver.ReResolve(context.Background(), execCtx)
+
+	// Expect error from LLM
+	if err == nil {
+		t.Fatal("Expected error from ReResolve")
+	}
+
+	// Wait for async recording
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := resolver.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+
+	// Get the recorded interaction
+	summaries, _ := store.ListRecent(context.Background(), 1)
+	if len(summaries) == 0 {
+		t.Fatal("No interactions recorded")
+	}
+
+	record, _ := store.GetRecord(context.Background(), summaries[0].RequestID)
+
+	// Verify StepID was still propagated in error case
+	if record.Interactions[0].StepID != expectedStepID {
+		t.Errorf("Expected StepID '%s', got '%s'", expectedStepID, record.Interactions[0].StepID)
+	}
+
+	// Verify it's marked as failed
+	if record.Interactions[0].Success {
+		t.Error("Expected Success=false for error case")
+	}
+}
+
+// stepIDTestMockAI is a minimal mock for StepID propagation tests
+type stepIDTestMockAI struct {
+	response string
+	err      error // Optional error to simulate LLM failures
+}
+
+func (m *stepIDTestMockAI) GenerateResponse(ctx context.Context, prompt string, opts *core.AIOptions) (*core.AIResponse, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &core.AIResponse{
+		Content:  m.response,
+		Model:    "test-model",
+		Provider: "test-provider",
+		Usage: core.TokenUsage{
+			PromptTokens:     10,
+			CompletionTokens: 5,
+			TotalTokens:      15,
+		},
+	}, nil
 }
 
 // =============================================================================

@@ -1170,3 +1170,69 @@ func TestOrchestrator_SkipsLLMPlanGenerationWhenPlanProvided(t *testing.T) {
 		t.Error("LLM SHOULD be called for plan generation when no plan override is provided")
 	}
 }
+
+// TestGetAgentName tests the getAgentName helper method fallback chain.
+// Priority: config.Name > config.RequestIDPrefix > "orchestrator"
+// Note: config.Name can be set via GOMIND_AGENT_NAME env var in DefaultConfig()
+func TestGetAgentName(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *OrchestratorConfig
+		expected string
+	}{
+		{
+			name:     "nil config returns default",
+			config:   nil,
+			expected: "orchestrator",
+		},
+		{
+			name:     "empty config returns default",
+			config:   &OrchestratorConfig{},
+			expected: "orchestrator",
+		},
+		{
+			name: "only RequestIDPrefix set",
+			config: &OrchestratorConfig{
+				RequestIDPrefix: "awhl",
+			},
+			expected: "awhl",
+		},
+		{
+			name: "only Name set",
+			config: &OrchestratorConfig{
+				Name: "travel-agent",
+			},
+			expected: "travel-agent",
+		},
+		{
+			name: "both Name and RequestIDPrefix set - Name wins",
+			config: &OrchestratorConfig{
+				Name:            "my-agent",
+				RequestIDPrefix: "prefix",
+			},
+			expected: "my-agent",
+		},
+		{
+			name: "empty Name falls back to RequestIDPrefix",
+			config: &OrchestratorConfig{
+				Name:            "",
+				RequestIDPrefix: "fallback-prefix",
+			},
+			expected: "fallback-prefix",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create orchestrator with the test config
+			o := &AIOrchestrator{
+				config: tt.config,
+			}
+
+			got := o.getAgentName()
+			if got != tt.expected {
+				t.Errorf("getAgentName() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}

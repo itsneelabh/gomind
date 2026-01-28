@@ -171,6 +171,7 @@ Unlike frameworks that evolved from notebooks and experiments, GoMind was archit
 | **Circuit Breakers** | Native support | External libraries needed |
 | **Service Discovery** | Redis-based, automatic | Manual configuration |
 | **Semantic Retry** | LLM computes corrected params | Manual error handling |
+| **Human-in-the-Loop** | Built-in approval checkpoints | Custom implementation |
 
 ### 🎬 See It In Action: Dynamic Tool Selection
 
@@ -921,7 +922,37 @@ err := cb.ExecuteWithTimeout(ctx, 5*time.Second, func() error {
 
 → See [agent-with-resilience](examples/agent-with-resilience/) for per-tool circuit breakers with AI-powered error correction
 
-### 5. Know What Your Agents Are Doing (Without the Hassle)
+### 5. Human-in-the-Loop Approval Checkpoints
+
+**The Problem**: Some agent operations are too risky to run automatically. Payment processing, data deletion, or sensitive API calls need human approval.
+
+**The Solution**: Built-in HITL (Human-in-the-Loop) support pauses execution at critical points and waits for approval:
+
+```go
+// Configure which operations require approval
+policy := orchestration.NewRuleBasedPolicy(orchestration.HITLConfig{
+    RequirePlanApproval:      true,  // Approve AI-generated plans before execution
+    SensitiveCapabilities:    []string{"transfer_funds", "delete_account"},
+    SensitiveAgents:          []string{"payment-service"},
+    DefaultTimeout:           5 * time.Minute,
+})
+
+// The orchestrator pauses and notifies via webhook when approval is needed
+controller := orchestration.NewInterruptController(policy, checkpointStore, handler)
+orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient,
+    orchestration.WithHITL(controller),
+)
+```
+
+**What Happens**:
+1. Agent generates execution plan → pauses for approval
+2. Webhook notifies your approval system (Slack, email, dashboard)
+3. Human approves/rejects via API → execution continues or aborts
+4. Timeout handling with configurable auto-approve/reject
+
+→ See [docs/HUMAN_IN_THE_LOOP_USER_GUIDE.md](docs/HUMAN_IN_THE_LOOP_USER_GUIDE.md) for complete HITL documentation
+
+### 6. Know What Your Agents Are Doing (Without the Hassle)
 
 **The Problem**: You need metrics and tracing to debug issues, but setting up Prometheus/Grafana/OpenTelemetry is complex.
 

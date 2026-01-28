@@ -816,6 +816,26 @@ func (t *TravelChatAgent) ProcessWithStreaming(
 }
 ```
 
+### Adding Human Approval for Sensitive Operations
+
+For chat agents handling sensitive operations (payments, data deletion, account changes), you can add Human-in-the-Loop (HITL) approval checkpoints. When configured, the orchestrator pauses before executing sensitive tools and waits for human approval via your approval system (Slack, dashboard, etc.).
+
+```go
+// Add HITL to your orchestrator configuration
+controller := orchestration.NewInterruptController(policy, checkpointStore, handler)
+orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient,
+    orchestration.WithHITL(controller),
+)
+
+// When a sensitive operation is detected, the orchestrator:
+// 1. Creates a checkpoint and pauses execution
+// 2. Sends webhook to your approval system
+// 3. Waits for approve/reject command
+// 4. Continues or aborts based on the response
+```
+
+→ See [Human-in-the-Loop User Guide](HUMAN_IN_THE_LOOP_USER_GUIDE.md) for complete HITL setup and configuration
+
 ---
 
 ## Putting It All Together
@@ -1628,6 +1648,7 @@ Before deploying, verify:
 
 - **[LOGGING_IMPLEMENTATION_GUIDE.md](./LOGGING_IMPLEMENTATION_GUIDE.md)** - Deep dive into logging with trace correlation
 - **[DISTRIBUTED_TRACING_GUIDE.md](./DISTRIBUTED_TRACING_GUIDE.md)** - Setting up distributed tracing
+- **[HUMAN_IN_THE_LOOP_USER_GUIDE.md](./HUMAN_IN_THE_LOOP_USER_GUIDE.md)** - Adding approval workflows for sensitive operations
 - **[orchestration/README.md](../orchestration/README.md)** - Orchestration module documentation
 - **[ai/README.md](../ai/README.md)** - AI module with streaming support
 - **[examples/travel-chat-agent/](../examples/travel-chat-agent/)** - The complete working example

@@ -237,11 +237,54 @@ func CreateOrchestrator(config *OrchestratorConfig, deps OrchestratorDependencie
 		}
 	}
 
+	// Set up execution store if enabled
+	// Auto-configures from environment (same pattern as LLM Debug Store).
+	// Enable via GOMIND_EXECUTION_DEBUG_STORE_ENABLED=true
+	if config.ExecutionStore.Enabled {
+		if config.ExecutionStoreBackend != nil {
+			// Custom backend provided - use it
+			orchestrator.SetExecutionStore(config.ExecutionStoreBackend)
+			factoryLogger.Info("ExecutionStore configured with custom backend", map[string]interface{}{
+				"operation": "execution_store_initialization",
+				"ttl":       config.ExecutionStore.TTL.String(),
+				"error_ttl": config.ExecutionStore.ErrorTTL.String(),
+			})
+		} else {
+			// Auto-configure Redis store from environment (same pattern as LLM Debug Store)
+			store, err := NewRedisExecutionDebugStore(
+				WithExecutionDebugRedisDB(core.RedisDBExecutionDebug),
+				WithExecutionDebugLogger(deps.Logger),
+				WithExecutionDebugTTL(config.ExecutionStore.TTL),
+				WithExecutionDebugErrorTTL(config.ExecutionStore.ErrorTTL),
+				WithExecutionDebugKeyPrefix(config.ExecutionStore.KeyPrefix),
+			)
+			if err != nil {
+				// Resilient behavior - use NoOp store if Redis unavailable
+				factoryLogger.Warn("Failed to initialize Redis execution debug store, using NoOp", map[string]interface{}{
+					"operation": "execution_debug_store_initialization",
+					"error":     err.Error(),
+					"hint":      "Set REDIS_URL or GOMIND_REDIS_URL, or disable via GOMIND_EXECUTION_DEBUG_STORE_ENABLED=false",
+				})
+				orchestrator.SetExecutionStore(NewNoOpExecutionStore())
+			} else {
+				orchestrator.SetExecutionStore(store)
+				factoryLogger.Info("Redis execution debug store initialized", map[string]interface{}{
+					"operation":  "execution_debug_store_initialization",
+					"redis_db":   core.RedisDBExecutionDebug,
+					"key_prefix": config.ExecutionStore.KeyPrefix,
+					"ttl":        config.ExecutionStore.TTL.String(),
+					"error_ttl":  config.ExecutionStore.ErrorTTL.String(),
+				})
+			}
+		}
+	}
+
 	factoryLogger.Info("Orchestrator created successfully", map[string]interface{}{
-		"operation":      "orchestrator_creation_complete",
-		"success":        true,
-		"error_analyzer": deps.EnableErrorAnalyzer,
-		"llm_debug":      config.LLMDebug.Enabled,
+		"operation":       "orchestrator_creation_complete",
+		"success":         true,
+		"error_analyzer":  deps.EnableErrorAnalyzer,
+		"llm_debug":       config.LLMDebug.Enabled,
+		"execution_store": config.ExecutionStore.Enabled,
 	})
 
 	return orchestrator, nil
@@ -372,6 +415,45 @@ func WithLLMDebugTTL(ttl time.Duration) OrchestratorOption {
 func WithLLMDebugErrorTTL(ttl time.Duration) OrchestratorOption {
 	return func(c *OrchestratorConfig) {
 		c.LLMDebug.ErrorTTL = ttl
+	}
+}
+
+// WithExecutionStore explicitly sets the execution store implementation.
+// Use this to inject a StorageProvider-backed store for DAG visualization.
+// Setting a store automatically enables execution storage (same pattern as WithLLMDebugStore).
+//
+// Example:
+//
+//	provider := NewRedisStorageProvider(redisClient) // Application code
+//	store := orchestration.NewExecutionStoreWithProvider(provider, config, logger)
+//	orchestrator, _ := orchestration.NewOrchestrator(deps, orchestration.WithExecutionStore(store))
+func WithExecutionStore(store ExecutionStore) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.ExecutionStore.Enabled = true // Auto-enable when store is provided
+		c.ExecutionStoreBackend = store
+	}
+}
+
+// WithExecutionStoreProvider is a convenience function that creates an ExecutionStore
+// from a StorageProvider. The application provides the StorageProvider implementation.
+func WithExecutionStoreProvider(provider StorageProvider, logger core.Logger) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.ExecutionStore.Enabled = true // Auto-enable when provider is provided
+		c.ExecutionStoreBackend = NewExecutionStoreWithProvider(provider, c.ExecutionStore, logger)
+	}
+}
+
+// WithExecutionStoreTTL sets custom TTL for successful execution records.
+func WithExecutionStoreTTL(ttl time.Duration) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.ExecutionStore.TTL = ttl
+	}
+}
+
+// WithExecutionStoreErrorTTL sets custom TTL for error execution records.
+func WithExecutionStoreErrorTTL(ttl time.Duration) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.ExecutionStore.ErrorTTL = ttl
 	}
 }
 

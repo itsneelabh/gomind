@@ -87,12 +87,16 @@ func NewHybridResolver(aiClient core.AIClient, logger core.Logger, opts ...Hybri
 //  2. If required parameters remain unmapped → use LLM micro-resolution
 //  3. LLM handles all semantic understanding (e.g., "latitude" → "lat")
 //
+// The stepID parameter associates any LLM calls (micro_resolution) with the
+// execution step for DAG visualization. Pass empty string if not step-specific.
+//
 // This ensures domain-agnostic behavior while avoiding unnecessary LLM calls
 // for trivial parameter mappings.
 func (h *HybridResolver) ResolveParameters(
 	ctx context.Context,
 	dependencyResults map[string]*StepResult,
 	targetCapability *EnhancedCapability,
+	stepID string,
 ) (map[string]interface{}, error) {
 	// Collect source data from all dependencies
 	sourceData := h.collectSourceData(dependencyResults)
@@ -159,7 +163,7 @@ func (h *HybridResolver) ResolveParameters(
 	})
 
 	hint := fmt.Sprintf("Need to extract values for required parameters: %v", unmapped)
-	resolved, err := h.microResolver.ResolveParameters(ctx, sourceData, targetCapability, hint)
+	resolved, err := h.microResolver.ResolveParameters(ctx, sourceData, targetCapability, hint, stepID)
 	if err != nil {
 		// Micro-resolution failed, return what we have
 		h.logWarn("Micro-resolution failed, using partial auto-wired results", map[string]interface{}{
@@ -248,12 +252,16 @@ func (h *HybridResolver) SetLogger(logger core.Logger) {
 // Example: template "{{step-2.response.data.country.currency}}" fails because
 // geocoding returns country:"France" (string), not country:{currency:"EUR"}.
 // This method can infer "EUR" from "France" using LLM.
+//
+// The stepID parameter associates any LLM calls with the execution step for
+// DAG visualization. Pass empty string if not step-specific.
 func (h *HybridResolver) ResolveSemanticValue(
 	ctx context.Context,
 	sourceData map[string]interface{},
 	paramName string,
 	paramHint string,
 	expectedType string,
+	stepID string,
 ) (interface{}, error) {
 	if h.microResolver == nil || !h.enableMicroResolution {
 		return nil, fmt.Errorf("micro-resolution not available")
@@ -278,7 +286,7 @@ func (h *HybridResolver) ResolveSemanticValue(
 		"source_keys": getMapKeys(sourceData),
 	})
 
-	resolved, err := h.microResolver.ResolveParameters(ctx, sourceData, targetCap, paramHint)
+	resolved, err := h.microResolver.ResolveParameters(ctx, sourceData, targetCap, paramHint, stepID)
 	if err != nil {
 		h.logWarn("Semantic value resolution failed", map[string]interface{}{
 			"error":      err.Error(),

@@ -102,6 +102,11 @@ type LLMInteraction struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"` // Error message if failed
 	Attempt int    `json:"attempt"`         // Attempt number (for retries)
+
+	// StepID associates this LLM call with a specific execution step.
+	// Populated for: micro_resolution, semantic_retry (step-specific calls)
+	// Empty for: plan_generation, correction, synthesis, tiered_selection (orchestrator-level)
+	StepID string `json:"step_id,omitempty"`
 }
 
 // LLMDebugRecordSummary is a lightweight version for listing.

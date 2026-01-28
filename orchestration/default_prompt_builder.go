@@ -404,9 +404,6 @@ LEGAL DOMAIN REQUIREMENTS:
 // buildPersonaSection generates the persona statement for the prompt.
 // If SystemInstructions is configured, uses it as the primary identity.
 // Otherwise, uses the default orchestrator identity.
-//
-// This follows the pattern established by LangChain, AutoGen, and OpenAI
-// where a single field defines the agent's core behavioral context.
 func (d *DefaultPromptBuilder) buildPersonaSection() string {
 	if d.config.SystemInstructions != "" {
 		// Developer's persona is primary identity, orchestrator role is functional

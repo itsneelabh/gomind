@@ -198,6 +198,12 @@ type AIOrchestrator struct {
 	// debugSeqID provides fallback correlation IDs when TraceID is not available
 	debugSeqID atomic.Uint64
 
+	// Execution Store for DAG visualization
+	// When enabled, stores plan + execution results for debugging
+	executionStore ExecutionStore
+	// executionWg tracks in-flight execution storage goroutines for graceful shutdown
+	executionWg sync.WaitGroup
+
 	// Observability (follows framework design principles)
 	telemetry core.Telemetry // For metrics and tracing
 	logger    core.Logger    // For structured logging
@@ -431,6 +437,125 @@ func (o *AIOrchestrator) GetLLMDebugStore() LLMDebugStore {
 	return o.debugStore
 }
 
+// SetExecutionStore sets the execution store for DAG visualization.
+// Per FRAMEWORK_DESIGN_PRINCIPLES.md, nil values are safely ignored.
+func (o *AIOrchestrator) SetExecutionStore(store ExecutionStore) {
+	if store == nil {
+		return // Safe default: ignore nil
+	}
+	o.executionStore = store
+
+	if o.logger != nil {
+		o.logger.Info("Execution store configured", map[string]interface{}{
+			"operation": "set_execution_store",
+		})
+	}
+}
+
+// GetExecutionStore returns the configured execution store (for API handlers).
+func (o *AIOrchestrator) GetExecutionStore() ExecutionStore {
+	return o.executionStore
+}
+
+// getAgentName returns the agent name for DAG visualization.
+// Priority: config.Name > config.RequestIDPrefix > "orchestrator"
+// This is used when storing executions to identify the orchestrator agent.
+func (o *AIOrchestrator) getAgentName() string {
+	if o.config == nil {
+		return "orchestrator"
+	}
+	if o.config.Name != "" {
+		return o.config.Name
+	}
+	if o.config.RequestIDPrefix != "" {
+		return o.config.RequestIDPrefix
+	}
+	return "orchestrator"
+}
+
+// storeExecutionAsync stores execution data asynchronously for DAG visualization.
+// This helper is used for both normal completions and HITL interrupts.
+// For interrupted executions, pass result=nil and checkpoint!=nil.
+// For normal completions, pass the result and checkpoint=nil.
+// Runs asynchronously to avoid blocking orchestration. Errors are logged, not propagated.
+// Uses WaitGroup to track in-flight recordings for graceful shutdown.
+func (o *AIOrchestrator) storeExecutionAsync(
+	ctx context.Context,
+	request string,
+	requestID string,
+	plan *RoutingPlan,
+	result *ExecutionResult,
+	checkpoint *ExecutionCheckpoint,
+) {
+	// Capture store reference to avoid TOCTOU race condition
+	store := o.executionStore
+	if store == nil {
+		return
+	}
+
+	// Capture timestamp now, not when goroutine runs (avoids timing drift)
+	createdAt := time.Now()
+
+	// Extract baggage BEFORE spawning goroutine to preserve correlation data.
+	// The parent context may be canceled after the HTTP handler returns,
+	// but we still want the async recording to complete.
+	bag := telemetry.GetBaggage(ctx)
+
+	// Capture agentName now (accesses o.config which should be immutable)
+	agentName := o.getAgentName()
+
+	o.executionWg.Add(1)
+	go func() {
+		defer o.executionWg.Done()
+
+		storeCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+
+		// Extract trace correlation from baggage
+		traceID := ""
+		originalRequestID := requestID
+		if bag != nil {
+			if tid, ok := bag["trace_id"]; ok {
+				traceID = tid
+			}
+			if origID, ok := bag["original_request_id"]; ok && origID != "" {
+				originalRequestID = origID
+			}
+		}
+
+		stored := &StoredExecution{
+			RequestID:         requestID,
+			OriginalRequestID: originalRequestID,
+			TraceID:           traceID,
+			AgentName:         agentName,
+			OriginalRequest:   request,
+			Plan:              plan,
+			Result:            result,
+			Interrupted:       checkpoint != nil,
+			Checkpoint:        checkpoint,
+			CreatedAt:         createdAt,
+		}
+
+		if storeErr := store.Store(storeCtx, stored); storeErr != nil {
+			if o.logger != nil {
+				logFields := map[string]interface{}{
+					"operation":   "execution_store",
+					"request_id":  requestID,
+					"interrupted": checkpoint != nil,
+					"error":       storeErr.Error(),
+				}
+				if traceID != "" {
+					logFields["trace_id"] = traceID
+				}
+				if checkpoint != nil && checkpoint.CheckpointID != "" {
+					logFields["checkpoint_id"] = checkpoint.CheckpointID
+				}
+				o.logger.Warn("Failed to store execution for DAG visualization", logFields)
+			}
+		}
+	}()
+}
+
 // SetInterruptController sets the HITL interrupt controller.
 // When set, enables human oversight at plan/step execution points.
 // The controller is propagated to the executor for step-level checks.
@@ -467,6 +592,12 @@ func (o *AIOrchestrator) recordDebugInteraction(ctx context.Context, requestID s
 		return
 	}
 
+	// Extract baggage BEFORE spawning goroutine to preserve correlation data.
+	// This is needed because the parent context may be canceled after the HTTP
+	// handler returns, but we still want the async recording to complete.
+	// Same pattern as execution store (lines 967-979).
+	bag := telemetry.GetBaggage(ctx)
+
 	// Track this goroutine for graceful shutdown
 	o.debugWg.Add(1)
 
@@ -474,11 +605,23 @@ func (o *AIOrchestrator) recordDebugInteraction(ctx context.Context, requestID s
 	go func() {
 		defer o.debugWg.Done()
 
-		// Use original context with timeout to preserve baggage (original_request_id).
-		// This allows LLM debug records from HITL resume requests to be correlated
-		// with the original conversation's request_id.
-		recordCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		// Use background context with timeout to avoid inheriting request cancellation.
+		// This ensures recordings complete even after HTTP handler returns.
+		// Same pattern as execution store (line 967).
+		// 1 second is sufficient for Redis (normally <100ms), avoids goroutine accumulation under load.
+		recordCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
+
+		// Re-inject baggage for HITL correlation (original_request_id).
+		// This allows LLM debug records from HITL resume requests to be
+		// correlated with the original conversation's request_id.
+		if bag != nil {
+			pairs := make([]string, 0, len(bag)*2)
+			for k, v := range bag {
+				pairs = append(pairs, k, v)
+			}
+			recordCtx = telemetry.WithBaggage(recordCtx, pairs...)
+		}
 
 		if err := o.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {
 			// Log but don't fail - debug is observability, not critical path
@@ -493,16 +636,17 @@ func (o *AIOrchestrator) recordDebugInteraction(ctx context.Context, requestID s
 	}()
 }
 
-// Shutdown gracefully shuts down the orchestrator, waiting for pending debug recordings.
+// Shutdown gracefully shuts down the orchestrator, waiting for pending recordings.
 // This follows FRAMEWORK_DESIGN_PRINCIPLES.md: Component Lifecycle Rules.
 func (o *AIOrchestrator) Shutdown(ctx context.Context) error {
 	// Stop background operations first
 	o.cancel()
 
-	// Wait for pending debug recordings with timeout
+	// Wait for pending debug recordings AND execution storage with timeout
 	done := make(chan struct{})
 	go func() {
 		o.debugWg.Wait()
+		o.executionWg.Wait() // Also wait for execution store goroutines
 		close(done)
 	}()
 
@@ -516,7 +660,7 @@ func (o *AIOrchestrator) Shutdown(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		if o.logger != nil {
-			o.logger.Warn("Orchestrator shutdown timed out, some debug recordings may be lost", map[string]interface{}{
+			o.logger.Warn("Orchestrator shutdown timed out, some recordings may be lost", map[string]interface{}{
 				"operation": "shutdown",
 				"error":     ctx.Err().Error(),
 			})
@@ -900,6 +1044,10 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 				span.SetAttribute("hitl.interrupted", true)
 				span.SetAttribute("hitl.checkpoint_id", checkpoint.CheckpointID)
 			}
+
+			// Store interrupted execution for DAG visualization
+			o.storeExecutionAsync(ctx, request, requestID, plan, nil, checkpoint)
+
 			return nil, &ErrInterrupted{
 				CheckpointID: checkpoint.CheckpointID,
 				Checkpoint:   checkpoint,
@@ -909,11 +1057,12 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 
 	// Step 3: Execute the plan
 	result, err := o.executor.Execute(ctx, plan)
+
 	if err != nil {
 		// Check for step-level HITL interrupt - propagate directly without wrapping
 		if IsInterrupted(err) {
+			checkpoint := GetCheckpoint(err)
 			if o.logger != nil {
-				checkpoint := GetCheckpoint(err)
 				logFields := map[string]interface{}{
 					"operation":     "plan_execution_hitl_interrupt",
 					"request_id":    requestID,
@@ -925,7 +1074,6 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 				o.logger.InfoWithContext(ctx, "Step-level HITL interrupt, returning to agent", logFields)
 			}
 			// Add span event and attributes for step-level HITL (visible in distributed traces)
-			checkpoint := GetCheckpoint(err)
 			if checkpoint != nil {
 				telemetry.AddSpanEvent(ctx, "hitl.step_interrupt.orchestrator_propagating",
 					attribute.String("checkpoint_id", GetCheckpointID(err)),
@@ -935,8 +1083,12 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 				span.SetAttribute("hitl.checkpoint_id", GetCheckpointID(err))
 				span.SetAttribute("hitl.interrupt_point", string(checkpoint.InterruptPoint))
 			}
+			// Store interrupted execution for DAG visualization (with checkpoint for proper status)
+			o.storeExecutionAsync(ctx, request, requestID, plan, result, checkpoint)
 			return nil, err // Return ErrInterrupted directly
 		}
+		// Store failed execution for DAG visualization (non-interrupt failure)
+		o.storeExecutionAsync(ctx, request, requestID, plan, result, nil)
 		if o.logger != nil {
 			o.logger.ErrorWithContext(ctx, "Plan execution failed", map[string]interface{}{
 				"operation":   "plan_execution",
@@ -949,6 +1101,9 @@ func (o *AIOrchestrator) ProcessRequest(ctx context.Context, request string, met
 		o.updateMetrics(time.Since(startTime), false)
 		return nil, fmt.Errorf("execution failed: %w", err)
 	}
+
+	// Store successful execution for DAG visualization
+	o.storeExecutionAsync(ctx, request, requestID, plan, result, nil)
 
 	if o.logger != nil {
 		failedSteps := 0
@@ -1228,6 +1383,10 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 			}
 			span.SetAttribute("hitl.interrupted", true)
 			span.SetAttribute("hitl.checkpoint_id", checkpoint.CheckpointID)
+
+			// Store interrupted execution for DAG visualization
+			o.storeExecutionAsync(ctx, request, requestID, plan, nil, checkpoint)
+
 			return nil, &ErrInterrupted{
 				CheckpointID: checkpoint.CheckpointID,
 				Checkpoint:   checkpoint,
@@ -1237,11 +1396,12 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 
 	// Execute the plan
 	result, err := o.executor.Execute(ctx, plan)
+
 	if err != nil {
 		// Check for step-level HITL interrupt - propagate directly without wrapping
 		if IsInterrupted(err) {
+			checkpoint := GetCheckpoint(err)
 			if o.logger != nil {
-				checkpoint := GetCheckpoint(err)
 				logFields := map[string]interface{}{
 					"operation":     "streaming_execution_hitl_interrupt",
 					"request_id":    requestID,
@@ -1253,7 +1413,6 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 				o.logger.InfoWithContext(ctx, "Step-level HITL interrupt, returning to agent", logFields)
 			}
 			// Add span event and attributes for step-level HITL (visible in distributed traces)
-			checkpoint := GetCheckpoint(err)
 			if checkpoint != nil {
 				telemetry.AddSpanEvent(ctx, "hitl.step_interrupt.orchestrator_propagating",
 					attribute.String("checkpoint_id", GetCheckpointID(err)),
@@ -1263,8 +1422,12 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 				span.SetAttribute("hitl.checkpoint_id", GetCheckpointID(err))
 				span.SetAttribute("hitl.interrupt_point", string(checkpoint.InterruptPoint))
 			}
+			// Store interrupted execution for DAG visualization (with checkpoint for proper status)
+			o.storeExecutionAsync(ctx, request, requestID, plan, result, checkpoint)
 			return nil, err // Return ErrInterrupted directly
 		}
+		// Store failed execution for DAG visualization (non-interrupt failure)
+		o.storeExecutionAsync(ctx, request, requestID, plan, result, nil)
 		if o.logger != nil {
 			o.logger.ErrorWithContext(ctx, "Plan execution failed", map[string]interface{}{
 				"operation":  "streaming_execution_error",
@@ -1274,6 +1437,9 @@ func (o *AIOrchestrator) ProcessRequestStreaming(
 		}
 		return nil, fmt.Errorf("failed to execute plan: %w", err)
 	}
+
+	// Store successful execution for DAG visualization
+	o.storeExecutionAsync(ctx, request, requestID, plan, result, nil)
 
 	// Build synthesis prompt
 	synthesisPrompt := o.buildSynthesisPrompt(request, result)

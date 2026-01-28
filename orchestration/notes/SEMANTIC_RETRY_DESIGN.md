@@ -496,9 +496,8 @@ The ErrorAnalyzer correctly identifies the problem but **cannot compute the fix*
 
 **Insight**: Sometimes re-running resolution with error context is sufficient.
 
-#### 3. Semantic Kernel Model Retry
+#### 3. LLM Self-Correction
 > "Pass tool call error messages back to the LLM so it can correct itself."
-> — [Microsoft Semantic Kernel Issue #12946](https://github.com/microsoft/semantic-kernel/issues/12946)
 
 **Insight**: The LLM that made the mistake should be the one to fix it.
 
@@ -1910,6 +1909,5 @@ The framework handles all these cases with the same mechanism because the LLM un
 2. [Self-Reflection in LLM Agents](https://arxiv.org/pdf/2405.06682) - 2024
 3. [Are Retrials All You Need?](https://arxiv.org/html/2504.12951) - 2025
 4. [Anthropic: Building Effective Agents](https://www.anthropic.com/research/building-effective-agents)
-5. [Microsoft Semantic Kernel: Model Retry](https://github.com/microsoft/semantic-kernel/issues/12946)
-6. [Rasa: Process Calling](https://rasa.com/blog/process-calling-agentic-tools-need-state)
-7. [Error Recovery in AI Agent Development](https://www.gocodeo.com/post/error-recovery-and-fallback-strategies-in-ai-agent-development)
+5. [Rasa: Process Calling](https://rasa.com/blog/process-calling-agentic-tools-need-state)
+6. [Error Recovery in AI Agent Development](https://www.gocodeo.com/post/error-recovery-and-fallback-strategies-in-ai-agent-development)

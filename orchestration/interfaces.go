@@ -260,6 +260,12 @@ type ServiceCapabilityConfig struct {
 
 // OrchestratorConfig configures the orchestrator
 type OrchestratorConfig struct {
+	// Name identifies this orchestrator agent for debugging and DAG visualization.
+	// Examples: "travel-agent", "support-bot", "order-processor"
+	// Default: Falls back to RequestIDPrefix if set, otherwise "orchestrator"
+	// Env: GOMIND_AGENT_NAME
+	Name string `json:"name,omitempty"`
+
 	RoutingMode       RouterMode        `json:"routing_mode"`
 	ExecutionOptions  ExecutionOptions  `json:"execution_options"`
 	SynthesisStrategy SynthesisStrategy `json:"synthesis_strategy"`
@@ -320,6 +326,17 @@ type OrchestratorConfig struct {
 	// Disabled by default for backward compatibility.
 	// Enable via GOMIND_HITL_ENABLED=true or config.HITL.Enabled=true.
 	HITL HITLConfig `json:"hitl,omitempty"`
+
+	// ExecutionStore configuration for DAG visualization
+	// When enabled, stores plan + execution results for debugging.
+	// Disabled by default for backward compatibility.
+	// Enable via GOMIND_EXECUTION_DEBUG_STORE_ENABLED=true or config.ExecutionStore.Enabled=true.
+	ExecutionStore ExecutionStoreConfig `json:"execution_store,omitempty"`
+
+	// ExecutionStoreBackend is the storage backend for execution records.
+	// If nil and ExecutionStore.Enabled is true, uses NoOp store (logs warning).
+	// Use WithExecutionStore() to inject a StorageProvider-backed implementation.
+	ExecutionStoreBackend ExecutionStore `json:"-"` // Not serializable
 
 	// RequestIDPrefix is the prefix used for generated request IDs in distributed tracing.
 	// Default: "orch" → generates IDs like "orch-1768510279883440759"
@@ -518,6 +535,33 @@ func DefaultConfig() *OrchestratorConfig {
 		default:
 			log.Printf("[WARN] Invalid GOMIND_HITL_DEFAULT_ACTION value: %q (valid: approve, reject, abort). Using default: reject", defaultAction)
 		}
+	}
+
+	// Execution Debug Store configuration from environment
+	// Note: Storage-specific settings (Redis URL, DB, etc.) are NOT here.
+	// The application configures those when creating the StorageProvider.
+	config.ExecutionStore = DefaultExecutionStoreConfig()
+	if enabled := os.Getenv("GOMIND_EXECUTION_DEBUG_STORE_ENABLED"); enabled != "" {
+		config.ExecutionStore.Enabled = strings.ToLower(enabled) == "true"
+	}
+	if ttl := os.Getenv("GOMIND_EXECUTION_DEBUG_TTL"); ttl != "" {
+		if duration, err := time.ParseDuration(ttl); err == nil {
+			config.ExecutionStore.TTL = duration
+		}
+	}
+	if errorTTL := os.Getenv("GOMIND_EXECUTION_DEBUG_ERROR_TTL"); errorTTL != "" {
+		if duration, err := time.ParseDuration(errorTTL); err == nil {
+			config.ExecutionStore.ErrorTTL = duration
+		}
+	}
+	if keyPrefix := os.Getenv("GOMIND_EXECUTION_DEBUG_KEY_PREFIX"); keyPrefix != "" {
+		config.ExecutionStore.KeyPrefix = keyPrefix
+	}
+
+	// Agent name from environment (for DAG visualization and HITL isolation)
+	// Falls back to RequestIDPrefix if Name is not set, then "orchestrator"
+	if name := os.Getenv("GOMIND_AGENT_NAME"); name != "" {
+		config.Name = name
 	}
 
 	return config

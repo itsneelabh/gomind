@@ -499,8 +499,8 @@ type HITLConfig struct {
 	DefaultAction  CommandType   `json:"default_action"`
 
 	// Storage configuration
-	CheckpointTTL  time.Duration `json:"checkpoint_ttl"`
-	RedisKeyPrefix string        `json:"redis_key_prefix"`
+	CheckpointTTL time.Duration `json:"checkpoint_ttl"`
+	KeyPrefix     string        `json:"key_prefix"` // Storage-agnostic key prefix
 
 	// Expiry processor configuration
 	// Controls how expired checkpoints are processed in the background.
@@ -522,7 +522,7 @@ func DefaultHITLConfig() HITLConfig {
 		DefaultTimeout:       5 * time.Minute,
 		DefaultAction:        CommandReject, // HITL enabled = require explicit approval
 		CheckpointTTL:        24 * time.Hour,
-		RedisKeyPrefix:       "gomind:hitl",
+		KeyPrefix:            "gomind:hitl",
 		ExpiryProcessor: ExpiryProcessorConfig{
 			Enabled:           true,             // Expiry processing enabled by default
 			ScanInterval:      10 * time.Second, // Scan every 10 seconds
@@ -639,31 +639,6 @@ func WithControllerLogger(logger core.Logger) InterruptControllerOption {
 func WithControllerTelemetry(telemetry core.Telemetry) InterruptControllerOption {
 	return func(c *DefaultInterruptController) {
 		c.telemetry = telemetry
-	}
-}
-
-// CheckpointStoreOption configures optional dependencies for RedisCheckpointStore
-type CheckpointStoreOption func(*RedisCheckpointStore)
-
-// WithCheckpointLogger sets the logger for the checkpoint store
-func WithCheckpointLogger(logger core.Logger) CheckpointStoreOption {
-	return func(s *RedisCheckpointStore) {
-		if logger == nil {
-			return
-		}
-		// Use ComponentAwareLogger for component-based log segregation (per LOGGING_IMPLEMENTATION_GUIDE.md)
-		if cal, ok := logger.(core.ComponentAwareLogger); ok {
-			s.logger = cal.WithComponent("framework/orchestration")
-		} else {
-			s.logger = logger
-		}
-	}
-}
-
-// WithCheckpointTelemetry sets the telemetry provider for the checkpoint store
-func WithCheckpointTelemetry(telemetry core.Telemetry) CheckpointStoreOption {
-	return func(s *RedisCheckpointStore) {
-		s.telemetry = telemetry
 	}
 }
 

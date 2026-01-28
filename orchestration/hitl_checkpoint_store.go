@@ -36,7 +36,7 @@ import (
 //	store := NewRedisCheckpointStore(
 //	    WithCheckpointRedisURL("redis://localhost:6379"),
 //	    WithCheckpointTTL(24 * time.Hour),
-//	    WithCheckpointLogger(logger),
+//	    WithCheckpointStoreLogger(logger),
 //	)
 //
 // =============================================================================
@@ -116,6 +116,32 @@ func WithInstanceID(id string) RedisCheckpointStoreOption {
 	}
 }
 
+// WithCheckpointStoreLogger sets the logger for the checkpoint store.
+// Per FRAMEWORK_DESIGN_PRINCIPLES.md, this option is in the implementation file
+// as it configures Redis-specific behavior.
+func WithCheckpointStoreLogger(logger core.Logger) RedisCheckpointStoreOption {
+	return func(c *redisCheckpointConfig) {
+		if logger == nil {
+			return
+		}
+		// Use ComponentAwareLogger for component-based log segregation (per LOGGING_IMPLEMENTATION_GUIDE.md)
+		if cal, ok := logger.(core.ComponentAwareLogger); ok {
+			c.logger = cal.WithComponent("framework/orchestration")
+		} else {
+			c.logger = logger
+		}
+	}
+}
+
+// WithCheckpointStoreTelemetry sets the telemetry provider for the checkpoint store.
+// Per FRAMEWORK_DESIGN_PRINCIPLES.md, this option is in the implementation file
+// as it configures Redis-specific behavior.
+func WithCheckpointStoreTelemetry(telemetry core.Telemetry) RedisCheckpointStoreOption {
+	return func(c *redisCheckpointConfig) {
+		c.telemetry = telemetry
+	}
+}
+
 // NewRedisCheckpointStore creates a new Redis-backed checkpoint store.
 // Returns concrete type per Go idiom "return structs, accept interfaces".
 //
@@ -142,22 +168,10 @@ func NewRedisCheckpointStore(opts ...interface{}) (*RedisCheckpointStore, error)
 		logger:    &core.NoOpLogger{},
 	}
 
-	// Apply options - handle both old-style and new-style options
+	// Apply options
 	for _, opt := range opts {
-		switch o := opt.(type) {
-		case RedisCheckpointStoreOption:
+		if o, ok := opt.(RedisCheckpointStoreOption); ok {
 			o(config)
-		case CheckpointStoreOption:
-			// Create a temporary store to apply the option, then copy values
-			// This maintains backward compatibility with the option functions defined in hitl_interfaces.go
-			tempStore := &RedisCheckpointStore{}
-			o(tempStore)
-			if tempStore.logger != nil {
-				config.logger = tempStore.logger
-			}
-			if tempStore.telemetry != nil {
-				config.telemetry = tempStore.telemetry
-			}
 		}
 	}
 

@@ -2115,24 +2115,15 @@ The tiered/hierarchical approach is now **industry standard**:
 
 This section addresses how developers can provide additional context to improve LLM decision-making.
 
-### Research: How Major Frameworks Solve This
-
-Before proposing enhancements, let's examine how established frameworks handle customization:
-
-| Framework | Primary Customization | Pattern |
-|-----------|----------------------|---------|
-| **[LangChain](https://docs.langchain.com/oss/python/langchain/agents)** | `system_prompt` (string) | Single string prepended to prompt |
-| **[CrewAI](https://docs.crewai.com/en/concepts/agents)** | `role` + `goal` + `backstory` | Three fields → combined into one prompt |
-| **[AutoGen](https://microsoft.github.io/autogen/stable//user-guide/agentchat-user-guide/tutorial/agents.html)** | `system_message` (string) | Single string for agent behavior |
-| **[OpenAI Assistants](https://platform.openai.com/docs/api-reference/assistants)** | `instructions` (string, max 256K) | Single field for all instructions |
-
-**Key Insight**: All major frameworks use **one primary field** for customization. CrewAI's breakdown (role/goal/backstory) is just developer ergonomics—they get combined into a single system prompt behind the scenes.
+### Research: Industry Best Practices
 
 From [Microsoft's AI Agent Design Patterns](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns):
 > "The system prompt shapes the agent's behavior by defining its core task, persona, and operations."
 
 From [Google Cloud's Agentic AI Patterns](https://docs.cloud.google.com/architecture/choose-design-pattern-agentic-ai-system):
 > "A single-agent system uses an AI model, a defined set of tools, and a comprehensive system prompt to autonomously handle a user request."
+
+**Key Insight**: Major frameworks use **one primary field** for customization - a single system prompt that defines the orchestrator's core behavioral context.
 
 ### Current GoMind Customization Mechanisms
 
@@ -2159,7 +2150,7 @@ The current system lacks a **single, prominent field for system-level instructio
 
 ### Recommended Enhancement: Keep It Simple
 
-Following the pattern established by LangChain, AutoGen, and OpenAI, add **one field**:
+Following industry best practices, add **one field**:
 
 #### Add `SystemInstructions` to `PromptConfig`
 
@@ -2168,10 +2159,7 @@ type PromptConfig struct {
     // ... existing fields ...
 
     // SystemInstructions defines the orchestrator's core behavioral context.
-    // This is prepended to the planning prompt, similar to:
-    // - LangChain's system_prompt
-    // - AutoGen's system_message
-    // - OpenAI's instructions
+    // This is prepended to the planning prompt.
     //
     // Example: "You are a travel planning assistant. Always check weather
     // before recommending outdoor activities. Prefer real-time data sources."
@@ -2202,7 +2190,7 @@ User Request: %s
 
 ### Usage Examples
 
-#### Simple Usage (like LangChain/AutoGen)
+#### Simple Usage
 
 ```go
 config := orchestration.DefaultConfig()
@@ -2236,10 +2224,10 @@ config.PromptConfig.CustomInstructions = []string{
 
 | Aspect | Benefit |
 |--------|---------|
-| **Framework Alignment** | Matches LangChain, AutoGen, OpenAI patterns |
+| **Industry Alignment** | Matches established patterns for system prompts |
 | **Simplicity** | One field instead of many nested structs |
 | **Backward Compatible** | New optional field, existing code unchanged |
-| **Discoverable** | Developers familiar with other frameworks will find it intuitive |
+| **Discoverable** | Developers will find it intuitive |
 | **Composable** | Works with existing `Domain` and `CustomInstructions` |
 
 ### What About Agent Specialization?
@@ -2264,10 +2252,7 @@ This follows the "start simple, add complexity as needed" principle from [Google
 // orchestration/prompt_builder.go - Add after line 116
 
 	// SystemInstructions defines the orchestrator's core behavioral context.
-	// This is prepended to the planning prompt, similar to:
-	// - LangChain's system_prompt
-	// - AutoGen's system_message
-	// - OpenAI's instructions
+	// This is prepended to the planning prompt.
 	//
 	// Example: "You are a travel planning assistant. Always check weather
 	// before recommending outdoor activities. Prefer real-time data sources."

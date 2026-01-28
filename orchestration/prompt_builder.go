@@ -116,10 +116,7 @@ type PromptConfig struct {
 	IncludeAntiPatterns *bool `json:"include_anti_patterns,omitempty"`
 
 	// SystemInstructions defines the orchestrator's core behavioral context.
-	// This is prepended to the planning prompt, similar to:
-	// - LangChain's system_prompt
-	// - AutoGen's system_message
-	// - OpenAI's instructions
+	// This is prepended to the planning prompt.
 	//
 	// When set, the developer's persona becomes the primary identity, and
 	// the orchestrator role becomes a functional description.

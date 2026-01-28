@@ -56,7 +56,7 @@ func TestHybridResolver_AllParamsAutoWired(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -105,7 +105,7 @@ func TestHybridResolver_OptionalParamsUnmapped(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -150,7 +150,7 @@ func TestHybridResolver_RequiredParamsMissingTriggersMicroResolution(t *testing.
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -191,7 +191,7 @@ func TestHybridResolver_MicroResolutionDisabled(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -223,7 +223,7 @@ func TestHybridResolver_EmptyDependencyResults(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -263,7 +263,7 @@ func TestHybridResolver_FailedStepsSkipped(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -307,7 +307,7 @@ func TestHybridResolver_MultipleDependencies(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -346,7 +346,7 @@ func TestHybridResolver_TypeCoercion(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -389,7 +389,7 @@ func TestHybridResolver_NestedObjectExtraction(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -423,7 +423,7 @@ func TestHybridResolver_CaseInsensitiveMatch(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -466,7 +466,7 @@ func TestHybridResolver_AutoWiredPriorityOverMicroResolution(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -504,7 +504,7 @@ func TestHybridResolver_NilAIClient(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -541,7 +541,7 @@ func TestHybridResolver_SetLogger(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, _ = resolver.ResolveParameters(ctx, depResults, targetCap)
+	_, _ = resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	// Should have logged something
 	if len(logger.messages) == 0 {
@@ -576,7 +576,7 @@ func TestHybridResolver_InvalidJSONResponse(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	params, err := resolver.ResolveParameters(ctx, depResults, targetCap)
+	params, err := resolver.ResolveParameters(ctx, depResults, targetCap, "test-step")
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)

@@ -553,7 +553,7 @@ Client                              Server
 
 ### Pattern 5: Checkpointing for Recovery
 
-> Source: [Kinde - Orchestrating Multi-Step Agents](https://kinde.com/learn/ai-for-software-engineering/ai-devops/orchestrating-multi-step-agents-temporal-dagster-langgraph-patterns-for-long-running-work/)
+> Source: [Kinde - Orchestrating Multi-Step Agents](https://kinde.com/learn/ai-for-software-engineering/ai-devops/orchestrating-multi-step-agents-patterns-for-long-running-work/)
 
 For truly long-running workflows (hours), save state at each step:
 
@@ -3200,7 +3200,7 @@ func main() {
 ### AI Agent Orchestration
 
 6. [AI Agent Design Patterns - Microsoft Azure](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns)
-7. [Orchestrating Multi-Step Agents - Kinde](https://kinde.com/learn/ai-for-software-engineering/ai-devops/orchestrating-multi-step-agents-temporal-dagster-langgraph-patterns-for-long-running-work/)
+7. [Orchestrating Multi-Step Agents - Kinde](https://kinde.com/learn/ai-for-software-engineering/ai-devops/orchestrating-multi-step-agents-patterns-for-long-running-work/)
 8. [Workflow Orchestration Agents - AWS Prescriptive Guidance](https://docs.aws.amazon.com/prescriptive-guidance/latest/agentic-ai-patterns/workflow-orchestration-agents.html)
 9. [Agentic AI with Temporal Orchestration - IntuitionLabs](https://intuitionlabs.ai/articles/agentic-ai-temporal-orchestration)
 

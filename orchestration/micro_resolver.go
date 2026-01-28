@@ -85,16 +85,20 @@ func NewMicroResolver(aiClient core.AIClient, logger core.Logger) *MicroResolver
 // ResolveParameters extracts parameters from source data for a target capability.
 // If function calling is available, uses it for guaranteed type safety.
 // Otherwise, falls back to text-based extraction with JSON parsing.
+//
+// The stepID parameter associates any LLM calls with the execution step for
+// DAG visualization. Pass empty string if not step-specific.
 func (m *MicroResolver) ResolveParameters(
 	ctx context.Context,
 	sourceData map[string]interface{},
 	targetCapability *EnhancedCapability,
 	hint string,
+	stepID string,
 ) (map[string]interface{}, error) {
 	if m.functionClient != nil {
-		return m.resolveWithFunctions(ctx, sourceData, targetCapability, hint)
+		return m.resolveWithFunctions(ctx, sourceData, targetCapability, hint, stepID)
 	}
-	return m.resolveWithText(ctx, sourceData, targetCapability, hint)
+	return m.resolveWithText(ctx, sourceData, targetCapability, hint, stepID)
 }
 
 // resolveWithFunctions uses LLM function calling for typed parameter extraction
@@ -103,6 +107,7 @@ func (m *MicroResolver) resolveWithFunctions(
 	sourceData map[string]interface{},
 	targetCapability *EnhancedCapability,
 	hint string,
+	stepID string,
 ) (map[string]interface{}, error) {
 	// Build the JSON schema for the target parameters
 	schema := m.buildParameterSchema(targetCapability)
@@ -162,6 +167,7 @@ func (m *MicroResolver) resolveWithText(
 	sourceData map[string]interface{},
 	targetCapability *EnhancedCapability,
 	hint string,
+	stepID string,
 ) (map[string]interface{}, error) {
 	sourceJSON, _ := json.MarshalIndent(sourceData, "", "  ")
 
@@ -246,6 +252,7 @@ RESPONSE FORMAT (JSON only):
 			Success:     false,
 			Error:       err.Error(),
 			Attempt:     1,
+			StepID:      stepID,
 		})
 
 		return nil, fmt.Errorf("micro-resolution text call failed: %w", err)
@@ -275,6 +282,7 @@ RESPONSE FORMAT (JSON only):
 		TotalTokens:      resp.Usage.TotalTokens,
 		Success:          true,
 		Attempt:          1,
+		StepID:           stepID,
 	})
 
 	// Parse the JSON response

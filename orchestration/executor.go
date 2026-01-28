@@ -637,6 +637,18 @@ func (e *SmartExecutor) Execute(ctx context.Context, plan *RoutingPlan) (*Execut
 								})
 							}
 							// Non-fatal: continue with interrupt even if update fails
+						} else {
+							// Update local checkpoint with completed steps for proper DAG visualization
+							// (UpdateCheckpointProgress updates the store, but we need the local checkpoint
+							// to have the data so it's included when storeExecutionAsync stores the execution)
+							checkpoint.CompletedSteps = completedStepResults
+							if checkpoint.StepResults == nil {
+								checkpoint.StepResults = make(map[string]*StepResult)
+							}
+							for i := range completedStepResults {
+								step := &completedStepResults[i]
+								checkpoint.StepResults[step.StepID] = step
+							}
 						}
 					}
 
@@ -1253,7 +1265,7 @@ func (e *SmartExecutor) resolveUnresolvedTemplatesWithLLM(
 			strVal, paramName)
 
 		// Use hybrid resolver's semantic value resolution
-		resolved, err := e.hybridResolver.ResolveSemanticValue(ctx, sourceData, paramName, hint, "string")
+		resolved, err := e.hybridResolver.ResolveSemanticValue(ctx, sourceData, paramName, hint, "string", stepID)
 		if err != nil {
 			if e.logger != nil {
 				e.logger.Warn("SEMANTIC FALLBACK FAILED: Could not resolve template", map[string]interface{}{
@@ -1531,7 +1543,7 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				// Collect step results from dependencies
 				stepResultsMap := e.collectDependencyResults(ctx, step.DependsOn)
 
-				resolved, err := e.hybridResolver.ResolveParameters(ctx, stepResultsMap, capabilityForResolution)
+				resolved, err := e.hybridResolver.ResolveParameters(ctx, stepResultsMap, capabilityForResolution, step.StepID)
 				if err != nil {
 					if e.logger != nil {
 						e.logger.WarnWithContext(ctx, "Hybrid resolution failed, falling back to template interpolation", map[string]interface{}{

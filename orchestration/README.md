@@ -12,6 +12,7 @@ Multi-agent coordination with AI-driven orchestration and declarative workflows.
 - [🔧 Workflow Engine in Detail](#-workflow-engine-in-detail)
 - [🎭 When to Use Each Mode](#-when-to-use-each-mode)
 - [⏱️ Async Tasks for Long-Running Operations](#️-async-tasks-for-long-running-operations)
+- [🛡️ Human-in-the-Loop (HITL) Approval](#️-human-in-the-loop-hitl-approval)
 - [🏗️ Architecture & Design Decisions](#️-architecture--design-decisions)
 - [🏗️ How Everything Fits Together](#️-how-everything-fits-together)
 - [📊 Performance & Caching](#-performance--caching-explained)
@@ -765,6 +766,92 @@ workerPool.RegisterHandler("research", func(ctx context.Context, task *core.Task
 
 📖 **For complete implementation details, deployment patterns, and production configuration, see the [Async Orchestration Guide](../docs/ASYNC_ORCHESTRATION_GUIDE.md).**
 
+## 🛡️ Human-in-the-Loop (HITL) Approval
+
+For sensitive operations, the orchestration module supports pausing execution and waiting for human approval before proceeding.
+
+### When to Use HITL
+
+| Scenario | HITL Recommended |
+|----------|------------------|
+| Read-only queries (weather, stock prices) | ❌ No |
+| Financial transactions (transfers, payments) | ✅ Yes |
+| Data modifications (delete, bulk update) | ✅ Yes |
+| Sensitive API calls (external integrations) | ✅ Yes |
+| AI-generated execution plans | Optional (configurable) |
+
+### Quick Start
+
+```go
+// 1. Create checkpoint store (Redis-backed for distributed deployments)
+checkpointStore, _ := orchestration.NewRedisCheckpointStore(
+    orchestration.WithCheckpointStoreRedisURL(redisURL),
+)
+
+// 2. Create webhook handler to notify your approval system
+commandStore, _ := orchestration.NewRedisCommandStore(
+    orchestration.WithCommandStoreRedisURL(redisURL),
+)
+handler := orchestration.NewWebhookInterruptHandler(
+    "https://your-service/hitl/webhook",
+    commandStore,
+)
+
+// 3. Define policy: which operations need approval
+policy := orchestration.NewRuleBasedPolicy(orchestration.HITLConfig{
+    RequirePlanApproval:   true,                     // Approve all AI plans
+    SensitiveCapabilities: []string{"transfer_funds", "delete_account"},
+    SensitiveAgents:       []string{"payment-service"},
+    DefaultTimeout:        5 * time.Minute,
+    DefaultAction:         orchestration.CommandReject, // Reject on timeout
+})
+
+// 4. Create controller and attach to orchestrator
+controller := orchestration.NewInterruptController(policy, checkpointStore, handler)
+orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient,
+    orchestration.WithHITL(controller),
+)
+```
+
+### Four Interrupt Points
+
+HITL can pause execution at different stages:
+
+| Interrupt Point | Triggered When | Use Case |
+|-----------------|----------------|----------|
+| `before_plan_execution` | AI generates a plan | Approve overall strategy |
+| `before_step` | Before each tool call | Approve individual operations |
+| `after_step` | After tool returns | Validate output before proceeding |
+| `on_error` | Errors exceed retry threshold | Human escalation |
+
+### Approval Flow
+
+```
+1. Execution reaches checkpoint → Creates ExecutionCheckpoint
+2. Webhook notification sent to your system
+3. Human reviews and responds:
+   POST /hitl/command
+   {"checkpoint_id": "...", "type": "approve"} // or "reject", "abort", "modify"
+4. Resume execution:
+   POST /hitl/resume/{checkpoint_id}
+5. Orchestrator continues or stops based on command
+```
+
+### Auto-Resume on Timeout
+
+Configure automatic behavior when humans don't respond:
+
+```bash
+# Enable expiry processor (background goroutine)
+export GOMIND_HITL_EXPIRY_ENABLED=true
+export GOMIND_HITL_EXPIRY_INTERVAL=10s
+
+# Default action on timeout: approve, reject, or abort
+export GOMIND_HITL_DEFAULT_ACTION=reject
+```
+
+📖 **For complete HITL documentation including multi-pod deployment, metrics, and troubleshooting, see the [Human-in-the-Loop User Guide](../docs/HUMAN_IN_THE_LOOP_USER_GUIDE.md).**
+
 ## 🏗️ Architecture & Design Decisions
 
 ### Why Orchestration Doesn't Import the AI Module
@@ -1146,7 +1233,6 @@ config := &orchestration.OrchestratorConfig{
     // Prompt customization
     PromptConfig: orchestration.PromptConfig{
         // SystemInstructions defines the orchestrator's persona and behavioral context
-        // Similar to LangChain's system_prompt, AutoGen's system_message
         SystemInstructions: `You are a helpful assistant.
 Prioritize accuracy and provide practical recommendations.`,
     },

@@ -166,6 +166,7 @@ func (r *ContextualReResolver) ReResolve(
 			Success:     false,
 			Error:       err.Error(),
 			Attempt:     execCtx.RetryCount + 1,
+			StepID:      execCtx.StepID,
 		})
 
 		r.logWarn("Re-resolution LLM call failed", map[string]interface{}{
@@ -191,6 +192,7 @@ func (r *ContextualReResolver) ReResolve(
 		TotalTokens:      response.Usage.TotalTokens,
 		Success:          true,
 		Attempt:          execCtx.RetryCount + 1,
+		StepID:           execCtx.StepID,
 	})
 
 	// Parse structured response
