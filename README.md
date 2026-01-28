@@ -7,42 +7,42 @@
 
 GoMind is a comprehensive platform for building autonomous AI agent systems, designed from the ground up to operate reliably in production environments. It provides AI-driven orchestration for multi-agent coordination, seamless integration with multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, DeepSeek, and more) as well as your own in-house hosted models via OpenAI-compatible endpoints, Redis-based service discovery for dynamic tool and agent networks, production-grade resilience patterns (circuit breakers, intelligent retry, panic recovery), and full observability through OpenTelemetry integration with distributed tracing and unified metrics. Written in Go for minimal resource footprint and Kubernetes-native deployment.
 
-## 📋 Table of Contents
+## Table of Contents
 
-**⚡ Quick Start**
+**1. Quick Start**
 - [What is GoMind?](#why-gomind-the-evolution-towards-production-ai-agents) • *2 min read*
 - [Getting Started in 5 Minutes](#getting-started-in-5-minutes) • *5 min setup*
 - [Installation](#installation) • *30 seconds*
 
-**🏗️ Core Concepts**
+**2. Core Concepts**
 - [What Makes GoMind Unique](#what-makes-gomind-unique-beyond-traditional-agent-frameworks) • *Key differentiators*
 - [Architecture Overview](#how-gomind-works) • *5 min read*
 - [Key Features](#core-capabilities) • *10 min read*
 - [Service Discovery](#1-agents-that-find-each-other-automatically) • *Deep dive*
 
-**📚 Guides & Examples**
+**3. Guides & Examples**
 - [Real-World Example](#putting-it-all-together-a-real-example) • *Complete system*
 - [Production Setup](#complete-production-setup) • *Full deployment*
 - [Module Documentation](#module-documentation) • *Reference docs*
 
-**🚀 Production & Deployment**
+**4. Production & Deployment**
 - [Kubernetes Deployment](#deploy-your-agent-to-kubernetes) • *Container setup*
 - [Performance Metrics](#container-image-size-details) • *Verified benchmarks*
 - [Framework Comparison](#quick-framework-comparison) • *vs Python alternatives*
 
-**🤔 Decision Making**
+**5. Decision Making**
 - [When to Use GoMind](#when-to-use-gomind) • *Choose the right tool*
 - [Why Production AI Agents](#why-gomind-the-evolution-towards-production-ai-agents) • *For architects*
 - [Limitations](#consider-python-frameworks-if) • *Be informed*
 
-**📖 Resources**
+**6. Resources**
 - [Examples Repository](#examples) • *Working code*
 - [Troubleshooting](#next-steps) • *Common issues*
 - [Contributing](#contributing) • *Join the project*
 
 ---
 
-**🎯 Reading Paths:**
+**Reading Paths:**
 - **Quick Evaluation** (5 mins): What is GoMind? → When to Use GoMind?
 - **Developer Onboarding** (15 mins): Getting Started → Key Features → Examples
 - **Architecture Review** (30 mins): Architecture Overview → Production Setup → Framework Comparison

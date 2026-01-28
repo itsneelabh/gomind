@@ -101,10 +101,29 @@ func WithDiscovery(enabled bool, provider string) Option {
 Standard precedence order (highest to lowest):
 1. Explicitly set configuration options
 2. `REDIS_URL`, `OPENAI_API_KEY`, etc. (standard names)
-3. `GOMIND_*` prefixed variables  
+3. `GOMIND_*` prefixed variables
 4. Sensible defaults (`localhost:6379`, etc.)
 
-#### 3. **Fail-Safe Defaults**
+#### 3. **Environment Variable Naming - No Duplicates**
+Before adding a new `GOMIND_*` environment variable, **always check for existing variables** that serve the same purpose:
+
+```go
+// ❌ Bad: Creating duplicate/conflicting env vars
+GOMIND_AGENT_NAME        // Already exists for agent identity
+GOMIND_ORCHESTRATOR_NAME // DON'T CREATE - same concept, causes confusion
+
+// ✅ Good: Reuse existing env vars across modules
+GOMIND_AGENT_NAME  // Single source of truth for agent identity
+                   // Used by: HITL isolation, DAG visualization, logging
+```
+
+**Rules**:
+- **Search before creating**: Grep for similar concepts in existing env var parsing
+- **One concept = One variable**: If `GOMIND_AGENT_NAME` identifies the agent, don't create `GOMIND_ORCHESTRATOR_NAME`
+- **Document usage**: When an env var is used by multiple modules, document all use cases in comments
+- **Cross-module awareness**: Check how other modules (orchestration, HITL, telemetry) name similar concepts
+
+#### 4. **Fail-Safe Defaults**
 - Components must work with zero configuration in development
 - Production deployment should require minimal explicit configuration
 - Missing optional dependencies should not break core functionality

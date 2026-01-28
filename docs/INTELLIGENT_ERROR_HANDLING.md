@@ -1133,6 +1133,16 @@ histogram_quantile(0.95, orchestration_semantic_retry_llm_latency_ms)
 sum(rate(orchestration_semantic_retry_independent_step_total[5m])) by (capability)
 ```
 
+**LLM Debug Payload Store:**
+
+For deep debugging of error handling flows, enable the LLM Debug Store to capture complete prompts and responses at all stages. Unlike Jaeger spans which truncate large payloads, this stores the full content:
+
+```bash
+export GOMIND_LLM_DEBUG_ENABLED=true
+```
+
+This captures interactions at 6 recording sites including `semantic_retry`, allowing you to inspect the exact prompts sent to the LLM and the responses received during error recovery. See [LLM_DEBUG_PAYLOAD_DESIGN.md](../orchestration/notes/LLM_DEBUG_PAYLOAD_DESIGN.md) for details.
+
 ### The Complete Error Handling Stack
 
 With Semantic Retry, the orchestration module provides a **four-layer defense**:

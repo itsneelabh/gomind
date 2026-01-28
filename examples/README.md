@@ -4,55 +4,39 @@ Complete, production-ready examples demonstrating AI-enhanced distributed system
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
 ### Getting Started
-- [📦 Available Examples](#-available-examples) - Browse all examples by complexity
-- [🚀 Quick Start](#-quick-start) - Get running in 5 minutes
-- [🧪 Test the System](#-test-the-system) - Verify your setup works
-- [🔧 Individual Example Usage](#-individual-example-usage) - Run examples locally
-- [🔑 API Key Configuration](#-api-key-configuration) - Set up AI providers
+- [1. Available Examples](#1-available-examples) - Browse all examples by complexity
+- [2. Quick Start](#2-quick-start) - Get running in 5 minutes
+- [3. Test the System](#3-test-the-system) - Verify your setup works
+- [4. Individual Example Usage](#4-individual-example-usage) - Run examples locally
+- [5. API Key Configuration](#5-api-key-configuration) - Set up AI providers
 
 ### Deployment
-- [☸️ Kubernetes Deployment](#️-kubernetes-deployment) - Local (Kind) and cloud
-- [📋 Detailed Example Features](#-detailed-example-features) - What each example demonstrates
-- [🏗️ System Architecture](#️-system-architecture) - How components interact
+- [6. Kubernetes Deployment](#6-kubernetes-deployment) - Local (Kind) and cloud
+- [7. Detailed Example Features](#7-detailed-example-features) - What each example demonstrates
+- [8. System Architecture](#8-system-architecture) - How components interact
 
 ### Operations
-- [📊 Monitoring & Observability](#-monitoring--observability) - Metrics, logs, traces
-- [🚨 Troubleshooting](#-troubleshooting) - Common issues and solutions
-- [🐛 Debugging & Troubleshooting](#-debugging--troubleshooting) - Debug logging guide
-- [🧹 Cleanup](#-cleanup) - Remove deployed resources
+- [9. Monitoring & Observability](#9-monitoring--observability) - Metrics, logs, traces
+- [10. Troubleshooting](#10-troubleshooting) - Common issues and solutions
+- [11. Cleanup](#11-cleanup) - Remove deployed resources
 
 ### Development
-- [🎨 Development Workflow](#-development-workflow) - Build tools, agents, and workflows
-  - [🔧 Critical: AI Telemetry Initialization Order](#-critical-ai-telemetry-initialization-order) - **Must-read for AI logging**
-- [📚 Learning Progression](#-learning-progression) - Structured learning paths
-- [🏗️ Building Your Own Examples](#️-building-your-own-examples) - **Best practices and patterns**
-  - [🎯 Workspace Independence](#-the-foundation-workspace-independence) - Most important rule
-  - [📁 File Structure](#-file-structure) - How to organize your code
-  - [⚙️ Configuration](#️-configuration-best-practices) - Environment-first config
-  - [🏷️ Naming Conventions](#️-naming-conventions) - Consistent naming
-  - [🎯 Capability Registration](#-capability-registration) - With Phase 2 hints
-  - [🔧 Main Function Structure](#-main-function-structure) - Standard pattern
-  - [🎨 Emoji Logging](#-emoji-logging) - Visual clarity
-  - [🛡️ Error Handling](#️-error-handling) - Graceful degradation
-  - [🐳 Docker Best Practices](#-docker-best-practices) - Multi-stage builds
-  - [☸️ Kubernetes Patterns](#️-kubernetes-patterns) - K8s manifests
-  - [📋 Required Supporting Files](#-required-supporting-files) - Checklist
-  - [🔍 Tool vs Agent Distinctions](#-tool-vs-agent-distinctions) - When to use what
-  - [✅ Pre-Commit Checklist](#-pre-commit-checklist) - Verify before commit
-  - [🤖 AI Coding Assistant Tips](#-ai-coding-assistant-tips) - Prompts for AI
+- [12. Development Workflow](#12-development-workflow) - Build tools, agents, and workflows
+- [13. Learning Progression](#13-learning-progression) - Structured learning paths
+- [14. Building Your Own Examples](#14-building-your-own-examples) - Best practices and patterns
 
 ### Resources
-- [📚 Next Steps](#-next-steps) - Your journey from learning to deployment
-- [📖 Documentation](#-documentation) - Additional guides and references
+- [15. Next Steps](#15-next-steps) - Your journey from learning to deployment
+- [16. Documentation](#16-documentation) - Additional guides and references
 
 ---
 
-## 📦 Available Examples
+## 1. Available Examples
 
-### 🎯 Quick Reference - Start Here
+### Quick Reference - Start Here
 
 | Example | Pattern | Complexity | Best For | Time |
 |---------|---------|------------|----------|------|
@@ -65,7 +49,7 @@ Complete, production-ready examples demonstrating AI-enhanced distributed system
 | **[orchestration-example](orchestration-example/)** | Orchestrator | ⭐⭐⭐⭐ Expert | Complex workflows | 45 min |
 | **[workflow-example](workflow-example/)** | YAML Engine | ⭐⭐⭐ Advanced | Declarative workflows | 30 min |
 
-### 🚀 Framework Patterns (Optional)
+### Framework Patterns (Optional)
 
 | Example | Focus | Best For | Time |
 |---------|-------|----------|------|
@@ -73,7 +57,7 @@ Complete, production-ready examples demonstrating AI-enhanced distributed system
 | **[context_propagation](context_propagation/)** | Tracing | Distributed system debugging | 15 min |
 | **[error_handling](error_handling/)** | Error Patterns | Framework consistency | 10 min |
 
-### 💡 Where Should I Start?
+### Where Should I Start?
 
 **👋 New to GoMind?** → `tool-example` then `agent-example`
 
@@ -90,7 +74,7 @@ Complete, production-ready examples demonstrating AI-enhanced distributed system
 |-----------|---------|----------|
 | **[k8-deployment/](k8-deployment/)** | Kubernetes deployment configs | Redis, Prometheus, Grafana, Jaeger, OTEL |
 
-## 🚀 Quick Start
+## 2. Quick Start
 
 ### Prerequisites
 
@@ -125,25 +109,25 @@ cd gomind/examples
 # Grafana:      http://localhost:3000 (admin/admin)
 # Prometheus:   http://localhost:9090
 # Jaeger:       http://localhost:16686
-# Weather Tool: http://localhost:8080/health
-# Agent:        http://localhost:8090/health
+# Weather Tool: http://localhost:8339/health
+# Agent:        http://localhost:8350/health
 ```
 
-## 🧪 Test the System
+## 3. Test the System
 
 Once the demo is running, test the complete tool → agent orchestration:
 
 ```bash
 # 1. Test weather tool directly
-curl -X POST http://localhost:8080/api/capabilities/current_weather \
+curl -X POST http://localhost:8339/api/capabilities/current_weather \
   -H "Content-Type: application/json" \
   -d '{"location":"New York","units":"metric"}'
 
 # 2. Test agent service discovery
-curl http://localhost:8090/api/capabilities/discover_tools
+curl http://localhost:8350/api/capabilities/discover_tools
 
 # 3. Test intelligent orchestration (agent + AI + tools)
-curl -X POST http://localhost:8090/api/capabilities/research_topic \
+curl -X POST http://localhost:8350/api/capabilities/research_topic \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "current weather conditions in San Francisco",
@@ -159,7 +143,7 @@ curl -X POST http://localhost:8090/api/capabilities/research_topic \
 4. Agent uses AI to analyze and synthesize results
 5. Agent returns intelligent summary
 
-## 🔧 Individual Example Usage
+## 4. Individual Example Usage
 
 ### Running Examples Locally
 
@@ -172,12 +156,12 @@ docker run -p 6379:6379 redis:7-alpine
 # Terminal 2: Run any tool
 cd tool-example
 go run main.go
-# Tool starts on http://localhost:8080
+# Tool starts on http://localhost:8340
 
 # Terminal 3: Run any agent
 cd agent-example
 go run main.go
-# Agent starts on http://localhost:8090
+# Agent starts on http://localhost:8350
 ```
 
 ### Building Examples
@@ -195,7 +179,7 @@ go build -o example-binary .
 docker build -t <example-name>:latest .
 ```
 
-## 🔑 API Key Configuration
+## 5. API Key Configuration
 
 ### Automated Setup (Recommended)
 
@@ -222,7 +206,7 @@ WEATHER_API_KEY=your-weather-api-key
 
 The framework auto-detects available providers and uses the best one available.
 
-## ☸️ Kubernetes Deployment
+## 6. Kubernetes Deployment
 
 ### Local Development (Kind)
 
@@ -260,9 +244,9 @@ kubectl apply -f agent-example/k8-deployment.yaml
 kubectl apply -f tool-example/k8-deployment.yaml
 ```
 
-## 📋 Detailed Example Features
+## 7. Detailed Example Features
 
-### 🔧 Core Learning Examples
+### Core Learning Examples
 
 #### [tool-example](tool-example/) - Passive Tool Pattern
 **What it demonstrates:**
@@ -288,7 +272,7 @@ kubectl apply -f tool-example/k8-deployment.yaml
 
 ---
 
-### 🤖 AI-Enhanced Examples
+### AI-Enhanced Examples
 
 #### [agent-example-enhanced](agent-example-enhanced/) - AI-Everything Agent
 **What it demonstrates:**
@@ -340,7 +324,7 @@ kubectl apply -f tool-example/k8-deployment.yaml
 
 ---
 
-### 🏗️ Advanced Orchestration
+### Advanced Orchestration
 
 #### [orchestration-example](orchestration-example/) - Multi-Modal Orchestration
 **What it demonstrates:**
@@ -366,7 +350,7 @@ kubectl apply -f tool-example/k8-deployment.yaml
 
 ---
 
-### 📊 Framework Patterns
+### Framework Patterns
 
 #### [telemetry](telemetry/) - Production Monitoring
 - Comprehensive metrics emission (counters, histograms, gauges)
@@ -387,7 +371,7 @@ kubectl apply -f tool-example/k8-deployment.yaml
 - Configuration error handling and validation
 - Framework-wide error consistency and debugging
 
-## 🏗️ System Architecture
+## 8. System Architecture
 
 ```
 ┌─────────────────┐    Service      ┌─────────────────┐
@@ -417,7 +401,7 @@ kubectl apply -f tool-example/k8-deployment.yaml
 - **AI Providers**: External intelligence for analysis and decision making
 - **Monitoring**: Full observability with metrics, logs, and traces
 
-## 📊 Monitoring & Observability
+## 9. Monitoring & Observability
 
 ### Accessing Dashboards
 
@@ -470,7 +454,7 @@ kubectl logs -f deployment/<service-name> -n gomind-examples | grep "Heartbeat h
 kubectl logs deployment/<service-name> -n gomind-examples | grep -E "(Failed to send heartbeat|failure_count)"
 ```
 
-## 🚨 Troubleshooting
+## 10. Troubleshooting
 
 ### Common Issues
 
@@ -529,7 +513,7 @@ kubectl logs -f -l app.kubernetes.io/part-of=gomind-framework -n gomind-examples
 ./setup-kind-demo.sh setup
 ```
 
-### 🐛 Debugging & Troubleshooting
+### Debugging & Troubleshooting
 
 #### Enable Debug Logging
 
@@ -597,11 +581,11 @@ kubectl logs -f deployment/research-agent -n gomind-examples | grep -i "ai\|open
 
 For comprehensive logging configuration, see [Logging Configuration](../docs/API_REFERENCE.md#logging-configuration) in the API Reference.
 
-## 🎨 Development Workflow
+## 11. Development Workflow
 
 ### 1. Pattern-Specific Development
 
-#### 🔧 Building Tools (Passive Components)
+#### Building Tools (Passive Components)
 ```bash
 # Start with tool-example
 cd tool-example && go run main.go
@@ -619,7 +603,7 @@ cp -r tool-example my-data-tool
 # → Tools are discovered automatically by agents
 ```
 
-#### 🤖 Building Agents (Active Coordinators)
+#### Building Agents (Active Coordinators)
 ```bash
 # Start with agent-example
 cd agent-example && go run main.go
@@ -637,7 +621,7 @@ cp -r agent-example my-workflow-agent
 # → Agents discover and coordinate tools automatically
 ```
 
-#### 🧠 AI-Enhanced Development
+#### AI-Enhanced Development
 ```bash
 # For basic AI enhancement:
 cd agent-example-enhanced
@@ -655,7 +639,7 @@ cd ai-multi-provider
 # - AI-driven decision making
 ```
 
-#### 🔧 Critical: AI Telemetry Initialization Order
+#### Critical: AI Telemetry Initialization Order
 
 **For AI tracing and logging to work correctly**, you MUST initialize telemetry BEFORE creating your agent/AI client:
 
@@ -703,9 +687,9 @@ See [Distributed Tracing Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md#ai-module-d
 ./setup-kind-demo.sh setup
 
 # Test specific patterns:
-# Tools: curl -X POST http://localhost:8080/api/capabilities/<name>
-# Agents: curl http://localhost:8090/api/capabilities/discover_tools
-# AI: curl -X POST http://localhost:8090/api/capabilities/research_topic
+# Tools: curl -X POST http://localhost:8340/api/capabilities/<name>
+# Agents: curl http://localhost:8350/api/capabilities/discover_tools
+# AI: curl -X POST http://localhost:8350/api/capabilities/research_topic
 
 # Debug specific components:
 kubectl logs -f -l app.kubernetes.io/name=<component> -n gomind-examples
@@ -713,7 +697,7 @@ kubectl logs -f -l app.kubernetes.io/name=<component> -n gomind-examples
 
 ### 3. Extending Examples
 
-#### 📝 Adding New Capabilities
+#### Adding New Capabilities
 ```bash
 # In any tool:
 tool.RegisterCapability(core.Capability{
@@ -726,7 +710,7 @@ tool.RegisterCapability(core.Capability{
 # → Automatically creates /api/capabilities/your_capability endpoint
 ```
 
-#### 🔄 Adding Orchestration Logic
+#### Adding Orchestration Logic
 ```bash
 # In any agent:
 func (a *YourAgent) handleComplexWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -765,7 +749,7 @@ func (a *YourAgent) handleComplexWorkflow(w http.ResponseWriter, r *http.Request
 # Multi-Provider: Scale based on AI API rate limits
 ```
 
-## 🧹 Cleanup
+## 12. Cleanup
 
 ```bash
 # Stop port forwarding
@@ -778,27 +762,27 @@ func (a *YourAgent) handleComplexWorkflow(w http.ResponseWriter, r *http.Request
 kind delete cluster --name gomind-demo
 ```
 
-## 📚 Learning Progression
+## 13. Learning Progression
 
-### 🚀 Beginner Path (30 minutes)
+### Beginner Path (30 minutes)
 1. **Start Simple**: `./setup-kind-demo.sh setup` → See everything working
 2. **Core Concepts**: Study `tool-example` → Understand passive tools
 3. **Coordination**: Study `agent-example` → Understand active agents
 4. **Test Together**: Run tool + agent → See service discovery in action
 
-### 🤖 AI Integration Path (1 hour)
+### AI Integration Path (1 hour)
 1. **Enhanced AI**: Study `agent-example-enhanced` → AI in every capability
 2. **AI-Native**: Study `ai-agent-example` → AI-driven architecture
 3. **Production AI**: Study `ai-multi-provider` → Provider resilience
 4. **Ready Tools**: Study `ai-tools-showcase` → Use built-in AI capabilities
 
-### 🏗️ Advanced Architecture Path (2 hours)
+### Advanced Architecture Path (2 hours)
 1. **Complex Flows**: Study `orchestration-example` → Multi-modal coordination
 2. **Declarative**: Study `workflow-example` → YAML-driven workflows
 3. **Observability**: Study `telemetry` + `context_propagation` → Production monitoring
 4. **Reliability**: Study `error_handling` → Framework consistency
 
-### 🎯 Use Case Focused Learning
+### Use Case Focused Learning
 
 **"I want to add AI to my existing service"**
 → Start with `ai-tools-showcase` → See 4 ready-to-use AI tools
@@ -816,7 +800,7 @@ kind delete cluster --name gomind-demo
 **"I want to understand the framework patterns"**
 → `tool-example` → `agent-example` → `context_propagation`
 
-### 📊 Error Handling Progression
+### Error Handling Progression
 
 | Level | Example | Error Handling Capability |
 |-------|---------|--------------------------|
@@ -827,11 +811,11 @@ kind delete cluster --name gomind-demo
 
 > **Note**: For AI-powered error correction, use the `orchestration` module. See [orchestration/README.md](../orchestration/README.md#-when-to-use-the-orchestration-module).
 
-## 🏗️ Building Your Own Examples
+## 14. Building Your Own Examples
 
 Want to create your own tools and agents? Follow these battle-tested patterns learned from all existing examples.
 
-### 🎯 The Foundation: Workspace Independence
+### The Foundation: Workspace Independence
 
 **Most Important Rule:** Every example must work standalone - no dependencies on framework source code.
 
@@ -876,7 +860,7 @@ go mod tidy
 
 ---
 
-### 📁 File Structure
+### File Structure
 
 **Tools use 4 focused files:**
 ```
@@ -906,7 +890,7 @@ your-agent/
 
 ---
 
-### ⚙️ Configuration Best Practices
+### Configuration Best Practices
 
 **Always use environment variables** - never hardcode values:
 
@@ -943,7 +927,7 @@ core.WithPort(8080)  // Don't do this!
 
 ---
 
-### 🏷️ Naming Conventions
+### Naming Conventions
 
 **Be consistent** - it helps developers (and AI) understand your code:
 
@@ -952,24 +936,49 @@ core.WithPort(8080)  // Don't do this!
 | Struct | `{Domain}Tool` | `{Domain}Agent` | `WeatherTool`, `ResearchAgent` |
 | Constructor | `New{Domain}Tool()` | `New{Domain}Agent()` | `NewWeatherTool()` |
 | Service Name | `{domain}-service` | `{domain}-assistant` | `weather-service`, `research-assistant` |
-| Port Range | 808X | 809X | Tools: 8080-8089, Agents: 8090-8099 |
+| Port Range | 833X-834X | 835X | Tools: 8333-8349, Agents: 8350-8359, UIs: 8360-8369 |
 
 **Port allocation:**
-```
-Tools (808X):
-├── 8080 - weather-service
-├── 8082 - stock-service
-└── 8083-8089 - Available
 
-Agents (809X):
-├── 8090 - research-assistant
-├── 8091 - research-assistant-enhanced
-└── 8092-8099 - Available
-```
+All examples use ports starting from **8333** to avoid conflicts with common development ports.
+
+| Example | Host Port | NodePort | Type |
+|---------|-----------|----------|------|
+| **Tools** | | | |
+| country-info-tool | 8333 | 30333 | tool |
+| currency-tool | 8334 | 30334 | tool |
+| geocoding-tool | 8335 | 30335 | tool |
+| grocery-tool | 8336 | 30336 | tool |
+| news-tool | 8337 | 30337 | tool |
+| stock-market-tool | 8338 | 30338 | tool |
+| weather-tool-v2 | 8339 | 30339 | tool |
+| tool-example | 8340 | 30340 | tool |
+| *Available* | 8341-8349 | 30341-30349 | |
+| **Agents** | | | |
+| agent-example | 8350 | 30350 | agent |
+| agent-with-async | 8351 | 30351 | agent |
+| agent-with-human-approval | 8352 | 30352 | agent |
+| agent-with-orchestration | 8353 | 30353 | agent |
+| agent-with-resilience | 8354 | 30354 | agent |
+| agent-with-telemetry | 8355 | 30355 | agent |
+| travel-chat-agent | 8356 | 30356 | agent |
+| *Available* | 8357-8359 | 30357-30359 | |
+| **UI Apps** | | | |
+| chat-ui | 8360 | 30360 | ui |
+| registry-viewer-app | 8361 | 30361 | ui |
+| agent-with-human-approval (UI) | 8362 | 30362 | ui |
+| *Available* | 8363-8369 | 30363-30369 | |
+
+**Infrastructure Ports (unchanged):**
+| Service | Host Port | NodePort |
+|---------|-----------|----------|
+| Grafana | 3000 | 30030 |
+| Prometheus | 9090 | 30090 |
+| Jaeger | 16686 | 31686 |
 
 ---
 
-### 🎯 Capability Registration
+### Capability Registration
 
 **Always include Phase 2 field hints** for AI accuracy:
 
@@ -1005,7 +1014,7 @@ tool.RegisterCapability(core.Capability{
 
 ---
 
-### 🔧 Main Function Structure
+### Main Function Structure
 
 **Every example follows this exact pattern:**
 
@@ -1066,7 +1075,7 @@ func main() {
 
 ---
 
-### 🎨 Emoji Logging
+### Emoji Logging
 
 **Use emojis for visual clarity** (makes logs easier to scan):
 
@@ -1091,7 +1100,7 @@ log.Println("📋 Registered endpoints...")
 
 ---
 
-### 🛡️ Error Handling
+### Error Handling
 
 **Graceful degradation** - warn for optional features, fail for required:
 
@@ -1117,7 +1126,7 @@ func validateConfig() error {
 
 ---
 
-### 🐳 Docker Best Practices
+### Docker Best Practices
 
 **Use multi-stage builds** for small images:
 
@@ -1143,7 +1152,7 @@ CMD ["./service"]
 
 ---
 
-### ☸️ Kubernetes Patterns
+### Kubernetes Patterns
 
 **Every example needs:**
 
@@ -1166,7 +1175,7 @@ resources:
 
 ---
 
-### 📋 Required Supporting Files
+### Required Supporting Files
 
 **Every example must have:**
 
@@ -1181,7 +1190,7 @@ resources:
 
 ---
 
-### 🔍 Tool vs Agent Distinctions
+### Tool vs Agent Distinctions
 
 **Tools (Passive):**
 - Use `core.NewTool()`
@@ -1197,7 +1206,7 @@ resources:
 
 ---
 
-### ✅ Pre-Commit Checklist
+### Pre-Commit Checklist
 
 Before committing your new example, verify:
 
@@ -1235,7 +1244,7 @@ Before committing your new example, verify:
 
 ---
 
-### 🤖 AI Coding Assistant Tips
+### AI Coding Assistant Tips
 
 When working with AI assistants (Claude, Copilot, etc.), use these prompts:
 
@@ -1255,7 +1264,7 @@ When working with AI assistants (Claude, Copilot, etc.), use these prompts:
 
 ---
 
-## 📚 Next Steps
+## 15. Next Steps
 
 1. **🏃 Run Quick Start** - See the full system (5 min)
 2. **🔍 Pick Your Path** - Choose beginner/AI/advanced based on your needs (15-120 min)
@@ -1265,7 +1274,7 @@ When working with AI assistants (Claude, Copilot, etc.), use these prompts:
 6. **☸️ Deploy** - Production Kubernetes deployment (1 hour)
 7. **🤖 Launch** - Your intelligent distributed system is live!
 
-## 📖 Documentation
+## 16. Documentation
 
 - **[Setup Script](setup-kind-demo.sh)** - Automated demo environment
 - **[API Keys Guide](setup-api-keys.sh)** - Automated API key configuration

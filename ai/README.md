@@ -2,26 +2,32 @@
 
 Multi-provider LLM integration with automatic detection, universal compatibility, and extensible architecture.
 
-## 📚 Table of Contents
+## Table of Contents
 
-- [🎯 What Does This Module Do?](#-what-does-this-module-do)
-- [🚀 Quick Start](#-quick-start)
-- [🏷️ Provider Aliases - The Clean Way](#️-provider-aliases---the-clean-way)
-- [🔗 Automatic Failover with Chain Client](#-automatic-failover-with-chain-client)
-- [🎨 Model Aliases - Portable Model Names](#-model-aliases---portable-model-names)
-- [🌍 Supported Providers](#-supported-providers)
-- [🧠 How It Works](#-how-it-works)
-- [📚 Core Concepts](#-core-concepts-explained)
-- [🎮 Three Ways to Use AI](#-three-ways-to-use-ai)
-- [🔧 Provider Configuration](#-provider-configuration)
-- [🏗️ How It Fits in GoMind](#️-how-it-fits-in-gomind)
-- [🚀 Advanced Features](#-advanced-features)
-- [🎯 Common Use Cases](#-common-use-cases)
-- [💡 Best Practices](#-best-practices)
-- [📖 Related Documentation](#-related-documentation)
-- [🎉 Summary](#-summary)
+### Getting Started
+1. [What Does This Module Do?](#1-what-does-this-module-do)
+2. [Quick Start](#2-quick-start)
+3. [Three Ways to Use AI](#3-three-ways-to-use-ai)
+4. [Provider Configuration](#4-provider-configuration)
+5. [Common Use Cases](#5-common-use-cases)
+6. [Best Practices](#6-best-practices)
 
-## 🎯 What Does This Module Do?
+### Advanced Topics
+7. [Provider Aliases](#7-provider-aliases---the-clean-way)
+8. [Chain Client (Failover)](#8-automatic-failover-with-chain-client)
+9. [Model Aliases](#9-model-aliases---portable-model-names)
+10. [Supported Providers](#10-supported-providers)
+11. [How It Works](#11-how-it-works)
+12. [Core Concepts](#12-core-concepts-explained)
+13. [Architecture](#13-how-it-fits-in-gomind)
+14. [Advanced Features](#14-advanced-features)
+15. [Streaming Support](#15-streaming-support)
+16. [Migration Guide](#16-migration-guide)
+17. [Distributed Tracing](#17-distributed-tracing-for-ai-operations)
+18. [Related Documentation](#18-related-documentation)
+19. [Summary](#19-summary)
+
+## 1. What Does This Module Do?
 
 Think of this module as your **universal translator for AI services**. Just like how a power adapter lets you plug your laptop into outlets worldwide, this module lets your agents talk to any AI service - OpenAI, Anthropic, Google, or even your company's private LLM.
 
@@ -65,7 +71,18 @@ response, _ := client.GenerateResponse(ctx, "Hello AI!", nil)
 
 > 📖 **For detailed configuration, operational scenarios, and Kubernetes deployment guides, see [AI Providers Setup Guide](../docs/AI_PROVIDERS_SETUP_GUIDE.md).**
 
-## 🚀 Quick Start
+### 📍 How to Read This Document
+
+| If you want to... | Start here |
+|-------------------|------------|
+| Make your first API call | [Quick Start](#-quick-start) |
+| Understand the 3 usage patterns | [Three Ways to Use AI](#-three-ways-to-use-ai) |
+| Configure providers & models | [Provider Configuration](#-provider-configuration) |
+| See practical examples | [Common Use Cases](#-common-use-cases) |
+| Learn production best practices | [Best Practices](#-best-practices) |
+| Use multi-provider failover | [Advanced Topics](#-advanced-topics) (Chain Client, Provider Aliases) |
+
+## 2. Quick Start
 
 ### Installation
 
@@ -115,7 +132,271 @@ fmt.Println(response.Content)
 
 For example, if you have `OPENAI_API_KEY` set, it uses OpenAI. If you have `GROQ_API_KEY` instead, it automatically configures the OpenAI provider to use Groq's endpoint. No code changes needed!
 
-## 🏷️ Provider Aliases - The Clean Way
+## 3. Three Ways to Use AI
+
+### Method 1: Zero Configuration (Auto-Pilot)
+
+Perfect for getting started - the module figures everything out:
+
+```go
+// Just set an environment variable
+export OPENAI_API_KEY=sk-...
+
+// In your code - that's it!
+client, _ := ai.NewClient()
+response, _ := client.GenerateResponse(ctx, "Hello!", nil)
+```
+
+**Behind the scenes:**
+1. Checks environment variables
+2. Finds available API keys
+3. Auto-configures the appropriate provider
+4. Ready to use!
+
+### Method 2: Explicit Provider (You Choose)
+
+When you want a specific provider:
+
+```go
+// Use native Anthropic implementation
+client, _ := ai.NewClient(
+    ai.WithProvider("anthropic"),
+    ai.WithAPIKey("sk-ant-..."),
+    ai.WithModel("claude-3-sonnet-20240229"),
+)
+
+// Use native Gemini implementation
+client, _ := ai.NewClient(
+    ai.WithProvider("gemini"),
+    ai.WithAPIKey("..."),
+    ai.WithModel("gemini-1.5-pro"),
+)
+```
+
+#### AWS Bedrock Provider
+
+AWS Bedrock provides unified access to multiple foundation models including Claude, Llama, Titan, and more. It requires the `bedrock` build tag:
+
+```bash
+# Build with Bedrock support
+go build -tags bedrock
+```
+
+**Configuration Methods:**
+
+```go
+// Method 1: Use AWS environment variables or IAM role
+client, _ := ai.NewClient(
+    ai.WithProvider("bedrock"),
+    ai.WithRegion("us-east-1"),
+)
+
+// Method 2: Explicit credentials
+client, _ := ai.NewClient(
+    ai.WithProvider("bedrock"),
+    ai.WithRegion("us-west-2"),
+    ai.WithAWSCredentials(accessKey, secretKey, sessionToken),
+)
+
+// Method 3: Specify a model
+client, _ := ai.NewClient(
+    ai.WithProvider("bedrock"),
+    ai.WithModel("anthropic.claude-3-sonnet-20240229-v1:0"),
+)
+```
+
+**Supported Models in Bedrock:**
+- Anthropic Claude (Opus, Sonnet, Haiku, Instant)
+- Meta Llama 2 & 3 (8B, 13B, 70B variants)
+- Amazon Titan (Text and Embeddings)
+- Mistral and Mixtral models
+- Cohere Command models
+
+**Authentication Priority:**
+1. Explicit credentials via `WithAWSCredentials()`
+2. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+3. AWS Profile (`AWS_PROFILE`)
+4. IAM role (when running on EC2/ECS/Lambda)
+5. Credentials file (`~/.aws/credentials`)
+
+### Method 3: Multi-Provider Strategy (Advanced)
+
+For multi-provider failover strategies, see [Chain Client](#-automatic-failover-with-chain-client) in Advanced Topics below.
+
+## 4. Provider Configuration
+
+### Environment Variables - Set and Forget
+
+The module automatically detects and configures based on environment:
+
+```bash
+# Native providers (each has its own implementation)
+export OPENAI_API_KEY=sk-...          # OpenAI
+export ANTHROPIC_API_KEY=sk-ant-...   # Anthropic Claude
+export GEMINI_API_KEY=...             # Google Gemini
+
+# OpenAI-compatible services with provider aliases (recommended)
+# Each gets its own namespace - no conflicts!
+export DEEPSEEK_API_KEY=sk-...        # DeepSeek reasoning models
+export GROQ_API_KEY=gsk-...           # Groq ultra-fast inference
+export XAI_API_KEY=xai-...            # xAI Grok models
+export QWEN_API_KEY=...               # Qwen (Alibaba) models
+export TOGETHER_API_KEY=...           # Together AI models
+export OLLAMA_BASE_URL=http://localhost:11434/v1  # Local Ollama
+
+# AWS Bedrock (requires -tags bedrock during build)
+export AWS_REGION=us-east-1
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+```
+
+### Configuration Options
+
+All configuration options available when creating a client:
+
+```go
+client, _ := ai.NewClient(
+    // Provider selection
+    ai.WithProvider("openai"),           // Base provider
+    ai.WithProviderAlias("openai.groq"), // Or use provider alias
+
+    // Authentication
+    ai.WithAPIKey("your-key"),
+    ai.WithBaseURL("https://..."),       // Custom endpoint
+
+    // Model configuration
+    ai.WithModel("gpt-4"),               // Model to use
+    ai.WithTemperature(0.7),             // Creativity (0.0-1.0)
+    ai.WithMaxTokens(2000),              // Max response tokens
+
+    // Connection settings
+    ai.WithTimeout(60 * time.Second),    // Request timeout
+    ai.WithMaxRetries(3),                // Retries on failure
+)
+```
+
+#### Default Values
+
+| Setting | Default |
+|---------|---------|
+| Provider | "auto" (auto-detects) |
+| Timeout | 30 seconds |
+| MaxRetries | 3 |
+| Temperature | 0.7 |
+| MaxTokens | 1000 |
+
+## 5. Common Use Cases
+
+### Simple Q&A Bot
+
+```go
+func handleQuestion(question string) string {
+    client, _ := ai.NewClient()
+
+    response, err := client.GenerateResponse(
+        context.Background(),
+        question,
+        &core.AIOptions{
+            MaxTokens: 500,
+            Temperature: 0.7,
+        },
+    )
+
+    if err != nil {
+        return "Sorry, I couldn't process that question."
+    }
+
+    return response.Content
+}
+```
+
+### Document Analysis
+
+```go
+func analyzeDocument(document string) (string, error) {
+    client, _ := ai.NewClient(
+        ai.WithProvider("anthropic"),
+        ai.WithModel("claude-3-sonnet-20240229"),
+    )
+
+    prompt := fmt.Sprintf(`
+        Analyze this document and provide:
+        1. Summary (2-3 sentences)
+        2. Key points
+        3. Action items
+
+        Document: %s
+    `, document)
+
+    response, err := client.GenerateResponse(
+        context.Background(),
+        prompt,
+        &core.AIOptions{
+            Temperature: 0.3,
+            MaxTokens: 1000,
+        },
+    )
+
+    return response.Content, err
+}
+```
+
+## 6. Best Practices
+
+### The Golden Rules
+
+1. **🔑 Never hardcode API keys**
+```go
+// ❌ Bad
+client, _ := ai.NewClient(ai.WithAPIKey("sk-proj-123..."))
+
+// ✅ Good
+client, _ := ai.NewClient(ai.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
+```
+
+2. **🔄 Always handle errors**
+```go
+response, err := client.GenerateResponse(ctx, prompt, options)
+if err != nil {
+    log.Printf("AI request failed: %v", err)
+    return fallbackResponse, nil
+}
+```
+
+3. **⏱️ Set appropriate timeouts**
+```go
+client, _ := ai.NewClient(
+    ai.WithTimeout(30 * time.Second),
+    ai.WithMaxRetries(3),
+)
+```
+
+4. **📊 Monitor token usage**
+```go
+response, _ := client.GenerateResponse(ctx, prompt, options)
+log.Printf("Request used %d tokens", response.Usage.TotalTokens)
+```
+
+5. **🎯 Use appropriate temperature**
+```go
+// For factual queries: lower temperature
+factualResponse, _ := client.GenerateResponse(ctx, prompt, &core.AIOptions{
+    Temperature: 0.2,
+})
+
+// For creative tasks: higher temperature
+creativeResponse, _ := client.GenerateResponse(ctx, prompt, &core.AIOptions{
+    Temperature: 0.8,
+})
+```
+
+---
+
+# 🔧 Advanced Topics
+
+> Everything below is for production systems with multi-provider needs, custom configurations, and advanced patterns. Start here after you're comfortable with basic usage.
+
+## 7. Provider Aliases - The Clean Way
 
 ### Real-World Analogy: Email Addresses vs Phone Extensions
 
@@ -231,7 +512,7 @@ export DEEPSEEK_API_KEY=sk-deepseek-key
 export GROQ_API_KEY=gsk-groq-key
 ```
 
-## 🔗 Automatic Failover with Chain Client
+## 8. Automatic Failover with Chain Client
 
 ### Real-World Analogy: Your Phone's Emergency Contacts
 
@@ -277,6 +558,25 @@ Think of Chain Client as having multiple backup generators:
 3. **Emergency Backup (Groq)**: If everything else fails, try this
 
 The chain stops at the **first successful response** - no wasted API calls!
+
+### Provider Priority Order
+
+When using `ai.NewClient()` without specifying a provider (auto-detection mode), providers are selected based on their priority scores:
+
+| Priority | Provider | Detection Method |
+|----------|----------|------------------|
+| 100 | OpenAI | `OPENAI_API_KEY` |
+| 95 | Groq | `GROQ_API_KEY` |
+| 90 | DeepSeek | `DEEPSEEK_API_KEY` |
+| 85 | xAI Grok | `XAI_API_KEY` |
+| 80 | Anthropic | `ANTHROPIC_API_KEY` |
+| 80 | Qwen | `QWEN_API_KEY` |
+| 75 | Together AI | `TOGETHER_API_KEY` |
+| 70 | Gemini | `GEMINI_API_KEY` |
+| 60+ | AWS Bedrock | AWS credentials (+10 on AWS infra) |
+| 50 | Ollama | Local service at `localhost:11434` |
+
+> **Note**: When using Chain Client with `WithProviderChain()`, providers are tried in the **order you specify**, not by priority. Priority only applies to auto-detection with `ai.NewClient()`.
 
 ### Complete Example: Building a Resilient AI System
 
@@ -429,7 +729,7 @@ This is useful for:
 - **Health endpoints** exposing available AI providers
 - **Debugging** failover behavior in production
 
-## 🎨 Model Aliases - Portable Model Names
+## 9. Model Aliases - Portable Model Names
 
 ### Real-World Analogy: T-Shirt Sizes
 
@@ -598,7 +898,7 @@ response, _ := client.GenerateResponse(
 )
 ```
 
-## 🌍 Supported Providers
+## 10. Supported Providers
 
 ### Universal OpenAI-Compatible Provider
 
@@ -728,13 +1028,13 @@ export GEMINI_API_KEY=your-key
 4. **Simple Migration**: Switch providers by changing base URL only
 5. **Auto-Detection**: Automatically finds and configures available services
 
-## 🧠 How It Works
+## 11. How It Works
 
 ### Auto-Detection
 
 When you call `ai.NewClient()` without specifying a provider, the module automatically checks for available services in priority order and configures the best option. See the [Auto-Detection Priority](#auto-detection-priority) section for details.
 
-## 📚 Core Concepts Explained
+## 12. Core Concepts Explained
 
 ### The Provider Registry - Plugin Architecture
 
@@ -757,168 +1057,6 @@ info := ai.GetProviderInfo()
 // Returns provider names, descriptions, availability, and priority
 ```
 
-## 🎮 Three Ways to Use AI
-
-### Method 1: Zero Configuration (Auto-Pilot)
-
-Perfect for getting started - the module figures everything out:
-
-```go
-// Just set an environment variable
-export OPENAI_API_KEY=sk-...
-
-// In your code - that's it!
-client, _ := ai.NewClient()
-response, _ := client.GenerateResponse(ctx, "Hello!", nil)
-```
-
-**Behind the scenes:**
-1. Checks environment variables
-2. Finds available API keys
-3. Auto-configures the appropriate provider
-4. Ready to use!
-
-### Method 2: Explicit Provider (You Choose)
-
-When you want a specific provider:
-
-```go
-// Use native Anthropic implementation
-client, _ := ai.NewClient(
-    ai.WithProvider("anthropic"),
-    ai.WithAPIKey("sk-ant-..."),
-    ai.WithModel("claude-3-sonnet-20240229"),
-)
-
-// Use native Gemini implementation
-client, _ := ai.NewClient(
-    ai.WithProvider("gemini"),
-    ai.WithAPIKey("..."),
-    ai.WithModel("gemini-1.5-pro"),
-)
-
-```
-
-#### AWS Bedrock Provider
-
-AWS Bedrock provides unified access to multiple foundation models including Claude, Llama, Titan, and more. It requires the `bedrock` build tag:
-
-```bash
-# Build with Bedrock support
-go build -tags bedrock
-```
-
-**Configuration Methods:**
-
-```go
-// Method 1: Use AWS environment variables or IAM role
-client, _ := ai.NewClient(
-    ai.WithProvider("bedrock"),
-    ai.WithRegion("us-east-1"),
-)
-
-// Method 2: Explicit credentials
-client, _ := ai.NewClient(
-    ai.WithProvider("bedrock"),
-    ai.WithRegion("us-west-2"),
-    ai.WithAWSCredentials(accessKey, secretKey, sessionToken),
-)
-
-// Method 3: Specify a model
-client, _ := ai.NewClient(
-    ai.WithProvider("bedrock"),
-    ai.WithModel("anthropic.claude-3-sonnet-20240229-v1:0"),
-)
-```
-
-**Supported Models in Bedrock:**
-- Anthropic Claude (Opus, Sonnet, Haiku, Instant)
-- Meta Llama 2 & 3 (8B, 13B, 70B variants)
-- Amazon Titan (Text and Embeddings)
-- Mistral and Mixtral models
-- Cohere Command models
-
-**Authentication Priority:**
-1. Explicit credentials via `WithAWSCredentials()`
-2. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
-3. AWS Profile (`AWS_PROFILE`)
-4. IAM role (when running on EC2/ECS/Lambda)
-5. Credentials file (`~/.aws/credentials`)
-
-### Method 3: Multi-Provider Strategy (Advanced)
-
-**🆕 NEW: Use Chain Client for automatic failover!** (Recommended)
-
-The easiest way to use multiple providers is with Chain Client, which handles failover automatically:
-
-```go
-// Automatic failover - Chain Client handles everything!
-client, _ := ai.NewChainClient(
-    ai.WithProviderChain(
-        "openai",           // Primary
-        "openai.deepseek",  // Backup
-        "openai.groq",      // Emergency
-    ),
-)
-
-// Just use it - failover happens automatically!
-response, err := client.GenerateResponse(ctx, prompt, nil)
-```
-
-See the [Automatic Failover with Chain Client](#-automatic-failover-with-chain-client) section above for full details!
-
----
-
-**Alternative: Manual Provider Management** (When you need fine-grained control)
-
-Use different providers for different purposes in your application:
-
-```go
-type AISystem struct {
-    primary   core.AIClient  // Your main provider
-    fallback  core.AIClient  // Backup provider
-    local     core.AIClient  // For sensitive data
-}
-
-func NewAISystem() *AISystem {
-    // Primary: OpenAI for general use (using alias - cleaner!)
-    primary, _ := ai.NewClient(ai.WithProviderAlias("openai"))
-
-    // Fallback: Groq for speed (using alias!)
-    fallback, _ := ai.NewClient(ai.WithProviderAlias("openai.groq"))
-
-    // Local: Ollama for sensitive data (using alias!)
-    local, _ := ai.NewClient(ai.WithProviderAlias("openai.ollama"))
-
-    return &AISystem{primary, fallback, local}
-}
-
-func (s *AISystem) Process(ctx context.Context, prompt string, sensitive bool) (*core.AIResponse, error) {
-    if sensitive {
-        // Use local model for sensitive data
-        return s.local.GenerateResponse(ctx, prompt, nil)
-    }
-
-    // Try primary first
-    response, err := s.primary.GenerateResponse(ctx, prompt, nil)
-    if err != nil {
-        // Manual fallback on error
-        return s.fallback.GenerateResponse(ctx, prompt, nil)
-    }
-
-    return response, nil
-}
-```
-
-**When to use Manual vs Chain Client:**
-- **Use Chain Client** when you want automatic failover for the same task
-- **Use Manual** when different providers serve different purposes (sensitive data vs public, different regions, etc.)
-
-## 🔧 Provider Configuration
-
-### Environment Variables - Set and Forget
-
-The module automatically detects and configures based on environment:
 
 ```bash
 # Native providers (each has its own implementation)
@@ -926,7 +1064,7 @@ export OPENAI_API_KEY=sk-...          # OpenAI
 export ANTHROPIC_API_KEY=sk-ant-...   # Anthropic Claude
 export GEMINI_API_KEY=...             # Google Gemini
 
-# 🆕 OpenAI-compatible services with provider aliases (recommended!)
+# OpenAI-compatible services with provider aliases (recommended)
 # Each gets its own namespace - no conflicts!
 export DEEPSEEK_API_KEY=sk-...        # DeepSeek reasoning models
 export DEEPSEEK_BASE_URL=https://...  # Optional: Override endpoint
@@ -971,7 +1109,7 @@ client, _ := ai.NewClient(
     // Provider selection (choose ONE of these methods):
     ai.WithProvider("openai"),           // Method 1: Base provider ("openai", "anthropic", "gemini", "auto")
     // OR
-    ai.WithProviderAlias("openai.groq"), // Method 2: 🆕 Provider alias (replaces WithProvider + WithBaseURL)
+    ai.WithProviderAlias("openai.groq"), // Method 2: Provider alias (replaces WithProvider + WithBaseURL)
 
     // Authentication
     ai.WithAPIKey("your-key"),          // API key (optional with aliases - can use env vars)
@@ -1009,7 +1147,7 @@ client, _ := ai.NewClient(
 - **Temperature**: 0.7
 - **MaxTokens**: 1000
 
-## 🏗️ How It Fits in GoMind
+## 13. How It Fits in GoMind
 
 ### The Architecture
 
@@ -1109,7 +1247,7 @@ response, err := agent.DiscoverAndOrchestrate(ctx,
     "Get the latest sales data and create a summary")
 ```
 
-## 🚀 Advanced Features
+## 14. Advanced Features
 
 ### Provider Registry Functions
 
@@ -1296,7 +1434,7 @@ if embedder, ok := client.(ai.EmbeddingClient); ok {
 }
 ```
 
-## 🌊 Streaming Support
+## 15. Streaming Support
 
 The AI module provides comprehensive streaming support across all providers. Streaming delivers AI responses token-by-token as they're generated, enabling real-time UX and lower time-to-first-token.
 
@@ -1506,154 +1644,7 @@ func streamWithBestPractices(ctx context.Context, client core.StreamingAIClient,
 
 **For a complete working example** of streaming in a production chat agent with SSE, session management, and conversation history, see the [Chat Agent Implementation Guide](../docs/CHAT_AGENT_GUIDE.md).
 
-## 🎯 Common Use Cases
-
-### Simple Q&A Bot
-
-```go
-func handleQuestion(question string) string {
-    // Auto-detects provider from environment
-    client, _ := ai.NewClient()
-    
-    response, err := client.GenerateResponse(
-        context.Background(),
-        question,
-        &core.AIOptions{
-            MaxTokens: 500,  // Keep responses concise
-            Temperature: 0.7, // Balanced creativity
-        },
-    )
-    
-    if err != nil {
-        return "Sorry, I couldn't process that question."
-    }
-    
-    return response.Content
-}
-```
-
-### Document Analysis
-
-```go
-func analyzeDocument(document string) (string, error) {
-    client, _ := ai.NewClient(
-        ai.WithProvider("anthropic"),  // Use Claude for documents
-        ai.WithAPIKey(os.Getenv("ANTHROPIC_API_KEY")),
-        ai.WithModel("claude-3-sonnet-20240229"),
-    )
-    
-    prompt := fmt.Sprintf(`
-        Analyze this document and provide:
-        1. Summary (2-3 sentences)
-        2. Key points
-        3. Action items
-        
-        Document: %s
-    `, document)
-    
-    response, err := client.GenerateResponse(
-        context.Background(),
-        prompt,
-        &core.AIOptions{
-            Temperature: 0.3,  // More focused analysis
-            MaxTokens: 1000,
-        },
-    )
-    
-    return response.Content, err
-}
-```
-
-### Resilient AI System with Fallback
-
-```go
-func createResilientAI() core.AIClient {
-    // Primary provider
-    primary, _ := ai.NewClient()
-    
-    // Fallback provider (different service)
-    fallback, _ := ai.NewClient(
-        ai.WithProvider("openai"),
-        ai.WithBaseURL("https://api.groq.com/openai/v1"),
-        ai.WithAPIKey(os.Getenv("GROQ_API_KEY")),
-    )
-    
-    // Wrap in resilient client
-    return &ResilientClient{
-        primary:  primary,
-        fallback: fallback,
-    }
-}
-
-type ResilientClient struct {
-    primary  core.AIClient
-    fallback core.AIClient
-}
-
-func (r *ResilientClient) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
-    // Try primary first
-    response, err := r.primary.GenerateResponse(ctx, prompt, options)
-    if err == nil {
-        return response, nil
-    }
-    
-    // Fallback on error
-    log.Printf("Primary provider failed, using fallback: %v", err)
-    return r.fallback.GenerateResponse(ctx, prompt, options)
-}
-```
-
-## 💡 Best Practices
-
-### The Golden Rules
-
-1. **🔑 Never hardcode API keys**
-```go
-// ❌ Bad
-client, _ := ai.NewClient(ai.WithAPIKey("sk-proj-123..."))
-
-// ✅ Good
-client, _ := ai.NewClient(ai.WithAPIKey(os.Getenv("OPENAI_API_KEY")))
-```
-
-2. **🔄 Always handle errors**
-```go
-response, err := client.GenerateResponse(ctx, prompt, options)
-if err != nil {
-    // Handle error appropriately
-    log.Printf("AI request failed: %v", err)
-    return fallbackResponse, nil
-}
-```
-
-3. **⏱️ Set appropriate timeouts**
-```go
-client, _ := ai.NewClient(
-    ai.WithTimeout(30 * time.Second),  // Don't wait forever
-    ai.WithMaxRetries(3),               // Retry transient failures
-)
-```
-
-4. **📊 Monitor token usage**
-```go
-response, _ := client.GenerateResponse(ctx, prompt, options)
-log.Printf("Request used %d tokens", response.Usage.TotalTokens)
-```
-
-5. **🎯 Use appropriate options for your use case**
-```go
-// For factual queries: lower temperature
-factualResponse, _ := client.GenerateResponse(ctx, prompt, &core.AIOptions{
-    Temperature: 0.2,  // More deterministic
-})
-
-// For creative tasks: higher temperature
-creativeResponse, _ := client.GenerateResponse(ctx, prompt, &core.AIOptions{
-    Temperature: 0.8,  // More creative
-})
-```
-
-## 🔄 Migration Guide
+## 16. Migration Guide
 
 ### Switching Between Providers
 
@@ -1705,7 +1696,7 @@ Your code stays the same:
 client, _ := ai.NewClient()  // Auto-detects from environment
 ```
 
-## 📊 Distributed Tracing for AI Operations
+## 17. Distributed Tracing for AI Operations
 
 The AI module supports distributed tracing via OpenTelemetry, allowing you to see AI operations (`ai.generate_response`, `ai.http_attempt`) in Jaeger as part of your request traces.
 
@@ -1777,14 +1768,14 @@ func main() {
 
 See `examples/agent-with-orchestration/` for a production-ready example with full AI telemetry integration.
 
-## 📖 Related Documentation
+## 18. Related Documentation
 
 | Document | Description |
 |----------|-------------|
 | **[AI Providers Setup Guide](../docs/AI_PROVIDERS_SETUP_GUIDE.md)** | Comprehensive guide for configuring providers, operational scenarios, Kubernetes deployment, and troubleshooting |
 | **[ARCHITECTURE.md](./ARCHITECTURE.md)** | Technical architecture and design decisions |
 
-## 🎉 Summary
+## 19. Summary
 
 ### What This Module Gives You
 

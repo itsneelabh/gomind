@@ -12,6 +12,7 @@ Welcome to the GoMind logging guide! This document explains how to implement con
 - [Agent Logging: Complete Example](#agent-logging-complete-example)
 - [Tool Logging: Complete Example](#tool-logging-complete-example)
 - [Handler Logging with Trace Correlation](#handler-logging-with-trace-correlation)
+- [HITL (Human-in-the-Loop) Request Tracing](#hitl-human-in-the-loop-request-tracing)
 - [Structured Logging: Field Naming Standards](#structured-logging-field-naming-standards)
 - [The Mixed Logging Problem](#the-mixed-logging-problem)
 - [Telemetry Integration](#telemetry-integration)
@@ -692,6 +693,409 @@ When using JSON format (production), trace context appears as fields:
 
 ---
 
+## HITL (Human-in-the-Loop) Request Tracing
+
+HITL workflows present a unique logging challenge: a single user conversation may span **multiple HTTP requests** with **different `request_id` values**. This section explains how to correlate logs across the entire HITL conversation.
+
+### The Challenge: Multiple Requests, One Conversation
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ HITL CONVERSATION FLOW                                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Request 1 (Parent)         Request 2 (Child/Resume)                    │
+│  ─────────────────          ──────────────────────                      │
+│  request_id: "req-abc123"   request_id: "req-def456"  ← DIFFERENT!     │
+│  trace_id: "trace-111"      trace_id: "trace-222"     ← DIFFERENT!     │
+│                                                                          │
+│  [User sends query]         [After human approval]                       │
+│       ↓                           ↓                                      │
+│  [Plan generated]           [Resume from checkpoint]                     │
+│       ↓                           ↓                                      │
+│  [HITL interrupt]           [Plan executes]                              │
+│       ↓                           ↓                                      │
+│  [Checkpoint created]       [Result returned]                            │
+│       ↓                                                                  │
+│  [ErrInterrupted returned]                                               │
+│                                                                          │
+│  HOW DO WE CORRELATE THESE TWO REQUESTS?                                │
+│  Answer: original_request_id = "req-abc123" (same for both!)            │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### The Solution: `original_request_id`
+
+GoMind uses `original_request_id` to link all requests in a HITL conversation:
+
+| Field | Initial Request | Resume Request | Purpose |
+|-------|-----------------|----------------|---------|
+| `request_id` | `req-abc123` | `req-def456` | Unique per HTTP request |
+| `original_request_id` | `req-abc123` | `req-abc123` | Same across conversation |
+| `trace_id` | `trace-111` | `trace-222` | Unique per distributed trace |
+| `checkpoint_id` | `cp-xyz789` | `cp-xyz789` | Links interrupt to resume |
+
+**Key insight**: `original_request_id` is the **correlation key** for the entire HITL conversation.
+
+### How `original_request_id` Flows Through the System
+
+#### 1. Initial Request (Parent)
+
+```go
+// orchestrator.go - ProcessRequest
+requestID := generateRequestID()  // e.g., "req-abc123"
+
+// For initial requests, original_request_id == request_id
+ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+// original_request_id defaults to request_id when not set in baggage
+```
+
+When a HITL checkpoint is created, `hitl_controller.go` captures:
+
+```go
+// hitl_controller.go - createCheckpoint
+originalRequestID := requestID  // Default to current request_id
+if bag := telemetry.GetBaggage(ctx); bag != nil {
+    if origID := bag["original_request_id"]; origID != "" {
+        originalRequestID = origID  // Use preserved original for resume
+    }
+}
+
+checkpoint := &ExecutionCheckpoint{
+    RequestID:         requestID,          // "req-abc123"
+    OriginalRequestID: originalRequestID,  // "req-abc123" (same for initial)
+    // ...
+}
+```
+
+#### 2. Resume Request (Child)
+
+When the agent resumes from a checkpoint, it **must** set `original_request_id` in baggage. The reference implementation in `agent-with-human-approval` uses this priority logic:
+
+```go
+// handlers.go - handleResumeSSE (from agent-with-human-approval)
+checkpoint, _ := checkpointStore.LoadCheckpoint(ctx, checkpointID)
+
+// Determine original_request_id for trace correlation across HITL conversation
+// Priority: 1) Header from UI, 2) Checkpoint's OriginalRequestID, 3) Checkpoint's RequestID (fallback)
+// NOTE: For step checkpoints, RequestID is the resume request's ID, not the original.
+// OriginalRequestID preserves the first request's ID across the entire HITL conversation.
+originalRequestID := originalRequestIDFromHeader  // From X-Original-Request-ID header
+if originalRequestID == "" {
+    if checkpoint.OriginalRequestID != "" {
+        originalRequestID = checkpoint.OriginalRequestID
+    } else {
+        originalRequestID = checkpoint.RequestID  // Fallback for legacy checkpoints
+    }
+}
+
+// Log the trace correlation setup
+t.Logger.InfoWithContext(ctx, "Trace correlation IDs determined", map[string]interface{}{
+    "operation":                       "hitl_resume_trace_setup",
+    "checkpoint_id":                   checkpointID,
+    "checkpoint_request_id":           checkpoint.RequestID,
+    "checkpoint_original_request_id":  checkpoint.OriginalRequestID,
+    "original_request_id_used":        originalRequestID,
+})
+
+// Set in baggage BEFORE calling orchestrator
+ctx = telemetry.WithBaggage(ctx, "original_request_id", originalRequestID)
+
+// Now call orchestrator - it will generate a NEW request_id
+// but original_request_id will be preserved via baggage
+result, err := orchestrator.ProcessRequestStreaming(ctx, checkpoint.OriginalRequest, ...)
+```
+
+#### 3. Execution Storage
+
+The `storeExecutionAsync` helper extracts `original_request_id` from baggage:
+
+```go
+// orchestrator.go - storeExecutionAsync
+originalRequestID := requestID  // Default
+if bag != nil {
+    if origID, ok := bag["original_request_id"]; ok && origID != "" {
+        originalRequestID = origID  // Links to parent request
+    }
+}
+
+stored := &StoredExecution{
+    RequestID:         requestID,          // "req-def456" (new)
+    OriginalRequestID: originalRequestID,  // "req-abc123" (preserved)
+    // ...
+}
+```
+
+### Logging Fields for HITL
+
+When logging in HITL-related code, include these fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `request_id` | **YES** | Current request's unique ID |
+| `original_request_id` | For HITL | Links to the conversation's first request |
+| `checkpoint_id` | For HITL | Links interrupt to resume |
+| `interrupted` | For HITL | Boolean indicating if this request was interrupted |
+
+**Example: HITL checkpoint creation log** (from orchestrator.go)
+
+```go
+if o.logger != nil {
+    o.logger.InfoWithContext(ctx, "Plan execution interrupted for human approval", map[string]interface{}{
+        "operation":     "hitl_plan_approval",
+        "request_id":    requestID,
+        "plan_id":       plan.PlanID,
+        "checkpoint_id": checkpoint.CheckpointID,
+    })
+}
+```
+
+> **Note**: The `original_request_id` is captured in the `ExecutionCheckpoint` struct and persisted to the checkpoint store. The checkpoint's `OriginalRequestID` field is then used during resume to correlate the conversation.
+
+**Example: Resume execution log**
+
+```go
+if a.Logger != nil {
+    a.Logger.InfoWithContext(ctx, "Resuming execution from checkpoint", map[string]interface{}{
+        "operation":           "hitl_resume",
+        "request_id":          newRequestID,        // New request_id
+        "original_request_id": originalRequestID,  // Preserved from parent
+        "checkpoint_id":       checkpoint.CheckpointID,
+        "checkpoint_status":   checkpoint.Status,
+    })
+}
+```
+
+### Filtering Logs by `original_request_id`
+
+To see the **entire HITL conversation** across all requests:
+
+#### JSON Format (with jq)
+
+```bash
+# Find all logs for a HITL conversation
+kubectl logs -n gomind-examples -l app=agent-with-human-approval | \
+  jq 'select(.original_request_id == "req-abc123" or .request_id == "req-abc123")'
+
+# Show the conversation timeline
+kubectl logs -n gomind-examples -l app=agent-with-human-approval | \
+  jq 'select(.original_request_id == "req-abc123")' | \
+  jq -s 'sort_by(.timestamp) | .[] | {timestamp, operation, request_id, message}'
+```
+
+#### Grafana Loki (LogQL)
+
+```logql
+# All logs in a HITL conversation
+{namespace="gomind-examples", app="agent-with-human-approval"}
+  | json
+  | original_request_id="req-abc123"
+
+# HITL interrupts only
+{namespace="gomind-examples"}
+  | json
+  | interrupted="true"
+
+# Correlation: find resume logs for a checkpoint
+{namespace="gomind-examples"}
+  | json
+  | checkpoint_id="cp-xyz789"
+  | operation="hitl_resume"
+```
+
+### Example: Complete HITL Conversation Logs
+
+Here's what a full HITL conversation looks like in logs:
+
+```json
+// === INITIAL REQUEST (Parent) ===
+{
+  "timestamp": "2025-01-15T10:00:00Z",
+  "level": "INFO",
+  "component": "framework/orchestration",
+  "message": "Starting request processing",
+  "operation": "process_request",
+  "request_id": "req-abc123",
+  "request_length": 45
+}
+
+{
+  "timestamp": "2025-01-15T10:00:01Z",
+  "level": "INFO",
+  "component": "framework/orchestration",
+  "message": "Plan generated successfully",
+  "operation": "plan_generation",
+  "request_id": "req-abc123",
+  "plan_id": "plan-001",
+  "step_count": 3
+}
+
+{
+  "timestamp": "2025-01-15T10:00:01Z",
+  "level": "INFO",
+  "component": "framework/orchestration",
+  "message": "Plan execution interrupted for human approval",
+  "operation": "hitl_plan_approval",
+  "request_id": "req-abc123",
+  "plan_id": "plan-001",
+  "checkpoint_id": "cp-xyz789"
+}
+
+// === HUMAN APPROVES (separate trace) ===
+{
+  "timestamp": "2025-01-15T10:05:00Z",
+  "level": "INFO",
+  "component": "agent/agent-with-human-approval",
+  "message": "Checkpoint approved by human",
+  "operation": "hitl_approve",
+  "checkpoint_id": "cp-xyz789",
+  "command": "approve"
+}
+
+// === RESUME REQUEST (Child) ===
+{
+  "timestamp": "2025-01-15T10:05:01Z",
+  "level": "INFO",
+  "component": "agent/agent-with-human-approval",
+  "message": "Resuming execution from checkpoint",
+  "operation": "hitl_resume",
+  "request_id": "req-def456",
+  "original_request_id": "req-abc123",
+  "checkpoint_id": "cp-xyz789"
+}
+
+{
+  "timestamp": "2025-01-15T10:05:02Z",
+  "level": "INFO",
+  "component": "framework/orchestration",
+  "message": "Using plan override from checkpoint",
+  "operation": "hitl_resume_plan_override",
+  "request_id": "req-def456",
+  "plan_id": "plan-001",
+  "step_count": 3
+}
+
+{
+  "timestamp": "2025-01-15T10:05:05Z",
+  "level": "INFO",
+  "component": "framework/orchestration",
+  "message": "Plan execution completed",
+  "operation": "plan_execution",
+  "request_id": "req-def456",
+  "plan_id": "plan-001",
+  "success": true,
+  "duration_ms": 3000
+}
+```
+
+**Observation**: Notice how `original_request_id: "req-abc123"` appears in both the initial interrupt log and the resume logs, allowing you to trace the entire conversation.
+
+### DAG Visualization and `original_request_id`
+
+The DAG visualization in the Registry Viewer uses `original_request_id` to group related executions:
+
+```go
+// ExecutionSummary in redis_execution_store.go
+type ExecutionSummary struct {
+    RequestID         string    `json:"request_id"`
+    OriginalRequestID string    `json:"original_request_id,omitempty"`
+    Interrupted       bool      `json:"interrupted,omitempty"`
+    // ...
+}
+```
+
+In the UI, executions with the same `original_request_id` are grouped as parent-child:
+
+```
+Execution DAG
+├─ req-abc123 (Parent, Interrupted: true)
+│  └─ Checkpoint: cp-xyz789 (Plan Approval)
+│
+└─ req-def456 (Child, OriginalRequestID: req-abc123)
+   └─ Steps: weather → currency → response
+```
+
+### Background Goroutine Logging for HITL
+
+When storing HITL executions asynchronously, use **non-context logging methods** since the goroutine runs with `context.Background()`:
+
+```go
+// orchestrator.go - storeExecutionAsync
+// This runs in a goroutine with context.Background()
+// so we use o.logger.Warn() NOT o.logger.WarnWithContext()
+
+if storeErr := store.Store(storeCtx, stored); storeErr != nil {
+    if o.logger != nil {
+        logFields := map[string]interface{}{
+            "operation":   "execution_store",
+            "request_id":  requestID,
+            "interrupted": checkpoint != nil,
+            "error":       storeErr.Error(),
+        }
+        if traceID != "" {
+            logFields["trace_id"] = traceID
+        }
+        if checkpoint != nil && checkpoint.CheckpointID != "" {
+            logFields["checkpoint_id"] = checkpoint.CheckpointID
+        }
+        o.logger.Warn("Failed to store execution for DAG visualization", logFields)
+    }
+}
+```
+
+**Why non-context method?** The parent HTTP request context may be canceled after the handler returns, but we still want the async storage to complete. Using `context.Background()` ensures the operation isn't canceled prematurely.
+
+### HITL Logging Checklist
+
+When implementing HITL-related logging:
+
+- [ ] Include `request_id` in all logs (current request's unique ID)
+- [ ] Include `original_request_id` when in a HITL flow (links to conversation start)
+- [ ] Include `checkpoint_id` when creating or resuming from checkpoints
+- [ ] Include `interrupted: true` when storing interrupted executions
+- [ ] Set `original_request_id` in baggage **before** calling orchestrator during resume
+- [ ] Use non-context logging methods in background goroutines
+- [ ] Log both the interrupt (parent) and resume (child) with matching `original_request_id`
+
+### Reference Implementation: agent-with-human-approval
+
+The [`examples/agent-with-human-approval`](../examples/agent-with-human-approval/) directory contains the reference implementation for HITL logging patterns. Key files to study:
+
+| File | Purpose |
+|------|---------|
+| [`handlers.go`](../examples/agent-with-human-approval/handlers.go) | `handleResumeSSE` - Shows complete trace correlation setup with priority-based `original_request_id` resolution |
+| [`handlers_auto_resume.go`](../examples/agent-with-human-approval/handlers_auto_resume.go) | `handleAutoResumeSSE` - Expiry-triggered auto-resume with same trace correlation patterns |
+| [`hitl_setup.go`](../examples/agent-with-human-approval/hitl_setup.go) | HITL controller and checkpoint store setup with expiry callbacks |
+
+**Key patterns demonstrated:**
+
+1. **Trace correlation setup** with `StartLinkedSpan` for Jaeger trace linking
+2. **Priority-based `original_request_id`** resolution (header → checkpoint → fallback)
+3. **Detailed logging** of trace correlation decisions for debugging
+4. **Baggage propagation** before orchestrator calls
+
+To run the example and observe the logging:
+
+```bash
+cd examples/agent-with-human-approval
+./setup.sh  # Deploys to Kubernetes
+
+# Port forward and test
+kubectl port-forward -n gomind-examples svc/agent-with-human-approval 8352:8352
+
+# Send a request that triggers HITL
+curl -X POST http://localhost:8352/api/sse/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "transfer $15000 to savings", "session_id": "test-session"}'
+
+# View logs with HITL correlation
+kubectl logs -n gomind-examples -l app=agent-with-human-approval --since=5m | \
+  jq 'select(.operation | startswith("hitl"))'
+```
+
+---
+
 ## Structured Logging: Field Naming Standards
 
 Consistent field names make log searching and filtering much easier.
@@ -731,6 +1135,185 @@ logger.Info("Request completed", map[string]interface{}{
     "capability":  "get_weather",
 })
 ```
+
+---
+
+## Required Patterns for Framework-Level Logging
+
+This section documents **required patterns** that MUST be followed when implementing logging in GoMind framework modules. These patterns are used throughout [orchestrator.go](../orchestration/orchestrator.go) and [executor.go](../orchestration/executor.go).
+
+### Pattern 1: Logger Nil Check (REQUIRED)
+
+**Always check for nil before calling any logger method.** This is non-negotiable for framework code.
+
+```go
+// From orchestration/orchestrator.go:573-580
+if o.logger != nil {
+    o.logger.InfoWithContext(ctx, "Starting request processing", map[string]interface{}{
+        "operation":      "process_request",
+        "request_id":     requestID,
+        "request_length": len(request),
+    })
+}
+
+// From orchestration/executor.go:1229-1235
+if e.logger != nil {
+    e.logger.ErrorWithContext(ctx, "Agent not found in catalog", map[string]interface{}{
+        "operation":  "agent_discovery",
+        "step_id":    step.StepID,
+        "agent_name": step.AgentName,
+    })
+}
+```
+
+**Why this is required:**
+- Components may be instantiated without a logger
+- Prevents nil pointer panics in production
+- Framework design allows optional logging
+- Enables graceful degradation
+
+### Pattern 2: Operation Field (REQUIRED)
+
+**Every log entry MUST include an `operation` field.** This is critical for log filtering and analysis.
+
+```go
+// From orchestration/orchestrator.go:598-604
+if o.logger != nil {
+    o.logger.ErrorWithContext(ctx, "Plan generation failed", map[string]interface{}{
+        "operation":   "plan_generation",  // REQUIRED - describes what operation failed
+        "request_id":  requestID,
+        "error":       err.Error(),
+        "duration_ms": time.Since(startTime).Milliseconds(),
+    })
+}
+
+// From orchestration/orchestrator.go:622-630
+if o.logger != nil {
+    o.logger.InfoWithContext(ctx, "Plan generated successfully", map[string]interface{}{
+        "operation":          "plan_generation",  // Same operation, different message
+        "request_id":         requestID,
+        "plan_id":            plan.PlanID,
+        "step_count":         len(plan.Steps),
+        "generation_time_ms": time.Since(startTime).Milliseconds(),
+    })
+}
+```
+
+**Standard operation values:**
+
+| Module | Operation | Description |
+|--------|-----------|-------------|
+| orchestration | `process_request` | Main request handling |
+| orchestration | `plan_generation` | LLM plan creation |
+| orchestration | `plan_execution` | Executing plan steps |
+| orchestration | `agent_discovery` | Finding agents |
+| orchestration | `llm_call` | LLM API calls |
+| ai | `ai_request` | AI provider calls |
+| resilience | `circuit_breaker` | Circuit breaker state |
+| resilience | `retry_attempt` | Retry operations |
+
+### Pattern 3: Request ID Propagation (REQUIRED)
+
+**Include `request_id` in all logs within a request context.** This enables request tracing.
+
+```go
+// From orchestration/orchestrator.go:567-580
+
+// Step 1: Generate request_id at the entry point
+requestID := generateRequestID()
+
+// Step 2: Add to context baggage for downstream components
+ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
+// Step 3: Include in all logs
+if o.logger != nil {
+    o.logger.InfoWithContext(ctx, "Starting request processing", map[string]interface{}{
+        "operation":      "process_request",
+        "request_id":     requestID,  // ALWAYS include
+        "request_length": len(request),
+    })
+}
+```
+
+**Retrieving request_id in downstream components:**
+
+```go
+// In any component that receives the context
+func (c *Component) doWork(ctx context.Context) error {
+    // Retrieve request_id from context baggage
+    requestID := telemetry.GetBaggage(ctx, "request_id")
+
+    if c.logger != nil {
+        c.logger.InfoWithContext(ctx, "Doing work", map[string]interface{}{
+            "operation":  "do_work",
+            "request_id": requestID,
+        })
+    }
+    // ...
+}
+```
+
+### Complete Logging Pattern
+
+Here's the complete pattern that combines all requirements:
+
+```go
+// Complete pattern from framework code
+func (o *Orchestrator) ProcessRequest(ctx context.Context, request string) (*Response, error) {
+    startTime := time.Now()
+
+    // Generate request_id
+    requestID := generateRequestID()
+    ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
+    // Log start with nil check + operation + request_id
+    if o.logger != nil {
+        o.logger.InfoWithContext(ctx, "Starting request processing", map[string]interface{}{
+            "operation":      "process_request",
+            "request_id":     requestID,
+            "request_length": len(request),
+        })
+    }
+
+    result, err := o.doWork(ctx, request)
+    if err != nil {
+        // Error logging with all required fields
+        if o.logger != nil {
+            o.logger.ErrorWithContext(ctx, "Request processing failed", map[string]interface{}{
+                "operation":   "process_request",
+                "request_id":  requestID,
+                "error":       err.Error(),
+                "duration_ms": time.Since(startTime).Milliseconds(),
+            })
+        }
+        return nil, err
+    }
+
+    // Success logging with all required fields
+    if o.logger != nil {
+        o.logger.InfoWithContext(ctx, "Request processing completed", map[string]interface{}{
+            "operation":   "process_request",
+            "request_id":  requestID,
+            "status":      "success",
+            "duration_ms": time.Since(startTime).Milliseconds(),
+        })
+    }
+
+    return result, nil
+}
+```
+
+### Logging Checklist for New Code
+
+Before submitting code, verify:
+
+- [ ] All logger calls wrapped in `if logger != nil { ... }`
+- [ ] Every log has an `operation` field
+- [ ] Request-scoped logs include `request_id`
+- [ ] Error logs include `error` field with `err.Error()`
+- [ ] Duration-sensitive operations include `duration_ms`
+- [ ] Using `WithContext` methods for request handlers
+- [ ] Using standard field names (see table above)
 
 ---
 
@@ -1446,22 +2029,32 @@ func (r *Agent) handleRequest(w http.ResponseWriter, req *http.Request) {
 
 ### Standard Fields
 
-| Field | Use For |
-|-------|---------|
-| `operation` | What action is being performed |
-| `status` | success, error, retry |
-| `error` | Error message |
-| `duration_ms` | How long it took |
-| `method` | HTTP method |
-| `path` | Request path |
+| Field | Required | Use For |
+|-------|----------|---------|
+| `operation` | **YES** | What action is being performed (MUST be in every log) |
+| `request_id` | **YES** | Request identifier (for request-scoped logs) |
+| `error` | On errors | Error message (use `err.Error()`) |
+| `duration_ms` | Recommended | How long it took |
+| `status` | Recommended | success, error, retry |
+| `method` | For HTTP | HTTP method |
+| `path` | For HTTP | Request path |
 
 ### Logging Checklist
 
+**Required (Framework Code):**
+- [ ] Logger nil checks: `if logger != nil { ... }`
+- [ ] `operation` field in every log entry
+- [ ] `request_id` in all request-scoped logs
+
+**Required (Application Code):**
 - [ ] Using `WithContext` methods in all HTTP handlers
+- [ ] `error` field for error logs (use `err.Error()`)
+- [ ] Logging both success and failure paths
+
+**Recommended:**
 - [ ] Including `duration_ms` for operations
 - [ ] Using consistent field names
 - [ ] Not logging sensitive data
-- [ ] Logging both success and failure paths
 - [ ] Using appropriate log levels
 - [ ] Initializing telemetry before creating components
 
@@ -1515,6 +2108,8 @@ Following these guidelines ensures your logs are useful in production, easy to s
 
 - **[DISTRIBUTED_TRACING_GUIDE.md](./DISTRIBUTED_TRACING_GUIDE.md)** - Complete guide for distributed tracing setup, including TracingMiddleware, TracedHTTPClient, Jaeger/OTEL infrastructure, and trace visualization
 - **[core/COMPONENT_LOGGING_DESIGN.md](../core/COMPONENT_LOGGING_DESIGN.md)** - Technical design document for component-aware logging architecture, including implementation details for all framework modules
+- **[orchestration/notes/HUMAN_IN_THE_LOOP_DESIGN.md](../orchestration/notes/HUMAN_IN_THE_LOOP_DESIGN.md)** - HITL architecture design including checkpoint storage, interrupt policies, and resume flow
+- **[orchestration/hitl_interfaces.go](../orchestration/hitl_interfaces.go)** - HITL interfaces including `ExecutionCheckpoint` with `OriginalRequestID` field
 - **[telemetry/trace_context.go](../telemetry/trace_context.go)** - Source for `GetTraceContext()`, `AddSpanEvent()`, `RecordSpanError()`
 - **[core/config.go](../core/config.go)** - ProductionLogger implementation and `WithComponent()` method
 - **[core/interfaces.go](../core/interfaces.go)** - Logger interface and `ComponentAwareLogger` interface definitions

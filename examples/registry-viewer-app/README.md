@@ -288,3 +288,51 @@ Default port `8100` was chosen to avoid conflicts with common service ports:
 | `REDIS_URL` | Override Redis URL for deployment (default: extracted from redis.yaml) |
 | `REDIS_NAMESPACE` | Redis key namespace (default: `gomind`) |
 | `DOCKER_NO_CACHE` | Set to `true` for fresh Docker build |
+
+## Related Orchestration Environment Variables
+
+The Registry Viewer displays data from the orchestration layer. Configure these variables on your **orchestration agent** (not the viewer itself) to enable features.
+
+### LLM Debug Storage
+
+Enable LLM debug storage to capture full request/response payloads for troubleshooting:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOMIND_LLM_DEBUG_ENABLED` | `false` | Enable LLM debug payload storage |
+| `GOMIND_LLM_DEBUG_TTL` | `24h` | Retention period for successful debug records |
+| `GOMIND_LLM_DEBUG_ERROR_TTL` | `168h` (7 days) | Retention period for error debug records |
+| `GOMIND_LLM_DEBUG_REDIS_DB` | `7` | Redis database number for debug storage |
+
+**Example:**
+```bash
+export GOMIND_LLM_DEBUG_ENABLED=true
+export GOMIND_LLM_DEBUG_TTL=48h
+```
+
+### Human-in-the-Loop (HITL) Configuration
+
+Configure HITL checkpoints for human oversight of AI-generated plans:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOMIND_HITL_ENABLED` | `false` | Enable HITL globally |
+| `GOMIND_HITL_REQUIRE_PLAN_APPROVAL` | `false` | Require human approval for all plans |
+| `GOMIND_HITL_SENSITIVE_CAPABILITIES` | (empty) | Capabilities requiring plan + step approval (comma-separated) |
+| `GOMIND_HITL_SENSITIVE_AGENTS` | (empty) | Agents requiring plan + step approval (comma-separated) |
+| `GOMIND_HITL_STEP_SENSITIVE_CAPABILITIES` | (empty) | Capabilities requiring step-only approval (comma-separated) |
+| `GOMIND_HITL_STEP_SENSITIVE_AGENTS` | (empty) | Agents requiring step-only approval (comma-separated) |
+| `GOMIND_HITL_DEFAULT_TIMEOUT` | `5m` | Timeout for human response |
+| `GOMIND_HITL_REDIS_DB` | `6` | Redis database number for HITL data |
+| `GOMIND_HITL_KEY_PREFIX` | `gomind:hitl` | Redis key prefix for HITL data |
+
+**Example:**
+```bash
+# Enable HITL with plan approval for sensitive operations
+export GOMIND_HITL_ENABLED=true
+export GOMIND_HITL_SENSITIVE_CAPABILITIES=transfer_funds,delete_account
+export GOMIND_HITL_STEP_SENSITIVE_CAPABILITIES=get_balance,view_orders
+export GOMIND_HITL_DEFAULT_TIMEOUT=10m
+```
+
+See [ENVIRONMENT_VARIABLES_GUIDE.md](../../docs/ENVIRONMENT_VARIABLES_GUIDE.md) for complete documentation of all framework variables.

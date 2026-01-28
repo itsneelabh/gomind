@@ -2492,6 +2492,433 @@ for _, interaction := range record.Interactions {
 
 For detailed implementation and architecture, see [LLM_DEBUG_PAYLOAD_DESIGN.md](../orchestration/notes/LLM_DEBUG_PAYLOAD_DESIGN.md).
 
+### Human-in-the-Loop (HITL)
+
+Add human oversight to AI orchestration. HITL pauses execution at critical points (checkpoints) and waits for human approval before proceeding.
+
+For getting started and implementation patterns, see the [Human-in-the-Loop User Guide](HUMAN_IN_THE_LOOP_USER_GUIDE.md).
+
+#### Core Interfaces
+
+HITL uses small, focused interfaces following Go idioms:
+
+```go
+// InterruptPolicy composes all approval behaviors
+type InterruptPolicy interface {
+    PlanApprover      // ShouldApprovePlan(ctx, plan) (*InterruptDecision, error)
+    StepApprover      // ShouldApproveBeforeStep/AfterStep(ctx, step, ...) (*InterruptDecision, error)
+    ErrorEscalator    // ShouldEscalateError(ctx, step, err, attempts) (*InterruptDecision, error)
+}
+
+// CheckpointStore persists workflow state for interrupt/resume
+type CheckpointStore interface {
+    SaveCheckpoint(ctx context.Context, checkpoint *ExecutionCheckpoint) error
+    LoadCheckpoint(ctx context.Context, checkpointID string) (*ExecutionCheckpoint, error)
+    UpdateCheckpointStatus(ctx context.Context, checkpointID string, status CheckpointStatus) error
+    ListPendingCheckpoints(ctx context.Context, filter CheckpointFilter) ([]*ExecutionCheckpoint, error)
+    DeleteCheckpoint(ctx context.Context, checkpointID string) error
+    StartExpiryProcessor(ctx context.Context, config ExpiryProcessorConfig) error
+    StopExpiryProcessor(ctx context.Context) error
+    SetExpiryCallback(callback ExpiryCallback) error
+}
+
+// InterruptController coordinates all HITL functionality
+type InterruptController interface {
+    SetPolicy(policy InterruptPolicy)
+    SetHandler(handler InterruptHandler)
+    SetCheckpointStore(store CheckpointStore)
+    CheckPlanApproval(ctx context.Context, plan *RoutingPlan) (*ExecutionCheckpoint, error)
+    CheckBeforeStep(ctx context.Context, step RoutingStep, plan *RoutingPlan) (*ExecutionCheckpoint, error)
+    CheckAfterStep(ctx context.Context, step RoutingStep, result *StepResult) (*ExecutionCheckpoint, error)
+    CheckOnError(ctx context.Context, step RoutingStep, err error, attempts int) (*ExecutionCheckpoint, error)
+    ProcessCommand(ctx context.Context, command *Command) (*ResumeResult, error)
+    ResumeExecution(ctx context.Context, checkpointID string) (*ExecutionResult, error)
+    UpdateCheckpointProgress(ctx context.Context, checkpointID string, completedSteps []StepResult) error
+}
+
+// CommandStore provides distributed command delivery
+type CommandStore interface {
+    PublishCommand(ctx context.Context, command *Command) error
+    SubscribeCommand(ctx context.Context, checkpointID string) (<-chan *Command, func(), error)
+    Close() error
+}
+
+// InterruptHandler manages notification and response collection
+type InterruptHandler interface {
+    NotifyInterrupt(ctx context.Context, checkpoint *ExecutionCheckpoint) error
+    WaitForCommand(ctx context.Context, checkpointID string, timeout time.Duration) (*Command, error)
+    SubmitCommand(ctx context.Context, command *Command) error
+}
+```
+
+#### Constructors
+
+**InterruptController:**
+```go
+func NewInterruptController(
+    policy InterruptPolicy,
+    store CheckpointStore,
+    handler InterruptHandler,
+    opts ...InterruptControllerOption,
+) *DefaultInterruptController
+
+// Options
+func WithControllerLogger(logger core.Logger) InterruptControllerOption
+func WithControllerTelemetry(telemetry core.Telemetry) InterruptControllerOption
+```
+
+**Policy:**
+```go
+func NewRuleBasedPolicy(config HITLConfig, opts ...PolicyOption) *RuleBasedPolicy
+func NewNoOpPolicy() *NoOpPolicy  // For testing or HITL-disabled scenarios
+
+// Options
+func WithPolicyLogger(logger core.Logger) PolicyOption
+```
+
+**CheckpointStore:**
+```go
+func NewRedisCheckpointStore(opts ...interface{}) (*RedisCheckpointStore, error)
+
+// Options
+func WithCheckpointRedisURL(url string) RedisCheckpointStoreOption
+func WithCheckpointRedisDB(db int) RedisCheckpointStoreOption
+func WithCheckpointKeyPrefix(prefix string) RedisCheckpointStoreOption
+func WithCheckpointTTL(ttl time.Duration) RedisCheckpointStoreOption
+func WithInstanceID(id string) RedisCheckpointStoreOption  // For distributed claim coordination
+func WithCheckpointStoreLogger(logger core.Logger) RedisCheckpointStoreOption
+func WithCheckpointStoreTelemetry(telemetry core.Telemetry) RedisCheckpointStoreOption
+```
+
+**CommandStore:**
+```go
+func NewRedisCommandStore(opts ...RedisCommandStoreOption) (*RedisCommandStore, error)
+
+// Options
+func WithCommandStoreRedisURL(url string) RedisCommandStoreOption
+func WithCommandStoreRedisDB(db int) RedisCommandStoreOption
+func WithCommandStoreKeyPrefix(prefix string) RedisCommandStoreOption
+func WithCommandStoreLogger(logger core.Logger) RedisCommandStoreOption
+func WithCommandStoreTelemetry(t core.Telemetry) RedisCommandStoreOption
+```
+
+**InterruptHandler:**
+```go
+func NewWebhookInterruptHandler(webhookURL string, commandStore CommandStore, opts ...WebhookHandlerOption) *WebhookInterruptHandler
+func NewNoOpInterruptHandler() *NoOpInterruptHandler  // For testing
+
+// Options
+func WithHandlerCircuitBreaker(cb core.CircuitBreaker) WebhookHandlerOption
+func WithHandlerLogger(logger core.Logger) WebhookHandlerOption
+func WithHandlerTelemetry(telemetry core.Telemetry) WebhookHandlerOption
+```
+
+**HITLHandler (HTTP API):**
+```go
+func NewHITLHandler(controller InterruptController, store CheckpointStore, opts ...HITLHandlerOption) *HITLHandler
+
+// Options
+func WithHITLHandlerLogger(logger core.Logger) HITLHandlerOption
+func WithHITLHandlerTelemetry(t core.Telemetry) HITLHandlerOption
+
+// Register all routes
+func (h *HITLHandler) RegisterRoutes(mux *http.ServeMux)
+```
+
+**Orchestrator Integration:**
+```go
+// Wire HITL into orchestrator after creation
+func (o *AIOrchestrator) SetInterruptController(controller InterruptController)
+func (o *AIOrchestrator) GetInterruptController() InterruptController
+```
+
+#### HTTP API Endpoints
+
+The framework provides these endpoints via `HITLHandler.RegisterRoutes`:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `POST /hitl/command` | POST | Submit approval command (approve, reject, edit, skip, abort, retry) |
+| `POST /hitl/resume/{checkpoint_id}` | POST | Resume workflow execution after approval |
+| `GET /hitl/checkpoints` | GET | List pending checkpoints |
+| `GET /hitl/checkpoints/{id}` | GET | Get checkpoint details |
+
+**Submit Command:**
+```bash
+curl -X POST http://agent:8080/hitl/command \
+  -H "Content-Type: application/json" \
+  -d '{"checkpoint_id": "cp-abc123", "type": "approve"}'
+```
+
+**Response:**
+```json
+{
+  "checkpoint_id": "cp-abc123",
+  "action": "approve",
+  "should_resume": true
+}
+```
+
+#### Interrupt Points
+
+| Interrupt Point | Trigger | Use Case |
+|-----------------|---------|----------|
+| `plan_generated` | After AI creates execution plan | Review full plan before any execution |
+| `before_step` | Before executing each tool/agent | Approve individual high-risk operations |
+| `on_error` | When a step fails and is recoverable | Human decides whether to retry, skip, or abort |
+| `after_step` | After step completes (reserved) | Output validation before proceeding |
+| `context_gathering` | During context collection (reserved) | Approve data access requests |
+
+#### Command Types by Interrupt Point
+
+| Command | Description | `plan_generated` | `before_step` | `after_step` | `on_error` |
+|---------|-------------|------------------|---------------|--------------|------------|
+| `approve` | Proceed with execution | Yes | Yes | Yes | No |
+| `reject` | Cancel and stop execution | Yes | Yes | Yes | No |
+| `edit` | Modify parameters and proceed | Yes | Yes | Yes | No |
+| `skip` | Skip this step, continue with next | No | Yes | Yes | Yes |
+| `abort` | Abort entire execution | Yes | Yes | Yes | Yes |
+| `retry` | Retry the failed step | No | Yes | No | Yes |
+| `respond` | Provide requested information | No | No | No | No |
+
+#### Key Types
+
+```go
+// ExecutionCheckpoint contains all state needed to resume execution
+type ExecutionCheckpoint struct {
+    CheckpointID       string                 `json:"checkpoint_id"`
+    RequestID          string                 `json:"request_id"`
+    OriginalRequestID  string                 `json:"original_request_id,omitempty"` // For trace correlation
+    InterruptPoint     InterruptPoint         `json:"interrupt_point"`
+    Decision           *InterruptDecision     `json:"decision"`
+    Plan               *RoutingPlan           `json:"plan"`
+    CompletedSteps     []StepResult           `json:"completed_steps"`
+    CurrentStep        *RoutingStep           `json:"current_step,omitempty"`
+    CurrentStepResult  *StepResult            `json:"current_step_result,omitempty"`
+    StepResults        map[string]*StepResult `json:"step_results"`
+    ResolvedParameters map[string]interface{} `json:"resolved_parameters,omitempty"`
+    OriginalRequest    string                 `json:"original_request"`
+    UserContext        map[string]interface{} `json:"user_context,omitempty"`
+    RequestMode        RequestMode            `json:"request_mode,omitempty"`
+    CreatedAt          time.Time              `json:"created_at"`
+    ExpiresAt          time.Time              `json:"expires_at"`
+    Status             CheckpointStatus       `json:"status"`
+}
+
+// InterruptPoint enum
+const (
+    InterruptPointPlanGenerated    InterruptPoint = "plan_generated"
+    InterruptPointBeforeStep       InterruptPoint = "before_step"
+    InterruptPointAfterStep        InterruptPoint = "after_step"
+    InterruptPointOnError          InterruptPoint = "on_error"
+    InterruptPointContextGathering InterruptPoint = "context_gathering"
+)
+
+// CheckpointStatus enum - includes human-initiated and expiry statuses
+const (
+    // Human-initiated
+    CheckpointStatusPending   CheckpointStatus = "pending"
+    CheckpointStatusApproved  CheckpointStatus = "approved"
+    CheckpointStatusRejected  CheckpointStatus = "rejected"
+    CheckpointStatusEdited    CheckpointStatus = "edited"
+    CheckpointStatusCompleted CheckpointStatus = "completed"
+    CheckpointStatusAborted   CheckpointStatus = "aborted"
+
+    // Streaming expiry (implicit deny)
+    CheckpointStatusExpired CheckpointStatus = "expired"
+
+    // Non-streaming expiry (policy-driven)
+    CheckpointStatusExpiredApproved CheckpointStatus = "expired_approved"
+    CheckpointStatusExpiredRejected CheckpointStatus = "expired_rejected"
+    CheckpointStatusExpiredAborted  CheckpointStatus = "expired_aborted"
+)
+
+// CommandType enum
+const (
+    CommandApprove CommandType = "approve"
+    CommandEdit    CommandType = "edit"
+    CommandReject  CommandType = "reject"
+    CommandSkip    CommandType = "skip"
+    CommandAbort   CommandType = "abort"
+    CommandRetry   CommandType = "retry"
+    CommandRespond CommandType = "respond"
+)
+
+// RequestMode determines expiry behavior
+const (
+    RequestModeStreaming    RequestMode = "streaming"     // Implicit deny on expiry
+    RequestModeNonStreaming RequestMode = "non_streaming" // Apply DefaultAction on expiry
+)
+
+// Command represents a human decision
+type Command struct {
+    CommandID    string                 `json:"command_id"`
+    CheckpointID string                 `json:"checkpoint_id"`
+    Type         CommandType            `json:"type"`
+    EditedPlan   *RoutingPlan           `json:"edited_plan,omitempty"`
+    EditedStep   *RoutingStep           `json:"edited_step,omitempty"`
+    EditedParams map[string]interface{} `json:"edited_params,omitempty"`
+    Feedback     string                 `json:"feedback,omitempty"`
+    Response     string                 `json:"response,omitempty"`
+    UserID       string                 `json:"user_id,omitempty"`
+    Timestamp    time.Time              `json:"timestamp"`
+}
+
+// ResumeResult contains the outcome of processing a command
+type ResumeResult struct {
+    CheckpointID string       `json:"checkpoint_id"`
+    Action       CommandType  `json:"action"`
+    ShouldResume bool         `json:"should_resume"`
+    ModifiedPlan *RoutingPlan `json:"modified_plan,omitempty"`
+    SkipStep     bool         `json:"skip_step,omitempty"`
+    Abort        bool         `json:"abort,omitempty"`
+    Feedback     string       `json:"feedback,omitempty"`
+}
+```
+
+#### Context Helpers
+
+**Request Context:**
+```go
+func WithRequestID(ctx context.Context, requestID string) context.Context
+func GetRequestID(ctx context.Context) string
+
+func WithRequestMode(ctx context.Context, mode RequestMode) context.Context
+func GetRequestMode(ctx context.Context) RequestMode
+
+func WithMetadata(ctx context.Context, metadata map[string]interface{}) context.Context
+func GetMetadata(ctx context.Context) map[string]interface{}
+```
+
+**Resume Context:**
+```go
+// Recommended: one-call context setup
+func BuildResumeContext(ctx context.Context, checkpoint *ExecutionCheckpoint) (context.Context, error)
+
+// Manual context building (for more control)
+func WithResumeMode(ctx context.Context, checkpointID string) context.Context
+func WithPlanOverride(ctx context.Context, plan *RoutingPlan) context.Context
+func WithCompletedSteps(ctx context.Context, results map[string]*StepResult) context.Context
+func WithPreResolvedParams(ctx context.Context, params map[string]interface{}, stepID string) context.Context
+```
+
+#### Error Handling
+
+```go
+// Check if execution was interrupted (not a failure)
+if orchestration.IsInterrupted(err) {
+    checkpoint := orchestration.GetCheckpoint(err)
+    checkpointID := orchestration.GetCheckpointID(err)
+    // Handle checkpoint - workflow is paused, not failed
+}
+
+// Error type checking
+if orchestration.IsCheckpointNotFound(err) { /* Checkpoint doesn't exist */ }
+if orchestration.IsCheckpointExpired(err) { /* Timeout reached */ }
+if orchestration.IsInvalidCommand(err) { /* Invalid command for state */ }
+if orchestration.IsHITLDisabled(err) { /* HITL not enabled */ }
+```
+
+#### Status Helpers
+
+```go
+// Check if checkpoint can be resumed
+if orchestration.IsResumableStatus(checkpoint.Status) {
+    // Status is: approved, edited, or expired_approved
+}
+
+// Check if checkpoint is in terminal state
+if orchestration.IsTerminalStatus(checkpoint.Status) {
+    // Status is: completed, rejected, aborted, expired, expired_rejected, expired_aborted
+}
+
+// Check if checkpoint is awaiting response
+if orchestration.IsPendingStatus(checkpoint.Status) {
+    // Status is: pending
+}
+```
+
+#### Configuration
+
+```go
+type HITLConfig struct {
+    Enabled                   bool          `json:"enabled"`
+    RequirePlanApproval       bool          `json:"require_plan_approval"`
+    SensitiveCapabilities     []string      `json:"sensitive_capabilities"`      // Plan + Step approval
+    SensitiveAgents           []string      `json:"sensitive_agents"`            // Plan + Step approval
+    StepSensitiveCapabilities []string      `json:"step_sensitive_capabilities"` // Step-only approval
+    StepSensitiveAgents       []string      `json:"step_sensitive_agents"`       // Step-only approval
+    EscalateAfterRetries      int           `json:"escalate_after_retries"`
+    DefaultTimeout            time.Duration `json:"default_timeout"`
+    DefaultAction             CommandType   `json:"default_action"`
+    CheckpointTTL             time.Duration `json:"checkpoint_ttl"`
+    KeyPrefix                 string        `json:"key_prefix"`
+    ExpiryProcessor           ExpiryProcessorConfig `json:"expiry_processor"`
+}
+
+// Create with smart defaults
+func DefaultHITLConfig() HITLConfig
+func NewHITLConfig(opts ...HITLOption) HITLConfig
+
+// Options
+func WithExpiryProcessor(config ExpiryProcessorConfig) HITLOption
+```
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `GOMIND_HITL_ENABLED` | `false` | Enable HITL system |
+| `GOMIND_HITL_REQUIRE_PLAN_APPROVAL` | `false` | Pause after every plan generation |
+| `GOMIND_HITL_SENSITIVE_CAPABILITIES` | `` | Capabilities requiring plan + step approval |
+| `GOMIND_HITL_SENSITIVE_AGENTS` | `` | Agents requiring plan + step approval |
+| `GOMIND_HITL_STEP_SENSITIVE_CAPABILITIES` | `` | Capabilities requiring step-only approval |
+| `GOMIND_HITL_STEP_SENSITIVE_AGENTS` | `` | Agents requiring step-only approval |
+| `GOMIND_HITL_ESCALATE_AFTER_RETRIES` | `3` | Escalate to human after N retry failures |
+| `GOMIND_HITL_DEFAULT_TIMEOUT` | `5m` | Checkpoint expiration time |
+| `GOMIND_HITL_DEFAULT_ACTION` | `reject` | Action on timeout (approve, reject, abort) |
+| `GOMIND_HITL_KEY_PREFIX` | `gomind:hitl` | Redis key prefix |
+
+#### Expiry Processor Configuration
+
+The expiry processor handles checkpoint timeouts in the background:
+
+```go
+type ExpiryProcessorConfig struct {
+    Enabled           bool              // Run processor (default: true)
+    ScanInterval      time.Duration     // Scan frequency (default: 10s)
+    BatchSize         int               // Max per scan (default: 100)
+    DeliverySemantics DeliverySemantics // Callback timing
+}
+
+const (
+    DeliveryAtMostOnce  DeliverySemantics = "at_most_once"  // Default, safe
+    DeliveryAtLeastOnce DeliverySemantics = "at_least_once" // Callback must be idempotent
+)
+
+type ExpiryCallback func(ctx context.Context, checkpoint *ExecutionCheckpoint, appliedAction CommandType)
+```
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `GOMIND_HITL_EXPIRY_ENABLED` | `true` | Enable expiry processor |
+| `GOMIND_HITL_EXPIRY_INTERVAL` | `10s` | Scan interval |
+| `GOMIND_HITL_EXPIRY_BATCH_SIZE` | `100` | Max checkpoints per scan |
+| `GOMIND_HITL_EXPIRY_DELIVERY` | `at_least_once` | Delivery semantics |
+| `GOMIND_HITL_STREAMING_EXPIRY` | `implicit_deny` | Streaming request expiry behavior |
+| `GOMIND_HITL_NON_STREAMING_EXPIRY` | `apply_default` | Non-streaming request expiry behavior |
+
+#### Metrics
+
+HITL emits these Prometheus metrics:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `orchestration.hitl.checkpoint_created_total` | Counter | interrupt_point, reason | Checkpoints created |
+| `orchestration.hitl.checkpoint_status_total` | Counter | from_status, to_status | Status transitions |
+| `orchestration.hitl.command_processed_total` | Counter | command_type, success | Commands processed |
+| `orchestration.hitl.checkpoint_expired_total` | Counter | action, request_mode, interrupt_point | Expired checkpoints |
+| `orchestration.hitl.approval_latency_seconds` | Histogram | command_type | Human response time |
+| `orchestration.hitl.expiry_scan_duration_seconds` | Histogram | - | Expiry scan duration |
+
 ---
 
 ## UI Module

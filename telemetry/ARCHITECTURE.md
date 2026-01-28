@@ -11,6 +11,11 @@
 
 1. [Architecture Overview](#architecture-overview)
 2. [Design Philosophy](#design-philosophy)
+   - [Why Explicit Initialization?](#1-why-explicit-initialization)
+   - [Global Singleton vs Dependency Injection](#2-global-singleton-vs-dependency-injection)
+   - [Progressive Disclosure API Design](#3-progressive-disclosure-api-design)
+   - [Module Boundaries for Metrics](#4-module-boundaries-for-metrics)
+   - [HTTP Middleware Extensibility](#5-http-middleware-extensibility-generic-mechanisms)
 3. [Global Singleton Pattern](#global-singleton-pattern)
 4. [OpenTelemetry Integration](#opentelemetry-integration)
 5. [Integration Patterns](#integration-patterns)
@@ -246,6 +251,80 @@ func RecordPlanGenerationRetry(module string) {  // WRONG: only orchestration us
 - The metric pattern is used by **2+ modules** with identical semantics
 - The metric is part of a framework-wide observability contract
 - Dashboard queries need to aggregate across modules using the same metric name
+
+### 5. HTTP Middleware Extensibility (Generic Mechanisms)
+
+**Principle**: The telemetry module provides **generic extension mechanisms**, not use-case-specific logic. Applications decide how to use these mechanisms.
+
+**The Design Decision**: When applications need custom tracing behavior (e.g., excluding certain requests), the telemetry module provides configurable hooks rather than hard-coded rules.
+
+**Example**: The `TracingMiddlewareConfig.RequestFilter` allows applications to exclude specific HTTP requests from tracing:
+
+```go
+// ✅ Application decides what to filter (in application main.go)
+middlewareConfig := &telemetry.TracingMiddlewareConfig{
+    ExcludedPaths: []string{"/health", "/metrics"},
+
+    // Application-specific filter logic
+    RequestFilter: func(r *http.Request) bool {
+        // Exclude polling requests from traces
+        return r.URL.Query().Get("poll") != "true"
+    },
+}
+```
+
+**Why This Design?**
+
+| Approach | Pros | Cons | GoMind Choice |
+|----------|------|------|---------------|
+| **Hard-coded rules in telemetry** | Simple for specific use case | Couples telemetry to application logic | ❌ |
+| **Generic filter mechanism** | Flexible, decoupled | Requires application configuration | ✅ Chosen |
+
+**Architectural Constraint**: The telemetry module **never knows about specific use cases** in other modules. For example:
+- Telemetry doesn't know about HITL checkpoint polling
+- Telemetry doesn't know about orchestration workflow types
+- Telemetry doesn't know about specific agent behaviors
+
+**Correct Pattern**:
+
+```go
+// ✅ In telemetry/http.go - Generic mechanism
+type TracingMiddlewareConfig struct {
+    ExcludedPaths []string
+    RequestFilter func(r *http.Request) bool  // Application decides filter logic
+}
+
+// ✅ In application main.go - Application-specific decision
+config.RequestFilter = func(r *http.Request) bool {
+    return r.URL.Query().Get("poll") != "true"  // Application knows about ?poll=true
+}
+```
+
+**Incorrect Pattern**:
+
+```go
+// ❌ Do NOT add use-case-specific logic to telemetry
+// telemetry/http.go
+func shouldTrace(r *http.Request) bool {
+    // WRONG: Telemetry shouldn't know about HITL polling
+    if r.URL.Query().Get("poll") == "true" {
+        return false
+    }
+    return true
+}
+```
+
+**Benefits of Generic Mechanisms**:
+1. **No Module Coupling**: Telemetry never imports or references other modules
+2. **Maximum Flexibility**: Applications can implement any filter logic
+3. **Future-Proof**: New use cases don't require telemetry module changes
+4. **Clear Responsibility**: Applications own their configuration decisions
+
+**Common Use Cases for RequestFilter**:
+- Exclude polling/health-check requests that create trace noise
+- Sample only certain request types in high-traffic scenarios
+- Filter requests based on headers, query params, or path patterns
+- Conditionally trace based on feature flags or environment
 
 ---
 

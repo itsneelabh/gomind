@@ -2,31 +2,33 @@
 
 Welcome to the observability powerhouse of GoMind! Think of this guide as your friendly companion who'll walk you through every aspect of telemetry, from the simplest metric to sophisticated production monitoring. Grab a coffee and let's dive in! ☕
 
-## 📚 Table of Contents
+## Table of Contents
 
-- [🎯 What Is Telemetry and Why Should You Care?](#-what-is-telemetry-and-why-should-you-care)
-- [🚀 The Simplest Thing That Works](#-the-simplest-thing-that-works)
-- [📊 The Three Types of Metrics](#-the-three-types-of-metrics-and-when-to-use-each)
-- [🎨 Adding Context with Labels](#-adding-context-with-labels)
-- [🔍 Progressive Disclosure: From Simple to Advanced](#-progressive-disclosure-from-simple-to-advanced)
-- [🏷️ Service Type Labeling](#️-service-type-labeling)
-- [🏗️ Production-Ready Configuration](#️-production-ready-configuration)
-- [🐳 Deploying with Docker](#-deploying-with-docker)
-- [☸️ Deploying on Kubernetes](#️-deploying-on-kubernetes)
-- [🔧 Adding Telemetry to Tools and Agents](#-adding-telemetry-to-tools-and-agents)
-- [🏭 The Architecture Under the Hood](#-the-architecture-under-the-hood)
-- [🛡️ Production Safety Features](#️-production-safety-features)
-- [🧪 Testing Your Telemetry](#-testing-your-telemetry)
-- [🔍 Debugging Telemetry Issues](#-debugging-telemetry-issues)
-- [📈 Advanced Patterns](#-advanced-patterns)
-- [🎯 Best Practices Summary](#-best-practices-summary)
-- [🏁 Quick Reference](#-quick-reference)
-- [🔗 Unified Metrics API](#-unified-metrics-api)
-- [🌐 Distributed Tracing](#-distributed-tracing)
-  - [📖 Comprehensive Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md)
-- [🎉 Summary](#-summary)
+1. [What Is Telemetry and Why Should You Care?](#1-what-is-telemetry-and-why-should-you-care)
+2. [The Simplest Thing That Works](#2-the-simplest-thing-that-works)
+3. [The Three Types of Metrics](#3-the-three-types-of-metrics-and-when-to-use-each)
+4. [Adding Context with Labels](#4-adding-context-with-labels)
+5. [Progressive Disclosure: From Simple to Advanced](#5-progressive-disclosure-from-simple-to-advanced)
+6. [Service Type Labeling](#6-service-type-labeling)
+7. [Production-Ready Configuration](#7-production-ready-configuration)
+8. [Deploying with Docker](#8-deploying-with-docker)
+9. [Deploying on Kubernetes](#9-deploying-on-kubernetes)
+10. [Adding Telemetry to Tools and Agents](#10-adding-telemetry-to-tools-and-agents)
+11. [The Architecture Under the Hood](#11-the-architecture-under-the-hood)
+12. [Production Safety Features](#12-production-safety-features)
+13. [Testing Your Telemetry](#13-testing-your-telemetry)
+14. [Debugging Telemetry Issues](#14-debugging-telemetry-issues)
+15. [Advanced Patterns](#15-advanced-patterns)
+16. [Best Practices Summary](#16-best-practices-summary)
+17. [Quick Reference](#17-quick-reference)
+18. [Unified Metrics API](#18-unified-metrics-api)
+19. [Distributed Tracing](#19-distributed-tracing)
+    - [Comprehensive Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md)
+20. [AI Module Distributed Tracing](#20-ai-module-distributed-tracing)
+21. [Push-Based Telemetry Limitations](#21-push-based-telemetry-limitations)
+22. [Summary](#22-summary)
 
-## 🎯 What Is Telemetry and Why Should You Care?
+## 1. What Is Telemetry and Why Should You Care?
 
 Let me explain this with a story that everyone can relate to.
 
@@ -56,7 +58,7 @@ Think about these scenarios:
 
 Without telemetry, you're debugging in the dark. With telemetry, you have X-ray vision into your application.
 
-## 🚀 The Simplest Thing That Works
+## 2. The Simplest Thing That Works
 
 Let's start with the absolute basics. Here's how to add telemetry to your application in 30 seconds:
 
@@ -105,7 +107,7 @@ func processRequest() {
 
 **That's literally all you need to start!** No complex setup, no configuration files, no external dependencies to install. The telemetry module handles everything internally.
 
-## 📊 The Three Types of Metrics (And When to Use Each)
+## 3. The Three Types of Metrics (And When to Use Each)
 
 Just like there are different tools in a toolbox, there are different types of metrics for different jobs:
 
@@ -151,7 +153,7 @@ telemetry.Gauge("active.connections", 42)
 
 **Use gauges when you want to know "what's the current value right now?"**
 
-## 🎨 Adding Context with Labels
+## 4. Adding Context with Labels
 
 Labels are like tags on your metrics - they add context and allow you to filter and group your data.
 
@@ -197,7 +199,7 @@ telemetry.Counter("api.request",
 
 **Why does cardinality matter?** Each unique combination of labels creates a new metric series. Too many series = memory explosion!
 
-## 🔍 Progressive Disclosure: From Simple to Advanced
+## 5. Progressive Disclosure: From Simple to Advanced
 
 The telemetry module follows the principle of progressive disclosure - start simple, add complexity only when needed.
 
@@ -244,7 +246,7 @@ telemetry.EmitWithOptions(ctx, "payment.amount", 99.99,
 )
 ```
 
-## 🏷️ Service Type Labeling
+## 6. Service Type Labeling
 
 The telemetry module automatically labels metrics with a `service_type` attribute that distinguishes between "tool" and "agent" services. This enables Grafana dashboard segregation and filtering by component type.
 
@@ -309,7 +311,7 @@ histogram_quantile(0.95,
 )
 ```
 
-## 🏗️ Production-Ready Configuration
+## 7. Production-Ready Configuration
 
 When you're ready to deploy to production, you need more sophisticated configuration. Let me show you how to set up telemetry that adapts to different environments.
 
@@ -479,7 +481,7 @@ func configureTelemetry() telemetry.Config {
 }
 ```
 
-## 🐳 Deploying with Docker
+## 8. Deploying with Docker
 
 Here's how to configure telemetry for containerized applications:
 
@@ -528,7 +530,7 @@ services:
     command: ["--config", "/etc/otel/config.yaml"]
 ```
 
-## ☸️ Deploying on Kubernetes
+## 9. Deploying on Kubernetes
 
 For Kubernetes deployments, use ConfigMaps and environment variables:
 
@@ -569,7 +571,7 @@ spec:
               fieldPath: status.podIP
 ```
 
-## 🔧 Adding Telemetry to Tools and Agents
+## 10. Adding Telemetry to Tools and Agents
 
 Now let's see how telemetry integrates with GoMind's core components - Tools and Agents.
 
@@ -898,7 +900,7 @@ func (a *TravelAgent) findTool(tools []*core.ServiceInfo, name string) *core.Ser
 }
 ```
 
-## 🏭 The Architecture Under the Hood
+## 11. The Architecture Under the Hood
 
 Let me explain how telemetry works internally, using an analogy everyone understands.
 
@@ -937,7 +939,7 @@ telemetry.Counter("request.count")  // You drop a letter in the mailbox
 └─────────────────────────────────────────┘
 ```
 
-## 🛡️ Production Safety Features
+## 12. Production Safety Features
 
 The telemetry module includes several safety features to protect your application in production:
 
@@ -1010,7 +1012,7 @@ func main() {
 }
 ```
 
-## 🧪 Testing Your Telemetry
+## 13. Testing Your Telemetry
 
 Here's how to test that your components emit metrics correctly:
 
@@ -1103,7 +1105,7 @@ func TestTelemetryProfiles(t *testing.T) {
 }
 ```
 
-## 🔍 Debugging Telemetry Issues
+## 14. Debugging Telemetry Issues
 
 When telemetry isn't working as expected, here's how to debug:
 
@@ -1144,7 +1146,7 @@ func debugTelemetry() {
 }
 ```
 
-## 📈 Advanced Patterns
+## 15. Advanced Patterns
 
 ### Pattern 1: Request Tracing
 ```go
@@ -1250,7 +1252,7 @@ func monitorResources() {
 }
 ```
 
-## 🎯 Best Practices Summary
+## 16. Best Practices Summary
 
 ### DO ✅
 - **Initialize early**: Set up telemetry at the start of main()
@@ -1267,7 +1269,7 @@ func monitorResources() {
 - **Don't over-instrument**: Start simple, add more as needed
 - **Don't ignore errors**: Log telemetry failures for debugging
 
-## 🏁 Quick Reference
+## 17. Quick Reference
 
 ### Initialization
 ```go
@@ -1304,7 +1306,7 @@ if !health.Initialized {
 }
 ```
 
-## 🔗 Unified Metrics API
+## 18. Unified Metrics API
 
 The Unified Metrics API provides pre-defined helper functions for recording cross-module metrics with consistent naming conventions. This enables unified observability across all GoMind modules (agent, orchestration, core) with standardized Prometheus metrics.
 
@@ -1502,7 +1504,7 @@ With unified metrics, you can create a single dashboard showing:
 
 See the [examples/k8-deployment/grafana.yaml](../examples/k8-deployment/grafana.yaml) for a pre-configured dashboard.
 
-## 🌐 Distributed Tracing
+## 19. Distributed Tracing
 
 Distributed tracing allows you to follow a request as it flows through multiple services. The telemetry module provides HTTP instrumentation that automatically propagates trace context using W3C TraceContext headers.
 
@@ -1572,6 +1574,35 @@ config := &telemetry.TracingMiddlewareConfig{
 
 tracedHandler := telemetry.TracingMiddlewareWithConfig("my-service", config)(mux)
 ```
+
+### Custom Request Filtering
+
+For more complex filtering logic (e.g., based on query parameters, headers, or request body),
+use `RequestFilter`. This is evaluated after `ExcludedPaths` and gives you full access to the request:
+
+```go
+config := &telemetry.TracingMiddlewareConfig{
+    ExcludedPaths: []string{"/health", "/metrics"},
+    // Exclude polling requests from tracing to reduce noise
+    // Return false to exclude, true to include
+    RequestFilter: func(r *http.Request) bool {
+        // Skip tracing for status polling requests
+        return r.URL.Query().Get("poll") != "true"
+    },
+}
+
+tracedHandler := telemetry.TracingMiddlewareWithConfig("my-service", config)(mux)
+```
+
+**Use cases for RequestFilter:**
+- Exclude polling/heartbeat requests with specific query parameters
+- Filter based on request headers (e.g., internal vs external traffic)
+- Skip tracing for specific user agents (e.g., health check bots)
+- Implement sampling logic based on request attributes
+
+**Design principle:** The telemetry module provides the generic filtering mechanism.
+Applications decide what to filter based on their specific needs. This keeps modules
+decoupled - telemetry doesn't need to know about HITL, polling, or any specific use case.
 
 ### Custom Span Names
 
@@ -1724,7 +1755,7 @@ For a complete deep-dive into distributed tracing with GoMind, including:
 
 See the **[Distributed Tracing and Log Correlation Guide](../docs/DISTRIBUTED_TRACING_GUIDE.md)**.
 
-## 🤖 AI Module Distributed Tracing
+## 20. AI Module Distributed Tracing
 
 The GoMind AI module supports distributed tracing, allowing you to see AI operations (`ai.generate_response`, `ai.http_attempt`) as part of your request traces in Jaeger.
 
@@ -1823,7 +1854,7 @@ When properly configured, the AI module emits these spans:
 
 See `examples/agent-with-orchestration/` for a working example with AI telemetry.
 
-## ⚠️ Push-Based Telemetry Limitations
+## 21. Push-Based Telemetry Limitations
 
 ### The Silent Failure Problem
 
@@ -2079,7 +2110,7 @@ scrape_configs:
 
 ---
 
-## 🎉 Summary
+## 22. Summary
 
 The telemetry module is your application's dashboard, giving you visibility into what's happening in production. It's designed to be:
 

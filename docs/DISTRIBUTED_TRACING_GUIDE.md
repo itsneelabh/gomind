@@ -1141,6 +1141,198 @@ Each span shows:
 
 ---
 
+## Required Patterns for Framework-Level Tracing
+
+This section documents the **required patterns** used throughout the GoMind framework for consistent distributed tracing. These patterns are implemented in [orchestrator.go](../orchestration/orchestrator.go) and [executor.go](../orchestration/executor.go).
+
+### Pattern 1: Logger Nil Check
+
+**Always check for nil before logging.** This ensures graceful degradation when logging is not configured.
+
+```go
+// From orchestration/orchestrator.go:573-580
+if o.logger != nil {
+    o.logger.InfoWithContext(ctx, "Starting request processing", map[string]interface{}{
+        "operation":      "process_request",
+        "request_id":     requestID,
+        "request_length": len(request),
+    })
+}
+```
+
+**Why this matters:**
+- Components may run without a logger configured
+- Prevents nil pointer panics in production
+- Allows flexible deployment configurations
+
+### Pattern 2: Operation Field in Every Log
+
+**Every log entry MUST include an `operation` field.** This enables filtering and analysis across distributed systems.
+
+```go
+// From orchestration/orchestrator.go:598-604
+if o.logger != nil {
+    o.logger.ErrorWithContext(ctx, "Plan generation failed", map[string]interface{}{
+        "operation":   "plan_generation",  // REQUIRED
+        "request_id":  requestID,
+        "error":       err.Error(),
+        "duration_ms": time.Since(startTime).Milliseconds(),
+    })
+}
+```
+
+**Standard operation values in orchestration:**
+- `process_request` - Main request handling
+- `plan_generation` - LLM plan creation
+- `plan_execution` - Step execution
+- `agent_discovery` - Finding agents in catalog
+- `llm_call` - LLM API calls
+
+### Pattern 3: Request ID Generation and Context Propagation
+
+**Generate request_id early and propagate via context baggage.** This enables end-to-end request tracking.
+
+```go
+// From orchestration/orchestrator.go:567-571
+
+// Step 1: Generate unique request_id
+requestID := generateRequestID()
+
+// Step 2: Add to context baggage for downstream access
+ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
+// Step 3: Set as span attribute
+if span != nil {
+    span.SetAttribute("request_id", requestID)
+}
+
+// Step 4: Include in all logs
+if o.logger != nil {
+    o.logger.InfoWithContext(ctx, "Starting request", map[string]interface{}{
+        "operation":  "process_request",
+        "request_id": requestID,  // Always include
+    })
+}
+```
+
+**Downstream retrieval:**
+
+```go
+// Any component can retrieve request_id from context baggage
+requestID := telemetry.GetBaggage(ctx, "request_id")
+```
+
+### Pattern 4: telemetry.RecordSpanError for All Errors
+
+**Always record errors on the span for trace visibility.** This makes errors visible in Jaeger.
+
+```go
+// From orchestration/executor.go:1228-1235
+agentInfo := e.findAgentByName(step.AgentName)
+if agentInfo == nil {
+    err := fmt.Errorf("agent %s not found in catalog", step.AgentName)
+
+    // Record error on span FIRST (visible in Jaeger)
+    telemetry.RecordSpanError(ctx, err)
+
+    // Then log the error
+    if e.logger != nil {
+        e.logger.ErrorWithContext(ctx, "Agent not found in catalog", map[string]interface{}{
+            "operation":  "agent_discovery",
+            "step_id":    step.StepID,
+            "agent_name": step.AgentName,
+        })
+    }
+    return result
+}
+```
+
+### Pattern 5: telemetry.Counter with Module Label
+
+**Include the `module` label in all counter metrics.** This enables per-module metric analysis.
+
+```go
+// From orchestration/orchestrator.go:1123-1124
+telemetry.Counter("plan_generation.total",
+    "module", telemetry.ModuleOrchestration,  // REQUIRED
+    "status", "error",
+)
+
+// From orchestration/executor.go (success case)
+telemetry.Counter("orchestration.hybrid_resolution.success",
+    "capability", capability,
+    "module", telemetry.ModuleOrchestration,  // REQUIRED
+)
+```
+
+**Standard module constants:**
+- `telemetry.ModuleOrchestration` - Orchestration module
+- `telemetry.ModuleAI` - AI module
+- `telemetry.ModuleResilience` - Resilience module
+- `telemetry.ModuleCore` - Core module
+
+### Pattern 6: request_id as First Span Attribute
+
+**When calling `telemetry.AddSpanEvent()`, always put `request_id` as the first attribute.** This ensures consistent attribute ordering in Jaeger.
+
+```go
+// From orchestration/orchestrator.go:1092-1099
+telemetry.AddSpanEvent(ctx, "llm.plan_generation.request",
+    attribute.String("request_id", requestID),  // FIRST attribute
+    attribute.String("prompt", truncateString(prompt, 2000)),
+    attribute.Int("prompt_length", len(prompt)),
+    attribute.Float64("temperature", 0.3),
+    attribute.Int("max_tokens", 2000),
+    attribute.Int("attempt", attempt),
+)
+```
+
+### Complete Error Handling Pattern
+
+Here's the complete pattern combining all requirements:
+
+```go
+func (e *Executor) executeStep(ctx context.Context, step *Step) *StepResult {
+    // Get request_id from context (propagated via baggage)
+    requestID := telemetry.GetBaggage(ctx, "request_id")
+
+    result, err := e.doWork(ctx, step)
+    if err != nil {
+        // 1. Record error on span (visible in Jaeger)
+        telemetry.RecordSpanError(ctx, err)
+
+        // 2. Add span event with request_id first
+        telemetry.AddSpanEvent(ctx, "step.execution.error",
+            attribute.String("request_id", requestID),
+            attribute.String("step_id", step.StepID),
+            attribute.String("error", err.Error()),
+        )
+
+        // 3. Emit counter metric with module label
+        telemetry.Counter("orchestration.step.failed",
+            "step_type", step.Type,
+            "module", telemetry.ModuleOrchestration,
+        )
+
+        // 4. Log with nil check, operation field, and request_id
+        if e.logger != nil {
+            e.logger.ErrorWithContext(ctx, "Step execution failed", map[string]interface{}{
+                "operation":  "step_execution",
+                "request_id": requestID,
+                "step_id":    step.StepID,
+                "error":      err.Error(),
+            })
+        }
+
+        return &StepResult{Success: false, Error: err.Error()}
+    }
+
+    return result
+}
+```
+
+---
+
 ## Best Practices
 
 ### DO
@@ -1546,6 +1738,231 @@ To analyze how the orchestrator recovered from an error:
 4. If the retry succeeded, you'll see a subsequent successful tool call span
 
 This automatic visibility into AI decision-making makes debugging orchestration issues straightforward without instrumenting your own code.
+
+---
+
+## HITL Cross-Trace Correlation
+
+Human-in-the-Loop (HITL) flows present a unique distributed tracing challenge: the original request trace ends when execution pauses for human approval, and a completely new trace begins when the user resumes. Without special handling, these traces appear disconnected in Jaeger, making it difficult to understand the full request lifecycle.
+
+### The Problem: Disconnected Traces
+
+```
+Request A: User sends query → Plan generated → HITL pauses (trace ends)
+                          [minutes/hours pass - human reviews]
+Request B: User approves → Resume → Execution continues (new trace)
+
+In Jaeger, these appear as TWO UNRELATED traces:
+- Trace A: "chat.process_request" (stops at checkpoint)
+- Trace B: "hitl.resume" (starts fresh, no connection to Trace A)
+```
+
+### The Solution: Linked Spans with Baggage
+
+GoMind uses **trace links** (not parent-child relationships) to connect resume traces to their original requests. This is the correct semantic model because:
+
+1. Resume operations are causally related but not direct children of the paused operation
+2. The original trace may have already ended
+3. Resume can happen long after the original request
+
+#### How It Works
+
+**Step 1: Store Trace Context in Checkpoint**
+
+When HITL creates a checkpoint, it automatically stores the current trace context:
+
+```go
+// orchestration/hitl_controller.go (lines 797-800)
+tc := telemetry.GetTraceContext(ctx)
+if tc.TraceID != "" {
+    userContext["original_trace_id"] = tc.TraceID
+    userContext["original_span_id"] = tc.SpanID
+}
+```
+
+**Step 2: Create Linked Span on Resume**
+
+When execution resumes, create a linked span that references the original trace:
+
+```go
+// examples/agent-with-human-approval/handlers.go (lines 330-358)
+// Extract trace context from checkpoint
+originalTraceID := ""
+originalSpanID := ""
+originalRequestID := checkpoint.RequestID
+
+if checkpoint.UserContext != nil {
+    if tid, ok := checkpoint.UserContext["original_trace_id"].(string); ok {
+        originalTraceID = tid
+    }
+    if sid, ok := checkpoint.UserContext["original_span_id"].(string); ok {
+        originalSpanID = sid
+    }
+}
+
+// Create linked span (NOT a child span)
+ctx, endLinkedSpan := telemetry.StartLinkedSpan(
+    ctx,
+    "hitl.resume",
+    originalTraceID,
+    originalSpanID,
+    map[string]string{
+        "checkpoint_id":       checkpointID,
+        "request_id":          checkpoint.RequestID,
+        "original_request_id": originalRequestID,
+        "link.type":           "hitl_resume",
+    },
+)
+defer endLinkedSpan()
+```
+
+**Step 3: Propagate Original Request ID**
+
+Use W3C Baggage to propagate the original request ID through all downstream spans:
+
+```go
+// Propagate original_request_id through all downstream operations
+ctx = telemetry.WithBaggage(ctx, "original_request_id", originalRequestID)
+```
+
+This ensures that every span created during the resumed execution has access to `original_request_id`, making correlation searches possible.
+
+### Frontend Integration for Trace Correlation
+
+The frontend should send the original request ID on resume calls:
+
+```javascript
+// examples/chat-ui/hitl.html
+// Store original request_id from first checkpoint
+if (data.request_id && !originalRequestId) {
+    originalRequestId = data.request_id;
+}
+
+// Send on all resume requests
+const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream'
+};
+if (originalRequestId) {
+    headers['X-Gomind-Original-Request-ID'] = originalRequestId;
+}
+
+fetch(`${backendUrl}/hitl/resume/${checkpointId}`, {
+    method: 'POST',
+    headers: headers
+});
+```
+
+### Understanding Trace Links vs Parent-Child
+
+In Jaeger, you'll see two types of trace relationships:
+
+| Relationship | Visual | When to Use |
+|--------------|--------|-------------|
+| **Parent-Child** | Nested spans under parent | Synchronous operations within the same request |
+| **Trace Link** | "References" section in span details | Async resumption, cross-request correlation |
+
+```
+Jaeger View:
+┌─────────────────────────────────────────────────────────────────┐
+│ Trace: 7a8b9c0d1e2f (hitl.resume - 2.5s)                       │
+│                                                                 │
+│ References: (click to view linked trace)                        │
+│   └─ FOLLOWS_FROM: 1a2b3c4d5e6f (chat.process_request)         │
+│                                                                 │
+│ Tags:                                                           │
+│   checkpoint_id: cp-abc123                                      │
+│   original_request_id: req-xyz789                               │
+│   link.type: hitl_resume                                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Finding HITL Traces in Jaeger
+
+**Method 1: Search by Original Request ID**
+```
+Service: agent-with-human-approval
+Tags: original_request_id=req-xyz789
+```
+
+**Method 2: Search by Checkpoint ID**
+```
+Service: agent-with-human-approval
+Tags: checkpoint_id=cp-abc123
+```
+
+**Method 3: Follow Links from Original Trace**
+1. Find the original trace that created the checkpoint
+2. Look for spans with `hitl_checkpoint_created` events
+3. Note the `checkpoint_id`
+4. Search for traces with that `checkpoint_id` tag
+
+### Complete HITL Tracing Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     HITL Cross-Trace Correlation                 │
+└─────────────────────────────────────────────────────────────────┘
+
+TRACE A: Original Request (trace_id: aaa111)
+├── chat.process_request (span_id: bbb222)
+│   ├── orchestrator.process_request
+│   │   ├── orchestrator.generate_plan
+│   │   └── [HITL checkpoint created]
+│   │       Event: hitl_checkpoint_created
+│   │       Tags: checkpoint_id=cp-abc123
+│   └── [Trace ends - waiting for approval]
+│
+│       [Human reviews and approves - minutes/hours later]
+│
+TRACE B: Resume Request (trace_id: ccc333)
+├── hitl.resume (span_id: ddd444)
+│   │   References: FOLLOWS_FROM trace_id=aaa111, span_id=bbb222
+│   │   Tags: original_request_id=req-xyz789
+│   │         checkpoint_id=cp-abc123
+│   │         link.type=hitl_resume
+│   │   Baggage: original_request_id=req-xyz789
+│   │
+│   ├── orchestrator.process_request  ← Baggage propagated
+│   │   ├── HTTP POST → weather-tool  ← Baggage propagated
+│   │   └── orchestrator.synthesize
+│   └── [Response returned]
+└─────────────────────────────────────────────────────────────────┘
+
+In Jaeger:
+- Find Trace A by request_id or time
+- See "hitl_checkpoint_created" event with checkpoint_id
+- Search for Trace B using checkpoint_id or original_request_id
+- Click "References" in Trace B to jump to Trace A
+```
+
+### Key Functions for HITL Tracing
+
+| Function | Purpose | Location |
+|----------|---------|----------|
+| `telemetry.StartLinkedSpan` | Create span with trace link to another trace | `telemetry/async_span.go:84` |
+| `telemetry.WithBaggage` | Propagate key-value through all downstream spans | `telemetry/context.go:76` |
+| `telemetry.GetTraceContext` | Extract current trace/span IDs for storage | `telemetry/trace_context.go:78` |
+
+### Best Practices for HITL Tracing
+
+1. **Always store trace context in checkpoints** - The controller does this automatically via `userContext`
+
+2. **Use linked spans, not child spans** - Resume operations are semantically "follows from", not "child of"
+
+3. **Propagate original_request_id via baggage** - This enables searching by the user-visible request ID
+
+4. **Include checkpoint_id in all HITL spans** - Essential for correlating approval commands with execution
+
+5. **Log cross-trace correlation in span events** - Add events when creating links for debugging:
+   ```go
+   import "go.opentelemetry.io/otel/attribute"
+
+   telemetry.AddSpanEvent(ctx, "hitl.trace_link_created",
+       attribute.String("original_trace_id", originalTraceID),
+       attribute.String("checkpoint_id", checkpointID),
+   )
+   ```
 
 ---
 

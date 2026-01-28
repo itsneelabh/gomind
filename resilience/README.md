@@ -2,24 +2,24 @@
 
 Bulletproof your agents with production-ready fault tolerance patterns.
 
-## 📚 Table of Contents
+## Table of Contents
 
-- [🎯 What Does This Module Do?](#-what-does-this-module-do)
-- [🚀 Quick Start](#-quick-start)
-- [🧠 How It Works](#-how-it-works)
-- [🔧 Advanced Configuration](#-advanced-configuration)
-- [🌍 Real-World Examples](#-real-world-examples)
-- [📊 Monitoring & Observability](#-monitoring--observability)
-- [🧪 Testing Your Resilience](#-testing-your-resilience)
-- [📋 Common Patterns & Best Practices](#-common-patterns--best-practices)
-- [⚡ Performance Tips](#-performance-tips)
-- [🔍 Debugging Guide](#-debugging-guide)
-- [✅ Production Checklist](#-production-checklist)
-- [💡 Pro Tips](#-pro-tips)
-- [🆕 New Production Features](#-new-production-features)
-- [🎓 Summary](#-summary---what-youve-learned)
+1. [What Does This Module Do?](#1-what-does-this-module-do)
+2. [Quick Start](#2-quick-start)
+3. [How It Works](#3-how-it-works)
+4. [Advanced Configuration](#4-advanced-configuration)
+5. [Real-World Examples](#5-real-world-examples)
+6. [Monitoring & Observability](#6-monitoring--observability)
+7. [Testing Your Resilience](#7-testing-your-resilience)
+8. [Common Patterns & Best Practices](#8-common-patterns--best-practices)
+9. [Performance Tips](#9-performance-tips)
+10. [Debugging Guide](#10-debugging-guide)
+11. [Production Checklist](#11-production-checklist)
+12. [Pro Tips](#12-pro-tips)
+13. [New Production Features](#13-new-production-features)
+14. [Summary](#14-summary---what-youve-learned)
 
-## 🎯 What Does This Module Do?
+## 1. What Does This Module Do?
 
 Think of this module as the **safety equipment for your agents** - like airbags and seatbelts in a car. When things go wrong (and they will), this module ensures your system stays up and running instead of crashing.
 
@@ -39,7 +39,7 @@ Imagine a smart power strip that:
 
 That's exactly how this module protects your agent communications!
 
-## 🚀 Quick Start
+## 2. Quick Start
 
 ### Installation
 
@@ -108,7 +108,7 @@ err := resilience.RetryWithCircuitBreaker(
 // Note: This helper function internally checks circuit state and records
 // success/failure automatically. You don't need to call cb.Execute() yourself.
 
-## 🧠 How It Works
+## 3. How It Works
 
 ### The Circuit Breaker State Machine
 
@@ -203,7 +203,7 @@ Gives accurate, real-time error rates
 
 This means if your service had problems an hour ago but is fine now, the circuit won't stay open unnecessarily.
 
-## 🔧 Advanced Configuration
+## 4. Advanced Configuration
 
 ### Production-Ready Circuit Breaker
 
@@ -271,7 +271,7 @@ noRetry := &resilience.RetryConfig{
 }
 ```
 
-## 🎭 Real-World Examples
+## 5. Real-World Examples
 
 ### Example 1: Protecting External API Calls
 
@@ -515,7 +515,7 @@ func (s *OrderService) scheduleShipping(order Order) error {
 }
 ```
 
-## 📊 Monitoring & Observability
+## 6. Monitoring & Observability
 
 ### Built-in Metrics Interface
 
@@ -599,7 +599,7 @@ WHERE state != 'closed'
 ORDER BY last_state_change DESC;
 ```
 
-## 🎮 Testing Your Resilience
+## 7. Testing Your Resilience
 
 ### Unit Testing Circuit Breakers
 
@@ -752,7 +752,7 @@ func TestWithChaos(t *testing.T) {
 }
 ```
 
-## 🏗️ Common Patterns & Best Practices
+## 8. Common Patterns & Best Practices
 
 ### Pattern 1: Service Degradation
 
@@ -938,7 +938,7 @@ func (s *Service) callServiceC(ctx context.Context) error {
 }
 ```
 
-## ⚡ Performance Tips
+## 9. Performance Tips
 
 ### 1. **Tune Your Thresholds**
 
@@ -996,7 +996,7 @@ config.WindowSize = 30 * time.Second  // Medium window
 config.BucketCount = 6                // 5-second buckets
 ```
 
-## 🔍 Debugging Guide
+## 10. Debugging Guide
 
 ### When Circuit Won't Close
 
@@ -1099,7 +1099,7 @@ go func() {
 }()
 ```
 
-## 🚦 Production Checklist
+## 11. Production Checklist
 
 Before deploying to production, make sure you've:
 
@@ -1114,7 +1114,7 @@ Before deploying to production, make sure you've:
 - [ ] **Train your team** on manual override procedures
 - [ ] **Document** which services use which circuit breakers
 
-## 💡 Pro Tips
+## 12. Pro Tips
 
 ### Tip 1: Different Configs for Different Environments
 
@@ -1221,7 +1221,7 @@ func (c *ResilientClient) doCall(ctx context.Context, request interface{}) error
 }
 ```
 
-## 🆕 New Production Features
+## 13. New Production Features
 
 ### Enhanced Circuit Breaker Capabilities
 
@@ -1349,7 +1349,7 @@ logger.Error("Recovered from panic", map[string]interface{}{
 })
 ```
 
-## 🎓 Summary - What You've Learned
+## 14. Summary - What You've Learned
 
 ### This Module Gives You Three Superpowers
 

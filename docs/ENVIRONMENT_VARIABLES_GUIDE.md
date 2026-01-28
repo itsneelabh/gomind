@@ -25,10 +25,12 @@ This document provides a comprehensive reference for all environment variables s
 12. [Kubernetes Configuration](#kubernetes-configuration)
 13. [Orchestration Configuration](#orchestration-configuration)
 14. [LLM Debug Configuration](#llm-debug-configuration)
-15. [Async Task Configuration](#async-task-configuration)
-16. [Prompt Configuration](#prompt-configuration)
-17. [Example/Tool Specific Variables](#exampletool-specific-variables)
-18. [Quick Reference Table](#quick-reference-table)
+15. [Execution Store Configuration](#execution-store-configuration)
+16. [Human-in-the-Loop (HITL) Configuration](#human-in-the-loop-hitl-configuration)
+17. [Async Task Configuration](#async-task-configuration)
+18. [Prompt Configuration](#prompt-configuration)
+19. [Example/Tool Specific Variables](#exampletool-specific-variables)
+20. [Quick Reference Table](#quick-reference-table)
 
 ---
 
@@ -730,6 +732,274 @@ Use the Registry Viewer App to view captured debug records:
 1. Navigate to the "LLM Debug" tab in the sidebar
 2. Browse records by agent, timestamp, or status (success/error)
 3. Inspect full request/response payloads for troubleshooting
+
+---
+
+## Execution Debug Store Configuration
+
+Configure execution debug storage for DAG visualization and debugging. This feature stores complete plan execution records (plan + result) to enable visualization of LLM-based plan execution as a directed acyclic graph (DAG).
+
+> **Important**: This feature is **disabled by default** to minimize storage overhead. Enable only when DAG visualization or execution debugging is needed.
+
+### Execution Debug Store Variables
+
+| Variable | Default | Status | Description | Source |
+|----------|---------|--------|-------------|--------|
+| `GOMIND_EXECUTION_DEBUG_STORE_ENABLED` | `false` | **Implemented** | Enable/disable execution debug storage | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_EXECUTION_DEBUG_TTL` | `24h` | **Implemented** | Retention period for successful execution records | [orchestration/redis_execution_store.go](../orchestration/redis_execution_store.go) |
+| `GOMIND_EXECUTION_DEBUG_ERROR_TTL` | `168h` (7 days) | **Implemented** | Retention period for failed execution records (longer for troubleshooting) | [orchestration/redis_execution_store.go](../orchestration/redis_execution_store.go) |
+| `GOMIND_EXECUTION_DEBUG_KEY_PREFIX` | `gomind:execution:debug` | **Implemented** | Key prefix for all storage keys. Allows multi-tenant deployments or custom namespacing. | [orchestration/redis_execution_store.go](../orchestration/redis_execution_store.go) |
+| `GOMIND_EXECUTION_DEBUG_REDIS_DB` | `8` | **Implemented** | Redis database number (uses `core.RedisDBExecutionDebug`) | [orchestration/redis_execution_store.go](../orchestration/redis_execution_store.go) |
+
+### Features (Same as LLM Debug Store)
+
+The execution debug store has full feature parity with the LLM Debug Store:
+- **Gzip compression**: Large payloads (>100KB) are automatically compressed
+- **Layer 1 resilience**: Built-in retry with exponential backoff (3 retries, 100ms-2s backoff)
+- **Layer 2 resilience**: Optional circuit breaker injection via `WithExecutionDebugCircuitBreaker()`
+- **Layer 3 resilience**: NoOp fallback when Redis is unavailable
+
+### How It Works
+
+When enabled, the orchestrator automatically stores:
+- **Plan data**: LLM-generated routing plans with step dependencies
+- **Execution results**: Step-by-step results with timing, status, and responses
+- **Trace correlation**: Links to distributed tracing (Jaeger) via trace IDs
+- **Metadata**: Investigation notes and custom annotations
+
+### Storage Key Patterns
+
+The execution debug store uses configurable key patterns based on `GOMIND_EXECUTION_DEBUG_KEY_PREFIX`:
+
+| Key Pattern | Purpose |
+|-------------|---------|
+| `{prefix}{request_id}` | Main execution record (plan + result) |
+| `{prefix}index` | Sorted index for listing recent executions |
+| `{prefix}trace:{trace_id}` | Trace ID → Request ID mapping |
+
+With the default prefix `gomind:execution:debug:`:
+- `gomind:execution:debug:req-001` - Execution record
+- `gomind:execution:debug:index` - Recent executions index
+- `gomind:execution:debug:trace:abc123` - Trace mapping
+
+### Example: Enable Execution Debug Storage
+
+```bash
+# Enable execution debug storage
+export GOMIND_EXECUTION_DEBUG_STORE_ENABLED=true
+
+# Use default TTLs (24h for success, 7 days for errors)
+# Or customize retention:
+export GOMIND_EXECUTION_DEBUG_TTL=48h
+export GOMIND_EXECUTION_DEBUG_ERROR_TTL=336h  # 14 days
+```
+
+### Example: Multi-Tenant Deployment
+
+```bash
+# Enable execution debug storage with custom prefix for isolation
+export GOMIND_EXECUTION_DEBUG_STORE_ENABLED=true
+export GOMIND_EXECUTION_DEBUG_KEY_PREFIX=myapp:prod:execution:debug:
+
+# Keys will be: myapp:prod:execution:debug:req-001, etc.
+```
+
+### Example: Kubernetes Deployment
+
+```yaml
+env:
+  # Enable execution debug storage
+  - name: GOMIND_EXECUTION_DEBUG_STORE_ENABLED
+    value: "true"
+
+  # Custom retention (optional)
+  - name: GOMIND_EXECUTION_DEBUG_TTL
+    value: "48h"
+  - name: GOMIND_EXECUTION_DEBUG_ERROR_TTL
+    value: "168h"
+
+  # Custom key prefix for namespace isolation (optional)
+  - name: GOMIND_EXECUTION_DEBUG_KEY_PREFIX
+    value: "myteam:execution:debug:"
+```
+
+### Viewing Execution Records
+
+Use the Registry Viewer App to visualize execution DAGs:
+1. Navigate to the "Executions" tab in the sidebar
+2. Browse recent executions with success/failure status
+3. Click on an execution to view the DAG visualization
+4. Inspect step details, timing, and results
+5. Link to Jaeger traces for distributed tracing correlation
+
+### Storage Provider
+
+The execution debug store uses the `StorageProvider` interface for backend abstraction:
+- **Redis**: Use `NewRedisExecutionDebugStore()` (auto-configures from environment)
+- **Other backends**: Implement the `StorageProvider` interface for PostgreSQL, DynamoDB, etc.
+
+See [DAG_VISUALIZATION_PROPOSAL.md](../examples/registry-viewer-app/DAG_VISUALIZATION_PROPOSAL.md) for detailed design and architecture.
+
+---
+
+## Human-in-the-Loop (HITL) Configuration
+
+Configure Human-in-the-Loop (HITL) checkpoints for human oversight of AI-generated plans and sensitive operations. HITL enables pausing execution for human approval before proceeding with critical steps.
+
+> **Important**: HITL is **disabled by default**. Enable it via `GOMIND_HITL_ENABLED=true` when human oversight is required.
+
+### Core HITL Variables
+
+| Variable | Default | Status | Description | Source |
+|----------|---------|--------|-------------|--------|
+| `GOMIND_HITL_ENABLED` | `false` | **Implemented** | Enable/disable HITL globally | [orchestration/interfaces.go:477](../orchestration/interfaces.go#L477) |
+| `GOMIND_HITL_REQUIRE_PLAN_APPROVAL` | `false` | **Implemented** | Require human approval for all LLM-generated plans | [orchestration/interfaces.go:480](../orchestration/interfaces.go#L480) |
+| `GOMIND_HITL_SENSITIVE_CAPABILITIES` | (empty) | **Implemented** | Comma-separated list of capabilities requiring **both plan AND step approval** | [orchestration/interfaces.go:483](../orchestration/interfaces.go#L483) |
+| `GOMIND_HITL_SENSITIVE_AGENTS` | (empty) | **Implemented** | Comma-separated list of agents requiring **both plan AND step approval** | [orchestration/interfaces.go:486](../orchestration/interfaces.go#L486) |
+| `GOMIND_HITL_STEP_SENSITIVE_CAPABILITIES` | (empty) | **Implemented** | Comma-separated list of capabilities requiring **step-only approval** (no plan approval) | [orchestration/interfaces.go:490](../orchestration/interfaces.go#L490) |
+| `GOMIND_HITL_STEP_SENSITIVE_AGENTS` | (empty) | **Implemented** | Comma-separated list of agents requiring **step-only approval** (no plan approval) | [orchestration/interfaces.go:493](../orchestration/interfaces.go#L493) |
+| `GOMIND_HITL_DEFAULT_TIMEOUT` | `5m` | **Implemented** | Timeout for human response before auto-action | [orchestration/interfaces.go:496](../orchestration/interfaces.go#L496) |
+| `GOMIND_HITL_ESCALATE_AFTER_RETRIES` | `3` | **Implemented** | Number of retries before escalating to human | [orchestration/interfaces.go:501](../orchestration/interfaces.go#L501) |
+
+### HITL Storage Variables
+
+| Variable | Default | Status | Description | Source |
+|----------|---------|--------|-------------|--------|
+| `GOMIND_HITL_REDIS_DB` | `6` | **Implemented** | Redis database number for HITL checkpoint/command data | [orchestration/hitl_checkpoint_store.go:114](../orchestration/hitl_checkpoint_store.go#L114) |
+| `GOMIND_HITL_KEY_PREFIX` | `gomind:hitl` | **Implemented** | Redis key prefix for HITL data | [orchestration/hitl_checkpoint_store.go:104](../orchestration/hitl_checkpoint_store.go#L104) |
+
+### HITL Handler Variables
+
+| Variable | Default | Status | Description | Source |
+|----------|---------|--------|-------------|--------|
+| `GOMIND_HITL_WEBHOOK_URL` | (none) | **Implemented** | Webhook URL for checkpoint notifications | Application-specific |
+
+### HITL Expiry Behavior Variables
+
+These variables control what happens when a checkpoint times out (expires) without a human response. See [HITL User Guide: Expiry Behavior](HUMAN_IN_THE_LOOP_USER_GUIDE.md#expiry-behavior-variables) for detailed usage.
+
+| Variable | Default | Values | Status | Description | Source |
+|----------|---------|--------|--------|-------------|--------|
+| `GOMIND_HITL_DEFAULT_ACTION` | `reject` | `approve`, `reject`, `abort` | **Implemented** | Action to take when `apply_default` expiry behavior is used. Fail-safe default is `reject` (HITL enabled = require explicit approval). | [orchestration/interfaces.go:510](../orchestration/interfaces.go#L510) |
+| `GOMIND_HITL_STREAMING_EXPIRY` | `implicit_deny` | `implicit_deny`, `apply_default` | **Implemented** | Expiry behavior for streaming (SSE) requests. `implicit_deny` = status→expired, no action. `apply_default` = auto-resume with `DefaultAction`. | [orchestration/hitl_checkpoint_store.go:1128](../orchestration/hitl_checkpoint_store.go#L1128) |
+| `GOMIND_HITL_NON_STREAMING_EXPIRY` | `apply_default` | `implicit_deny`, `apply_default` | **Implemented** | Expiry behavior for non-streaming (HTTP 202) requests. `apply_default` = auto-apply `DefaultAction` on timeout. | [orchestration/hitl_checkpoint_store.go:1149](../orchestration/hitl_checkpoint_store.go#L1149) |
+| `GOMIND_HITL_DEFAULT_REQUEST_MODE` | `non_streaming` | `streaming`, `non_streaming` | **Implemented** | Default request mode when not explicitly set via `WithRequestMode()`. A warning is logged when this fallback is used. | [orchestration/hitl_checkpoint_store.go:1097](../orchestration/hitl_checkpoint_store.go#L1097) |
+
+**Expiry Behavior Matrix** (see [HITL User Guide: Expiry Behavior Matrix](HUMAN_IN_THE_LOOP_USER_GUIDE.md#expiry-behavior-variables)):
+
+| Request Mode | Expiry Behavior | What Happens |
+|--------------|-----------------|--------------|
+| Streaming + `implicit_deny` | Status → `expired` | User saw dialog but didn't respond. No action taken. |
+| Streaming + `apply_default` | Status → `expired_approved/rejected` | Auto-resume enabled (see [Auto-Resume](HUMAN_IN_THE_LOOP_USER_GUIDE.md#13-auto-resume-timeout-auto-approval)) |
+| Non-Streaming + `apply_default` | Status → `expired_approved/rejected` | DefaultAction applied automatically |
+| Non-Streaming + `implicit_deny` | Status → `expired` | Require manual intervention |
+
+### HITL Expiry Processor Variables
+
+The expiry processor is a background goroutine that scans for expired checkpoints and processes them according to the configured action. See [HITL User Guide: Auto-Resume](HUMAN_IN_THE_LOOP_USER_GUIDE.md#13-auto-resume-timeout-auto-approval) for the auto-approval flow.
+
+| Variable | Default | Status | Description | Source |
+|----------|---------|--------|-------------|--------|
+| `GOMIND_HITL_EXPIRY_ENABLED` | `true` | **Implemented** | Enable/disable the background expiry processor. Set to `false` to disable automatic checkpoint expiration. | [orchestration/hitl_checkpoint_store.go:127](../orchestration/hitl_checkpoint_store.go#L127) |
+| `GOMIND_HITL_EXPIRY_INTERVAL` | `10s` | **Implemented** | How often the processor scans Redis for expired checkpoints. Lower values = faster detection but more Redis load. | [orchestration/hitl_checkpoint_store.go:130](../orchestration/hitl_checkpoint_store.go#L130) |
+| `GOMIND_HITL_EXPIRY_BATCH_SIZE` | `100` | **Implemented** | Maximum checkpoints processed per scan cycle. Prevents overwhelming the system when many expire simultaneously. | [orchestration/hitl_checkpoint_store.go:133](../orchestration/hitl_checkpoint_store.go#L133) |
+| `GOMIND_HITL_EXPIRY_DELIVERY` | `at_most_once` | **Implemented** | Callback delivery guarantee: `at_most_once` (safe default, no retries) or `at_least_once` (may retry, callback must be idempotent). | [orchestration/hitl_checkpoint_store.go:136](../orchestration/hitl_checkpoint_store.go#L136) |
+
+### HITL Approval Modes
+
+HITL supports two approval modes based on risk level:
+
+| Mode | Variables | Behavior |
+|------|-----------|----------|
+| **Full HITL** (Plan + Step) | `GOMIND_HITL_SENSITIVE_CAPABILITIES`, `GOMIND_HITL_SENSITIVE_AGENTS` | Pauses at plan generation for approval, then pauses again at each matching step |
+| **Step-Only** | `GOMIND_HITL_STEP_SENSITIVE_CAPABILITIES`, `GOMIND_HITL_STEP_SENSITIVE_AGENTS` | Skips plan approval, only pauses when the specific step is about to execute |
+
+Use **Full HITL** for high-risk operations (e.g., `transfer_funds`, `delete_account`) where you want to review the entire plan before any execution.
+
+Use **Step-Only** for medium-risk operations (e.g., `get_balance`, `view_orders`) where you trust the plan but want confirmation before each action.
+
+### Example: Full HITL Configuration
+
+```bash
+# Enable HITL with plan approval
+export GOMIND_HITL_ENABLED=true
+export GOMIND_HITL_REQUIRE_PLAN_APPROVAL=true
+
+# Configure high-risk operations (plan + step approval)
+export GOMIND_HITL_SENSITIVE_CAPABILITIES=transfer_funds,delete_account,send_email
+export GOMIND_HITL_SENSITIVE_AGENTS=payment-service,admin-tool
+
+# Timeout and escalation
+export GOMIND_HITL_DEFAULT_TIMEOUT=5m
+export GOMIND_HITL_ESCALATE_AFTER_RETRIES=3
+
+# Redis storage (separate from service discovery DB 0)
+export GOMIND_HITL_REDIS_DB=6
+export GOMIND_HITL_KEY_PREFIX=gomind:hitl
+
+# Webhook for notifications
+export GOMIND_HITL_WEBHOOK_URL=https://my-service/internal/hitl-webhook
+```
+
+### Example: Step-Only HITL Configuration
+
+```bash
+# Enable HITL (plan approval NOT required globally)
+export GOMIND_HITL_ENABLED=true
+export GOMIND_HITL_REQUIRE_PLAN_APPROVAL=false
+
+# Full HITL (plan + step approval) for high-risk operations
+export GOMIND_HITL_SENSITIVE_CAPABILITIES=transfer_funds,delete_account
+export GOMIND_HITL_SENSITIVE_AGENTS=payment-service
+
+# Step-only approval (no plan pause) for medium-risk operations
+export GOMIND_HITL_STEP_SENSITIVE_CAPABILITIES=get_balance,view_orders,send_notification
+export GOMIND_HITL_STEP_SENSITIVE_AGENTS=read-service,notification-tool
+
+# Timeout and storage
+export GOMIND_HITL_DEFAULT_TIMEOUT=5m
+export GOMIND_HITL_REDIS_DB=6
+```
+
+### Example: Kubernetes Deployment
+
+```yaml
+env:
+  # Enable HITL
+  - name: GOMIND_HITL_ENABLED
+    value: "true"
+  - name: GOMIND_HITL_REQUIRE_PLAN_APPROVAL
+    value: "true"
+
+  # Sensitive operations
+  - name: GOMIND_HITL_SENSITIVE_CAPABILITIES
+    value: "transfer_funds,delete_account"
+  - name: GOMIND_HITL_SENSITIVE_AGENTS
+    value: "payment-service"
+
+  # Step-only operations
+  - name: GOMIND_HITL_STEP_SENSITIVE_CAPABILITIES
+    value: "get_balance,view_orders"
+
+  # Timeout
+  - name: GOMIND_HITL_DEFAULT_TIMEOUT
+    value: "10m"
+
+  # Webhook
+  - name: GOMIND_HITL_WEBHOOK_URL
+    value: "http://notification-service/hitl-webhook"
+```
+
+### Viewing HITL Checkpoints
+
+Use the Registry Viewer App or the HITL API endpoints to monitor pending checkpoints:
+- `GET /hitl/checkpoints` - List pending checkpoints
+- `GET /hitl/checkpoints/{id}` - Get checkpoint details
+- `POST /hitl/command` - Submit approval/rejection decision (with `{"checkpoint_id": "...", "type": "approve|reject"}`)
+- `POST /hitl/resume-sync/{id}` - Resume execution after approval (JSON response)
+- `POST /hitl/resume/{id}` - Resume execution after approval (SSE stream)
+
+See [HUMAN_IN_THE_LOOP_USER_GUIDE.md](HUMAN_IN_THE_LOOP_USER_GUIDE.md) for detailed usage and examples, or [HUMAN_IN_THE_LOOP_DESIGN.md](../orchestration/notes/HUMAN_IN_THE_LOOP_DESIGN.md) for architecture details.
 
 ---
 

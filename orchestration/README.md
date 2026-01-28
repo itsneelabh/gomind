@@ -2,33 +2,34 @@
 
 Multi-agent coordination with AI-driven orchestration and declarative workflows.
 
-## 📚 Table of Contents
+## Table of Contents
 
-- [🎯 What Does This Module Do?](#-what-does-this-module-do)
-- [🚀 Quick Start](#-quick-start)
-- [🧠 How It Works](#-how-it-works)
-- [🤖 AI Orchestration in Detail](#-ai-orchestration-in-detail)
-  - [LLM-Generated Execution Plan Structure](#llm-execution-plan)
-- [🔧 Workflow Engine in Detail](#-workflow-engine-in-detail)
-- [🎭 When to Use Each Mode](#-when-to-use-each-mode)
-- [⏱️ Async Tasks for Long-Running Operations](#️-async-tasks-for-long-running-operations)
-- [🛡️ Human-in-the-Loop (HITL) Approval](#️-human-in-the-loop-hitl-approval)
-- [🏗️ Architecture & Design Decisions](#️-architecture--design-decisions)
-- [🏗️ How Everything Fits Together](#️-how-everything-fits-together)
-- [📊 Performance & Caching](#-performance--caching-explained)
-- [🔍 Monitoring & Metrics](#-monitoring--metrics---know-whats-happening)
-- [🛠️ Configuration](#️-configuration)
-- [📝 Usage Patterns](#-usage-patterns)
-- [🚦 Requirements](#-requirements)
-- [🚀 Scaling to Hundreds of Agents](#-scaling-to-hundreds-of-agents---capability-provider-architecture)
-- [⚡ Performance Considerations](#-performance-considerations)
-- [🔮 Potential Enhancements](#-potential-enhancements)
-- [📖 API Reference](#-api-reference)
-- [💡 Best Practices & Tips](#-best-practices--tips)
-- [🆕 Production-Ready Enhancements](#-production-ready-enhancements)
-- [🎓 Summary](#-summary---what-youve-learned)
+1. [What Does This Module Do?](#1-what-does-this-module-do)
+2. [Quick Start](#2-quick-start)
+3. [How It Works](#3-how-it-works)
+4. [AI Orchestration in Detail](#4-ai-orchestration-in-detail)
+   - [LLM-Generated Execution Plan Structure](#llm-execution-plan)
+5. [Workflow Engine in Detail](#5-workflow-engine-in-detail)
+6. [When to Use Each Mode](#6-when-to-use-each-mode)
+7. [Async Tasks for Long-Running Operations](#7-async-tasks-for-long-running-operations)
+8. [Human-in-the-Loop (HITL) Approval](#8-human-in-the-loop-hitl-approval)
+9. [Architecture & Design Decisions](#9-architecture--design-decisions)
+10. [How Everything Fits Together](#10-how-everything-fits-together)
+11. [Performance & Caching](#11-performance--caching-explained)
+12. [Monitoring & Metrics](#12-monitoring--metrics---know-whats-happening)
+13. [Configuration](#13-configuration)
+14. [Usage Patterns](#14-usage-patterns)
+15. [Requirements](#15-requirements)
+16. [Scaling to Hundreds of Agents](#16-scaling-to-hundreds-of-agents---capability-provider-architecture)
+17. [Performance Considerations](#17-performance-considerations)
+18. [Streaming Support](#18-streaming-support)
+19. [Potential Enhancements](#19-potential-enhancements)
+20. [API Reference](#20-api-reference)
+21. [Best Practices & Tips](#21-best-practices--tips)
+22. [Production-Ready Enhancements](#22-production-ready-enhancements)
+23. [Summary](#23-summary---what-youve-learned)
 
-## 🎯 What Does This Module Do?
+## 1. What Does This Module Do?
 
 Think of this module as the **conductor of an orchestra**. Just like a conductor coordinates musicians to create beautiful music, this module coordinates multiple agents to accomplish complex tasks.
 
@@ -51,7 +52,7 @@ The orchestration module ensures:
 
 That's exactly how it coordinates your tools and agents!
 
-## 🚀 Quick Start
+## 2. Quick Start
 
 ### Installation
 
@@ -99,7 +100,7 @@ steps:
     depends_on: [get-price, get-news]   # Wait for both
 ```
 
-## 🧠 How It Works
+## 3. How It Works
 
 ### The Two Orchestration Modes Explained
 
@@ -150,7 +151,7 @@ Workflow: Daily Report
 | **DAG Scheduler** | Figures out what can run in parallel | Like a smart scheduler who knows task dependencies |
 | **Routing Cache** | Remembers recent decisions to speed things up | Like remembering phone numbers instead of looking them up |
 
-## 🤖 AI Orchestration in Detail
+## 4. AI Orchestration in Detail
 
 ### Step-by-Step: How AI Processes Your Request
 
@@ -461,7 +462,7 @@ response, _ := orchestrator.ProcessRequest(ctx,
 )
 ```
 
-## 🔧 Workflow Engine in Detail
+## 5. Workflow Engine in Detail
 
 ### How Workflows Work - The Smart Recipe Executor
 
@@ -652,7 +653,7 @@ steps:
 # ${steps.stepName.output.field} - Specific field from output
 ```
 
-## 🎯 When to Use the Orchestration Module
+## 5.1 When to Use the Orchestration Module
 
 Use this module when you need capabilities beyond basic tool/agent coordination:
 
@@ -683,7 +684,7 @@ Use this module when you need capabilities beyond basic tool/agent coordination:
 
 > **Note**: If your agent only needs basic tool calls without intelligent retry, you can use `core` directly. For smarter error recovery, use this module.
 
-## 🎭 When to Use Each Mode
+## 6. When to Use Each Mode
 
 ### Use AI Orchestration When:
 - Processing natural language requests
@@ -697,7 +698,7 @@ Use this module when you need capabilities beyond basic tool/agent coordination:
 - Predictable performance is important
 - Avoiding LLM costs for routine tasks
 
-## ⏱️ Async Tasks for Long-Running Operations
+## 7. Async Tasks for Long-Running Operations
 
 ### The Problem: When AI Takes Too Long
 
@@ -766,7 +767,7 @@ workerPool.RegisterHandler("research", func(ctx context.Context, task *core.Task
 
 📖 **For complete implementation details, deployment patterns, and production configuration, see the [Async Orchestration Guide](../docs/ASYNC_ORCHESTRATION_GUIDE.md).**
 
-## 🛡️ Human-in-the-Loop (HITL) Approval
+## 8. Human-in-the-Loop (HITL) Approval
 
 For sensitive operations, the orchestration module supports pausing execution and waiting for human approval before proceeding.
 
@@ -852,7 +853,7 @@ export GOMIND_HITL_DEFAULT_ACTION=reject
 
 📖 **For complete HITL documentation including multi-pod deployment, metrics, and troubleshooting, see the [Human-in-the-Loop User Guide](../docs/HUMAN_IN_THE_LOOP_USER_GUIDE.md).**
 
-## 🏗️ Architecture & Design Decisions
+## 9. Architecture & Design Decisions
 
 ### Why Orchestration Doesn't Import the AI Module
 
@@ -999,7 +1000,7 @@ This design is a textbook example of the **Dependency Inversion Principle**:
 - Not on concrete implementations (`ai` module)
 - This maintains architectural purity and enables true modularity
 
-## 🏗️ How Everything Fits Together
+## 10. How Everything Fits Together
 
 ### The Orchestra Metaphor - Complete Picture
 
@@ -1085,7 +1086,7 @@ The orchestration module offers **two modes** - the application chooses which to
 | **Executor** | Runs tools and agents efficiently | Like a project manager |
 | **State Store** | Tracks workflow progress | Like a progress tracker |
 
-## 📊 Performance & Caching Explained
+## 11. Performance & Caching Explained
 
 ### Why Caching Matters - The Restaurant Analogy
 
@@ -1134,7 +1135,7 @@ config.CacheTTL = 1 * time.Hour  // Long cache
 config.CacheEnabled = false  // No cache, always fresh
 ```
 
-## 🔍 Monitoring & Metrics - Know What's Happening
+## 12. Monitoring & Metrics - Know What's Happening
 
 ### Understanding Your System's Health
 
@@ -1187,7 +1188,7 @@ if metrics.ComponentCallsFailed > 10 {
 }
 ```
 
-## 🛠️ Configuration
+## 13. Configuration
 
 ### Environment Variables
 
@@ -1256,17 +1257,17 @@ Prioritize accuracy and provide practical recommendations.`,
 }
 ```
 
-## 📝 Usage Patterns
+## 14. Usage Patterns
 
 The orchestration module supports various usage patterns as demonstrated in the documentation above. Refer to the code examples in this README for implementation guidance.
 
-## 🚦 Requirements
+## 15. Requirements
 
 - **Redis** - For tool/agent discovery and state storage
 - **OpenAI API Key** - For AI orchestration (or compatible LLM)
 - **Running Components** - Tools and agents registered with discovery
 
-## 🚀 Scaling to Hundreds of Agents - Capability Provider Architecture
+## 16. Scaling to Hundreds of Agents - Capability Provider Architecture
 
 ### The Problem: Token Overflow at Scale
 
@@ -1438,7 +1439,7 @@ The service provider includes built-in resilience:
 | **100s-1000s agents** | Service | Semantic search scales better |
 | **Production critical** | Service + Circuit Breaker | Maximum resilience |
 
-## ⚡ Performance Considerations
+## 17. Performance Considerations
 
 1. **Workflow Execution** - DAG-based execution with automatic parallelization
 2. **Caching** - Use routing cache to reduce redundant LLM calls
@@ -1447,7 +1448,7 @@ The service provider includes built-in resilience:
 5. **Timeouts** - Configure appropriate timeouts for your use case
 6. **Capability Provider** - Use service provider for 100s+ agents to avoid token overflow
 
-## 🌊 Streaming Support
+## 18. Streaming Support
 
 The orchestration module supports real-time streaming of AI responses, enabling SSE/WebSocket chat interfaces and lower time-to-first-token UX.
 
@@ -1590,7 +1591,7 @@ ctx = orchestration.WithStepCallback(ctx,
 
 **For a complete production example** with SSE streaming, session management, and conversation history, see the [Chat Agent Implementation Guide](../docs/CHAT_AGENT_GUIDE.md).
 
-## 🔮 Potential Enhancements
+## 19. Potential Enhancements
 
 These features are not yet implemented but could be added:
 - Visual workflow designer UI
@@ -1599,7 +1600,7 @@ These features are not yet implemented but could be added:
 - Workflow versioning and migration tools
 - Custom capability provider implementations (e.g., GraphQL-based)
 
-## 📖 API Reference
+## 20. API Reference
 
 ### Core Types
 - `Orchestrator` - Main orchestration interface
@@ -1630,7 +1631,7 @@ These features are not yet implemented but could be added:
 - `WithTelemetry(enabled)` - Enable/disable telemetry
 - `WithFallback(enabled)` - Enable/disable fallback provider
 
-## 💡 Best Practices & Tips
+## 21. Best Practices & Tips
 
 ### The Journey from Prototype to Production
 
@@ -1671,7 +1672,7 @@ steps:
 5. **🔄 Handle Failures**: Always configure retries and timeouts
 6. **🚀 Think Parallel**: Design workflows to maximize parallelism
 
-## 🆕 Production-Ready Enhancements
+## 22. Production-Ready Enhancements
 
 ### LLM-First Hybrid Parameter Resolution
 
@@ -1965,7 +1966,7 @@ agent.RegisterCapability(core.Capability{
 - **Conditional Branching**: Support for if/else logic in workflows
 - **Error Handling Strategies**: Configure retry, skip, or fail strategies per step
 
-## 🎓 Summary - What You've Learned
+## 23. Summary - What You've Learned
 
 ### This Module Gives You Two Superpowers:
 

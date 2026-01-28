@@ -2,25 +2,25 @@
 
 Welcome to the foundation of intelligent agent systems! This guide will walk you through everything step-by-step, like a friendly mentor sitting right next to you. ☕
 
-## 📚 Table of Contents
+## Table of Contents
 
-- [What Is This Module and Why Should You Care?](#-what-is-this-module-and-why-should-you-care)
-- [What's Included (and What's Not)](#-whats-included-and-whats-not)
-- [The Framework: Bringing It All Together](#️-the-framework-bringing-it-all-together)
-- [Quick Start: Your First Components](#-quick-start-your-first-components)
-- [Registering Capabilities: Making Your Components Useful](#-registering-capabilities-making-your-components-useful)
-- [Advanced Features: The Power Tools](#️-advanced-features-the-power-tools)
-- [Understanding Component Registration and Discovery](#-understanding-component-registration-and-discovery)
-- [Architecture Patterns](#️-architecture-patterns)
-- [Advanced Features](#-advanced-features)
-- [Best Practices](#-best-practices)
-- [Common Patterns and Solutions](#-common-patterns-and-solutions)
-- [Debugging and Monitoring](#-debugging-and-monitoring)
-- [Performance Considerations](#-performance-considerations)
-- [Summary](#-summary)
-- [Next Steps](#-next-steps)
+1. [What Is This Module and Why Should You Care?](#1-what-is-this-module-and-why-should-you-care)
+2. [What's Included (and What's Not)](#2-whats-included-and-whats-not)
+3. [The Framework: Bringing It All Together](#3-the-framework-bringing-it-all-together)
+4. [Quick Start: Your First Components](#4-quick-start-your-first-components)
+5. [Registering Capabilities: Making Your Components Useful](#5-registering-capabilities-making-your-components-useful)
+6. [Advanced Features: The Power Tools](#6-advanced-features-the-power-tools)
+7. [Understanding Component Registration and Discovery](#7-understanding-component-registration-and-discovery)
+8. [Architecture Patterns](#8-architecture-patterns)
+9. [Advanced Features](#9-advanced-features)
+10. [Best Practices](#10-best-practices)
+11. [Common Patterns and Solutions](#11-common-patterns-and-solutions)
+12. [Debugging and Monitoring](#12-debugging-and-monitoring)
+13. [Performance Considerations](#13-performance-considerations)
+14. [Summary](#14-summary)
+15. [Next Steps](#15-next-steps)
 
-## 🎯 What Is This Module and Why Should You Care?
+## 1. What Is This Module and Why Should You Care?
 
 Let me explain this in the simplest way possible.
 
@@ -243,7 +243,7 @@ With the rise of AI and Large Language Models (LLMs), we need:
 - **Clear boundaries** between passive tools and active orchestrators
 - **Scalable architecture** where each component does one thing well
 
-## 🎨 What's Included (and What's Not)
+## 2. What's Included (and What's Not)
 
 ### ✅ Core Module Includes:
 - **Component framework** - Both Tool and Agent base implementations
@@ -289,7 +289,7 @@ translator := ai.NewAITool("translator", apiKey)
 assistant := ai.NewAIAgent("assistant", apiKey)
 ```
 
-## 🏗️ The Framework: Bringing It All Together
+## 3. The Framework: Bringing It All Together
 
 Before we build our first components, let's understand the Framework - it's the conductor that orchestrates everything!
 
@@ -519,7 +519,7 @@ framework.Run(ctx)  // Initializes, connects to Redis, registers, starts server
 // - Connection cleanup
 ```
 
-## 🚀 Quick Start: Your First Components
+## 4. Quick Start: Your First Components
 
 ### Prerequisites
 - Go 1.21 or later
@@ -652,7 +652,7 @@ func main() {
 }
 ```
 
-## 🎯 Registering Capabilities: Making Your Components Useful
+## 5. Registering Capabilities: Making Your Components Useful
 
 Now that you know how to create Tools and Agents, let's learn the most important part: **how to make them actually DO something!** This is where capabilities come in.
 
@@ -1098,7 +1098,7 @@ curl http://localhost:8080/languages
 5. **All capabilities are discoverable** via `/api/capabilities`
 6. **Tools register task capabilities**, Agents register orchestration capabilities
 
-## 🛠️ Advanced Features: The Power Tools
+## 6. Advanced Features: The Power Tools
 
 Now that you understand capabilities, let's explore the powerful features that make your components production-ready. Think of these as the professional-grade tools in your workshop!
 
@@ -2026,7 +2026,7 @@ For an AI agent:
    // This helps automatically clean up crashed or stopped components
    ```
 
-## 📚 Understanding Component Registration and Discovery
+## 7. Understanding Component Registration and Discovery
 
 ### How Tools Register Themselves
 
@@ -2085,7 +2085,7 @@ aiAgents, _ := agent.Discover(ctx, core.DiscoveryFilter{
 // agent.Discovery = discovery // Manual assignment (framework respects this)
 ```
 
-## 🏗️ Architecture Patterns
+## 8. Architecture Patterns
 
 ### Pattern 1: Tool Collection with Agent Coordinator
 
@@ -2120,7 +2120,7 @@ aiAgents, _ := agent.Discover(ctx, core.DiscoveryFilter{
   [Tools]    [Tools]     [Tools]
 ```
 
-## 🚀 Advanced Features
+## 9. Advanced Features
 
 ### Kubernetes Support
 
@@ -2157,7 +2157,7 @@ productionAgents, _ := agent.Discover(ctx, core.DiscoveryFilter{
 })
 ```
 
-## 🎓 Best Practices
+## 10. Best Practices
 
 ### 1. Choose the Right Component Type
 
@@ -2230,7 +2230,7 @@ func (o *OrderAgent) ProcessOrder(ctx context.Context, order Order) error {
 }
 ```
 
-## 🎯 Common Patterns and Solutions
+## 11. Common Patterns and Solutions
 
 ### Pattern: AI-Enhanced Tool
 ```go
@@ -2258,7 +2258,7 @@ gateway := core.NewBaseAgent("api-gateway")
 // Discovers available tools and routes requests
 ```
 
-## 🔍 Debugging and Monitoring
+## 12. Debugging and Monitoring
 
 ### Check Component Registration
 
@@ -2276,7 +2276,7 @@ All components automatically provide health endpoints:
 - Tools: `http://localhost:8080/health`
 - Agents: `http://localhost:8090/health`
 
-## 📊 Performance Considerations
+## 13. Performance Considerations
 
 ### Tools are Lightweight
 - Minimal overhead (~5MB binary)
@@ -2299,7 +2299,7 @@ All components automatically provide health endpoints:
 - **Atomic Operations**: Registration uses Redis transactions to prevent partial state issues
 - **Zero Downtime**: Services remain functional even when Redis is unavailable during startup
 
-## 🎉 Summary
+## 14. Summary
 
 The GoMind Core module provides two fundamental building blocks:
 
@@ -2314,7 +2314,7 @@ This clear separation enables:
 
 Remember: **Tools work, Agents think!**
 
-## 📚 Next Steps
+## 15. Next Steps
 
 - Explore the [AI Module](../ai/README.md) for AI-enhanced components
 - Learn about [Orchestration](../orchestration/README.md) for complex workflows

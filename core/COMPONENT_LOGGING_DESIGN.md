@@ -854,65 +854,6 @@ func (cb *CircuitBreaker) SetLogger(logger core.Logger) {
 }
 ```
 
-### ui Module (3 files)
-
-#### ui/session_redis.go - `RedisSessionStore.SetLogger`
-
-```go
-// SetLogger sets the logger for the Redis session store
-// The component is always set to "framework/ui" to ensure proper log attribution
-// regardless of which agent or tool is using the UI module.
-func (s *RedisSessionStore) SetLogger(logger core.Logger) {
-    if logger == nil {
-        s.logger = &core.NoOpLogger{}
-    } else {
-        if cal, ok := logger.(core.ComponentAwareLogger); ok {
-            s.logger = cal.WithComponent("framework/ui")
-        } else {
-            s.logger = logger
-        }
-    }
-}
-```
-
-#### ui/registry.go - `Registry.SetLogger`
-
-```go
-// SetLogger sets the logger for the registry
-// The component is always set to "framework/ui" to ensure proper log attribution
-// regardless of which agent or tool is using the UI module.
-func (r *Registry) SetLogger(logger core.Logger) {
-    if logger == nil {
-        r.logger = &core.NoOpLogger{}
-    } else {
-        if cal, ok := logger.(core.ComponentAwareLogger); ok {
-            r.logger = cal.WithComponent("framework/ui")
-        } else {
-            r.logger = logger
-        }
-    }
-}
-```
-
-#### ui/circuit_breaker.go - `CircuitBreaker.SetLogger`
-
-```go
-// SetLogger sets the logger for the circuit breaker
-// The component is always set to "framework/ui" to ensure proper log attribution
-// regardless of which agent or tool is using the UI module.
-func (cb *CircuitBreaker) SetLogger(logger core.Logger) {
-    if logger == nil {
-        cb.logger = &core.NoOpLogger{}
-    } else {
-        if cal, ok := logger.(core.ComponentAwareLogger); ok {
-            cb.logger = cal.WithComponent("framework/ui")
-        } else {
-            cb.logger = logger
-        }
-    }
-}
-```
-
 ### Summary Table
 
 | Module | File | Type | Component Name |
@@ -932,9 +873,6 @@ func (cb *CircuitBreaker) SetLogger(logger core.Logger) {
 | orchestration | template_prompt_builder.go | `TemplatePromptBuilder` | `framework/orchestration` |
 | resilience | retry.go | `RetryHandler` | `framework/resilience` |
 | resilience | circuit_breaker.go | `CircuitBreaker` | `framework/resilience` |
-| ui | session_redis.go | `RedisSessionStore` | `framework/ui` |
-| ui | registry.go | `Registry` | `framework/ui` |
-| ui | circuit_breaker.go | `CircuitBreaker` | `framework/ui` |
 
 ### Key Design Decisions
 
