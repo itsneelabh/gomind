@@ -1,24 +1,35 @@
-# GoMind - Production-Ready Framework for Autonomous AI Agent Networks
+# GoMind - Open Source Kubernetes-Native Platform for Autonomous AI Agent Networks
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+> **Microservices meet AI**: Build autonomous agent networks where each tool and agent runs as an independent service, discovered dynamically, and orchestrated intelligently.
+
 > **Note:** This framework is currently under active feature development. All the examples are working and can be run in a local Kind cluster. However, the framework has not yet reached Beta release.
 
-GoMind is a comprehensive platform for building autonomous AI agent systems, designed from the ground up to operate reliably in production environments. It provides AI-driven orchestration for multi-agent coordination, seamless integration with multiple LLM providers (OpenAI, Anthropic, Gemini, Groq, DeepSeek, and more) as well as your own in-house hosted models via OpenAI-compatible endpoints, Redis-based service discovery for dynamic tool and agent networks, production-grade resilience patterns (circuit breakers, intelligent retry, panic recovery), and full observability through OpenTelemetry integration with distributed tracing and unified metrics. Written in Go for minimal resource footprint and Kubernetes-native deployment.
+GoMind is an **open source**, **Kubernetes-native** platform for building autonomous AI agent networks, inspired by **microservice architecture** principles. Each tool and agent operates as an independent, discoverable service—scaling, failing, and evolving independently while collaborating through AI-driven orchestration.
+
+**Vendor agnostic by design**: Seamlessly integrate with any LLM provider (OpenAI, Anthropic, Gemini, Groq, DeepSeek) or your own self-hosted models via OpenAI-compatible endpoints. Switch providers without changing your agent code.
+
+**Production-ready from day one**: Redis/Valkey-based service discovery for dynamic tool networks, built-in resilience patterns (circuit breakers, semantic retry, panic recovery), and full observability through OpenTelemetry with distributed tracing and unified metrics. Written in Go for minimal resource footprint (~15-44MB containers, 8-20MB runtime memory) and true Kubernetes-native deployment.
 
 ## Table of Contents
 
 **1. Quick Start**
-- [What is GoMind?](#why-gomind-the-evolution-towards-production-ai-agents) • *2 min read*
+- [Why GoMind?](#why-gomind-microservices-architecture-for-ai-agents) • *2 min read*
 - [Getting Started in 5 Minutes](#getting-started-in-5-minutes) • *5 min setup*
 - [Installation](#installation) • *30 seconds*
 
 **2. Core Concepts**
-- [What Makes GoMind Unique](#what-makes-gomind-unique-beyond-traditional-agent-frameworks) • *Key differentiators*
+- [What Makes GoMind Unique](#what-makes-gomind-unique-vendor-agnostic-microservice-native-ai) • *Key differentiators*
 - [Architecture Overview](#how-gomind-works) • *5 min read*
-- [Key Features](#core-capabilities) • *10 min read*
-- [Service Discovery](#1-agents-that-find-each-other-automatically) • *Deep dive*
+- [Key Features](#core-capabilities)
+  - [Dynamic Service Discovery](#1-agents-that-find-each-other-automatically) - Tools & agents find each other at runtime
+  - [AI-Powered Orchestration](#2-talk-to-your-agents-in-plain-english) - Natural language → execution plans
+  - [Predefined Workflows](#3-define-repeatable-agent-workflows) - YAML, code-based, or custom JSON workflows
+  - [Resilience Patterns](#4-agents-that-dont-crash-your-system) - Circuit breakers, retry, panic recovery
+  - [Human-in-the-Loop](#5-human-in-the-loop-approval-checkpoints) - Plan & step approval checkpoints
+  - [Full Observability](#6-know-what-your-agents-are-doing-without-the-hassle) - Metrics, tracing, logging
 
 **3. Guides & Examples**
 - [Real-World Example](#putting-it-all-together-a-real-example) • *Complete system*
@@ -32,7 +43,7 @@ GoMind is a comprehensive platform for building autonomous AI agent systems, des
 
 **5. Decision Making**
 - [When to Use GoMind](#when-to-use-gomind) • *Choose the right tool*
-- [Why Production AI Agents](#why-gomind-the-evolution-towards-production-ai-agents) • *For architects*
+- [Microservices for AI](#why-gomind-microservices-architecture-for-ai-agents) • *For architects*
 - [Limitations](#consider-python-frameworks-if) • *Be informed*
 
 **6. Resources**
@@ -50,32 +61,34 @@ GoMind is a comprehensive platform for building autonomous AI agent systems, des
 
 ---
 
-## Why GoMind? The Evolution Towards Production AI Agents
+## Why GoMind? Microservices Architecture for AI Agents
 
-### 1. Intelligent Agents and Tools Are the Future of AI Architecture
+### 1. The Microservices Paradigm Applied to AI
 
-**The Paradigm Shift**: The future of AI isn't monolithic applications, but ecosystems of specialized components - tools that perform specific tasks and agents that orchestrate them intelligently.
+**The Core Insight**: The same principles that revolutionized web services—independent deployment, service discovery, fault isolation, and horizontal scaling—apply perfectly to AI agent systems.
 
-- **Specialized Tools**: Each tool masters one capability (calculation, data retrieval, translation)
-- **Intelligent Agents**: Orchestrators that discover and coordinate tools to solve complex problems
-- **Composable Intelligence**: Combine simple tools through smart agents
-- **Independent Scaling**: Scale only the components that need more resources
-- **Fault Isolation**: One tool failing doesn't crash your entire AI system
-- **Rapid Iteration**: Update individual tools or agents without touching the whole system
+Just as microservices decomposed monolithic applications into specialized, independently deployable services, GoMind decomposes AI systems into:
 
-### 2. Kubernetes: The Battle-Tested Platform for AI Components
+- **Tools as Domain Services**: Each tool is an independent microservice focused on a specific domain, exposing multiple related capabilities. A stock-market-tool provides quotes, company profiles, and news; a weather-tool provides current conditions and forecasts. Deploy, scale, and update each domain independently.
+- **Agents as Composable Orchestrators**: Agents discover and coordinate tools at runtime—but they also expose their own capabilities. A travel-research agent orchestrates weather, currency, and geocoding tools, then exposes `research_destination` as a capability that other agents can call. This enables hierarchical composition: agents calling agents.
+- **Dynamic Discovery**: Both tools and agents register their capabilities; any agent can discover and use them. Add new tools or agents without redeploying existing ones.
+- **Fault Isolation**: One tool failing doesn't crash your AI system. Circuit breakers prevent cascade failures.
+- **Independent Scaling**: Scale only the tools under load. A popular weather tool can run 10 replicas while a rarely-used calculator runs one.
+- **Zero-Downtime Updates**: Rolling deployments for individual tools. Agents discover new versions as they come online.
 
-**Why Reinvent the Wheel?** Kubernetes already solved distributed system challenges. GoMind builds on this foundation while adding intelligent capabilities for autonomous agent networks:
+### 2. Kubernetes-Native: Built for the Platform That Runs Production
+
+**Why Reinvent the Wheel?** Kubernetes already solved the hard problems of running microservices at scale. GoMind embraces this foundation, adding AI-specific capabilities on top:
 
 | Capability | Kubernetes Provides | GoMind Adds |
 |------------|---------------------|-------------|
-| **Discovery** | Service DNS for static endpoints | Redis-based dynamic capability discovery - agents find tools by what they do, not where they are |
-| **Auto-scaling** | HPA scales pods based on metrics | Go's 8-12MB memory footprint means 10x more agents per node vs Python frameworks |
+| **Discovery** | Service DNS for static endpoints | Redis/Valkey-based dynamic capability discovery - agents find tools by what they do, not where they are |
+| **Auto-scaling** | HPA scales pods based on metrics | Go's 8-20MB memory footprint means 10x more agents per node vs Python frameworks |
 | **Health Monitoring** | Restart failed pods | Circuit breakers prevent cascade failures before pods need restarting |
 | **Load Balancing** | Distribute traffic across replicas | Intelligent routing based on tool capabilities and health status |
 | **Rolling Updates** | Zero-downtime deployments | Agents automatically discover new tool versions as they come online |
 
-**The GoMind Advantage**: Go's tiny containers (~15-44MB) and minimal runtime footprint (8-12MB) make aggressive autoscaling practical. Scale from 10 to 100 agents without blowing your infrastructure budget.
+**The GoMind Advantage**: Go's tiny containers (~15-44MB) and minimal runtime footprint (8-20MB) make aggressive autoscaling practical. Scale from 10 to 100 agents without blowing your infrastructure budget.
 
 ### 3. Why Go? Language Is No Longer a Barrier
 
@@ -86,7 +99,7 @@ GoMind is a comprehensive platform for building autonomous AI agent systems, des
 | What You Get with Go | The Reality |
 |---------------------|-------------|
 | **Container Size** | ~15-26MB for tools, ~24-44MB for agents (verified) |
-| **Memory Footprint** | 8-12MB at runtime (verified in Kubernetes) |
+| **Memory Footprint** | 8-20MB at runtime (verified in Kubernetes) |
 | **Startup Time** | ~100ms |
 | **Deployment** | Single binary - no dependencies |
 | **Concurrency** | Native goroutines - thousands of concurrent operations |
@@ -115,13 +128,29 @@ GoMind is a comprehensive platform for building autonomous AI agent systems, des
 🔴 **Common Challenge**: "Add Prometheus, OpenTelemetry, Grafana, configure them all..."
 ✅ **GoMind**: Initialize once, then `telemetry.Counter("task.done")`. Observability built-in.
 
-## What Makes GoMind Unique: Beyond Traditional Agent Frameworks
+## What Makes GoMind Unique: Vendor-Agnostic, Microservice-Native AI
 
-While popular frameworks like LangChain, CrewAI, and AutoGen require you to define agent workflows upfront, GoMind takes a different approach: **AI-driven dynamic orchestration with runtime capability discovery**.
+While popular frameworks tie you to specific providers and require predefined workflows, GoMind takes a different approach: **vendor-agnostic AI with microservice-style dynamic discovery**.
 
-### The Key Differentiator: From Predefined Workflows to AI-Generated Execution Plans
+### True Vendor Independence
 
-**Traditional Frameworks (LangChain, CrewAI, AutoGen):**
+Switch LLM providers without changing your agent code:
+
+```go
+// Same agent code works with any provider
+client := ai.NewClient(ai.WithProviderAlias("default")) // Uses GOMIND_AI_PROVIDER env var
+
+// Or explicitly choose providers at runtime
+openai := ai.NewClient(ai.WithProviderAlias("openai"))
+anthropic := ai.NewClient(ai.WithProviderAlias("anthropic"))
+selfHosted := ai.NewClient(ai.WithProviderAlias("ollama")) // Your own models
+```
+
+Supported providers: OpenAI, Anthropic Claude, Google Gemini, Groq, DeepSeek, Ollama, and any OpenAI-compatible endpoint (vLLM, LocalAI, etc.).
+
+### Dynamic Orchestration Over Predefined Workflows
+
+**Traditional Frameworks:**
 - Workflows defined in code: chains, graphs, crews, or conversation patterns
 - Agent roles and responsibilities must be predetermined (researcher, writer, reviewer)
 - Adding new tools requires updating orchestration logic
@@ -130,7 +159,7 @@ While popular frameworks like LangChain, CrewAI, and AutoGen require you to defi
 **GoMind's Approach:**
 - AI generates execution plans at runtime based on natural language requests
 - Tools register themselves with capabilities - no predefined roles needed
-- New tools automatically become available to existing orchestrators via Redis discovery
+- New tools automatically become available to existing orchestrators via Redis/Valkey discovery
 - LLM dynamically selects tools based on discovered capabilities, not hardcoded references
 
 ### Architectural Innovation: Compile-Time Enforcement
@@ -164,12 +193,12 @@ Unlike frameworks that evolved from notebooks and experiments, GoMind was archit
 | Aspect | GoMind | Traditional Frameworks |
 |--------|--------|----------------------|
 | **Container Size** | 15-44MB (verified) | 200-900MB (Python + deps) |
-| **Memory per Agent** | 8-12MB (verified in K8s) | 100-500MB |
+| **Memory per Agent** | 8-20MB (verified in K8s) | 100-500MB |
 | **Startup Time** | ~100ms | 5-30 seconds |
 | **Concurrent Agents** | 1000s (goroutines) | 10s-100s (GIL/processes) |
 | **Health Checks** | Built-in from start | Added via extensions |
 | **Circuit Breakers** | Native support | External libraries needed |
-| **Service Discovery** | Redis-based, automatic | Manual configuration |
+| **Service Discovery** | Redis/Valkey-based, automatic | Manual configuration |
 | **Semantic Retry** | LLM computes corrected params | Manual error handling |
 | **Human-in-the-Loop** | Built-in approval checkpoints | Custom implementation |
 
@@ -397,7 +426,7 @@ response, _ := orchestrator.ProcessRequest(ctx,
 //   4. Synthesizes results into a coherent response
 ```
 
-No explicit wiring. No predefined workflows. Add a new tool to Redis, and it's immediately available to all orchestrators.
+No explicit wiring. No predefined workflows. Add a new tool to Redis/Valkey, and it's immediately available to all orchestrators.
 
 ### Dual-Mode Orchestration: Choose Your Approach
 
@@ -460,7 +489,7 @@ flowchart TB
             end
         end
 
-        Redis[("🔴 Redis Registry<br/>━━━━━━━━━━━━━━━━<br/>• Service registration<br/>• TTL-based health<br/>• Capability catalog")]
+        Redis[("🔴 Redis/Valkey<br/>━━━━━━━━━━━━━━━━<br/>• Service registration<br/>• TTL-based health<br/>• Capability catalog")]
 
         OTEL["📊 OTEL Collector<br/>━━━━━━━━━━━━━━━━<br/>• Metrics (OTLP)<br/>• Traces (OTLP)<br/>• → Prometheus/Jaeger"]
 
@@ -528,9 +557,9 @@ flowchart TB
 
 **How It Works**:
 
-1. **Tools Register** → Each tool announces itself to Redis with capabilities and a 30-second TTL
+1. **Tools Register** → Each tool announces itself to Redis/Valkey with capabilities and a 30-second TTL
 2. **Heartbeat** → Tools refresh their TTL every 15 seconds (automatic via Framework)
-3. **Agents Discover** → Agents query Redis to find tools by capability (e.g., "find all tools with `current_weather`")
+3. **Agents Discover** → Agents query Redis/Valkey to find tools by capability (e.g., "find all tools with `current_weather`")
 4. **AI Selects** → When processing natural language, AI analyzes available capabilities and generates an execution plan
 5. **Coordinate** → Agent calls selected tools via HTTP, collects responses, synthesizes results
 
@@ -544,7 +573,7 @@ GoMind is designed to leverage Kubernetes capabilities for production-grade depl
 |-------------------|-------------------|
 | **Service DNS** | Tools register with K8s Service DNS (`weather-service.namespace.svc.cluster.local`), not pod IPs |
 | **Load Balancing** | K8s Services automatically distribute traffic across all healthy pods |
-| **Autoscaling** | HPA can scale pods 1→N without changing Redis registration - same service DNS |
+| **Autoscaling** | HPA can scale pods 1→N without changing Redis/Valkey registration - same service DNS |
 | **Pod Lifecycle** | Pod restarts, crashes, rolling updates don't affect discovery - K8s handles routing |
 | **Health Checks** | Unhealthy pods removed from Service endpoints automatically via readinessProbe |
 
@@ -552,7 +581,7 @@ GoMind is designed to leverage Kubernetes capabilities for production-grade depl
 # Example: weather-tool-v2 deployment (2 replicas, single service)
 env:
   - name: GOMIND_K8S_SERVICE_NAME
-    value: "weather-tool-v2-service"    # ← Registered in Redis
+    value: "weather-tool-v2-service"    # ← Registered in Redis/Valkey
   - name: GOMIND_K8S_SERVICE_PORT
     value: "80"                          # ← Service port, not container port
 ---
@@ -728,7 +757,7 @@ func main() {
 
 That's it! Your agent is running at `http://localhost:8080` with:
 - ✅ Health checks at `/health`
-- ✅ Automatic service discovery (if Redis is configured)
+- ✅ Automatic service discovery (if Redis/Valkey is configured)
 - ✅ Graceful shutdown handling
 - ✅ Built-in error handling
 
@@ -791,7 +820,7 @@ func main() {
 
 The Framework automatically handles:
 - ✅ Dependency injection (Registry for Tools, Discovery for Agents)
-- ✅ Redis connection and service registration
+- ✅ Redis/Valkey connection and service registration
 - ✅ HTTP server with health checks and CORS
 - ✅ Graceful shutdown on SIGINT/SIGTERM
 - ✅ Configuration from environment variables
@@ -815,10 +844,10 @@ tools, err := r.Discovery.FindByCapability(ctx, "current_weather")
 ```
 
 **What Happens Behind the Scenes**:
-- Tools register themselves in Redis with a TTL (default 30 seconds)
+- Tools register themselves in Redis/Valkey with a TTL (default 30 seconds)
 - If a tool crashes, it's automatically removed after TTL expires
-- Agents query Redis to find available tools by type or capability
-- No hardcoded IPs, no service mesh needed - just Redis
+- Agents query Redis/Valkey to find available tools by type or capability
+- No hardcoded IPs, no service mesh needed - just Redis/Valkey
 
 → See [agent-example](examples/agent-example/) for complete implementation with AI-powered tool selection
 
@@ -859,36 +888,62 @@ curl -X POST http://localhost:8080/api/research \
 
 **The Problem**: Some agent tasks always follow the same pattern. How do you avoid re-orchestrating the same sequence every time?
 
-**The Solution**: Write the recipe once, run it forever:
+**The Solution**: Multiple workflow options depending on your needs:
 
+| Mode | Best For | Definition |
+|------|----------|------------|
+| **Predefined Workflows** | Named, reusable patterns | Code-based with parameters |
+| **Natural Language** | Flexible, AI-driven | LLM plans execution dynamically |
+| **Custom JSON** | Dynamic, API-driven | Runtime-submitted steps |
+| **YAML Workflows** | Ops-friendly, version-controlled | Declarative YAML files |
+
+**Predefined Workflow** - Named workflows with parameters:
+```bash
+curl -X POST http://localhost:8094/orchestrate/travel-research \
+  -H "Content-Type: application/json" \
+  -d '{"destination": "Tokyo, Japan", "base_currency": "USD", "amount": 1000}'
+```
+
+**Natural Language** - AI discovers tools and plans execution:
+```bash
+curl -X POST http://localhost:8094/orchestrate/natural \
+  -H "Content-Type: application/json" \
+  -d '{"request": "What is the weather in Paris and what currency do they use?"}'
+```
+
+**Custom JSON** - Define steps at runtime (no LLM needed):
+```bash
+curl -X POST http://localhost:8094/orchestrate/custom \
+  -H "Content-Type: application/json" \
+  -d '{
+    "steps": [
+      {"tool": "geocoding-tool", "capability": "geocode_location", "params": {"location": "Berlin"}},
+      {"tool": "weather-tool-v2", "capability": "get_current_weather", "params": {"lat": 52.52, "lon": 13.405}}
+    ]
+  }'
+```
+
+**YAML Workflow** - Declarative with dependencies:
 ```yaml
-# workflow.yaml - Steps with automatic parallel execution
 name: daily-report
 steps:
   - name: get-sales
     agent: sales-agent
     action: fetch_daily_total
-  - name: get-costs          # Runs in parallel with get-sales!
+  - name: get-costs          # Runs in parallel with get-sales
     agent: finance-agent
     action: fetch_daily_costs
   - name: calculate-profit
-    agent: calculator-agent
     depends_on: [get-sales, get-costs]  # Wait for both
-    inputs:
-      revenue: ${steps.get-sales.output}
-      costs: ${steps.get-costs.output}
-```
-
-```go
-// Execute workflows with the orchestrator
-result, err := orchestrator.ExecutePlan(ctx, plan)
 ```
 
 **What Happens Behind the Scenes**:
-- Framework identifies which steps can run in parallel (sales & costs)
+- Framework identifies which steps can run in parallel
 - Automatically waits for dependencies before running next steps
-- Passes data between agents using ${} variable substitution
+- Passes data between agents using parameter resolution
 - If an agent fails, the workflow stops and reports which step failed
+
+→ See [agent-with-orchestration](examples/agent-with-orchestration/) for complete workflow implementation
 
 → See [orchestration/README.md](orchestration/README.md) for workflow engine documentation
 
@@ -926,13 +981,23 @@ err := cb.ExecuteWithTimeout(ctx, 5*time.Second, func() error {
 
 **The Problem**: Some agent operations are too risky to run automatically. Payment processing, data deletion, or sensitive API calls need human approval.
 
-**The Solution**: Built-in HITL (Human-in-the-Loop) support pauses execution at critical points and waits for approval:
+**The Solution**: Built-in HITL (Human-in-the-Loop) support with two approval modes:
+
+#### Plan Approval
+Approve the entire AI-generated execution plan before any tools are called. See all planned operations upfront.
+
+<img src="docs/images/HITL_Plan_Approval.png" alt="Plan Approval" width="450">
+
+#### Step Approval
+Approve individual sensitive operations as they're reached during execution. Non-sensitive steps run automatically.
+
+<img src="docs/images/HITL_Step_Approval.png" alt="Step Approval" width="450">
 
 ```go
-// Configure which operations require approval
+// Configure approval requirements
 policy := orchestration.NewRuleBasedPolicy(orchestration.HITLConfig{
-    RequirePlanApproval:      true,  // Approve AI-generated plans before execution
-    SensitiveCapabilities:    []string{"transfer_funds", "delete_account"},
+    RequirePlanApproval:      true,  // Require plan approval before execution
+    SensitiveCapabilities:    []string{"transfer_funds", "delete_account", "stock_quote"},
     SensitiveAgents:          []string{"payment-service"},
     DefaultTimeout:           5 * time.Minute,
 })
@@ -944,19 +1009,20 @@ orchestrator := orchestration.NewAIOrchestrator(config, discovery, aiClient,
 )
 ```
 
-**What Happens**:
-1. Agent generates execution plan → pauses for approval
-2. Webhook notifies your approval system (Slack, email, dashboard)
-3. Human approves/rejects via API → execution continues or aborts
-4. Timeout handling with configurable auto-approve/reject
+**How It Works**:
+1. Agent generates execution plan → pauses for plan approval (if enabled)
+2. Webhook notifies your approval system (Slack, dashboard, custom UI)
+3. During execution, sensitive steps pause for individual approval
+4. Human approves/rejects → execution continues or aborts
+5. Configurable timeout with auto-approve/reject behavior
 
 → See [docs/HUMAN_IN_THE_LOOP_USER_GUIDE.md](docs/HUMAN_IN_THE_LOOP_USER_GUIDE.md) for complete HITL documentation
 
 ### 6. Know What Your Agents Are Doing (Without the Hassle)
 
-**The Problem**: You need metrics and tracing to debug issues, but setting up Prometheus/Grafana/OpenTelemetry is complex.
+**The Problem**: You need metrics and tracing to debug issues, but don't want vendor lock-in or complex setup.
 
-**The Solution**: Initialize once, then emit metrics with one line from anywhere:
+**The Solution**: GoMind uses **OpenTelemetry (OTEL)** for vendor-neutral observability. Export metrics and traces to any OTEL-compatible backend—Prometheus, Jaeger, Datadog, Grafana Cloud, or your own infrastructure. Initialize once, then emit metrics with one line from anywhere:
 
 ```go
 // Initialize with environment-based profile (development/staging/production)
@@ -975,11 +1041,12 @@ core.WithMiddleware(telemetry.TracingMiddleware(serviceName))
 ```
 
 **Built-in Safety Features**:
+- **Vendor-neutral**: OTEL standard means no lock-in—switch backends without code changes
 - **Won't crash your agents**: If metrics backend is down, agents keep running
 - **Won't explode your bill**: Automatic cardinality limiting
 - **Development vs Production**: Different settings for local testing vs production
 
-→ See [agent-with-telemetry](examples/agent-with-telemetry/) for Prometheus, Jaeger, and Grafana integration
+→ See [agent-with-telemetry](examples/agent-with-telemetry/) for OTEL integration with Prometheus, Jaeger, and Grafana
 
 ## Putting It All Together: A Real Example
 
@@ -1038,7 +1105,7 @@ framework.Run(ctx)
 ```
 
 Your agents are now:
-- ✅ Discoverable via Redis with automatic TTL refresh
+- ✅ Discoverable via Redis/Valkey with automatic TTL refresh
 - ✅ Protected by circuit breakers (with resilience module)
 - ✅ Emitting metrics to Prometheus/OTEL
 - ✅ Traceable with distributed tracing
@@ -1054,7 +1121,7 @@ Your agents are now:
 |-------------------|---------|-------------------|
 | **Deploy an agent** | Copy single binary, run | Install Python, pip install 50 packages, pray |
 | **Container image size** | ~15-44MB (Alpine + Go binary) | 200-900MB (Python + dependencies) |
-| **Memory footprint** | 8-12MB per component (verified) | 100-500MB per agent |
+| **Memory footprint** | 8-20MB per component (verified) | 100-500MB per agent |
 | **Handle API failures** | Built-in circuit breakers | Add retry library, configure it |
 | **Coordinate agents** | "Analyze this data" (English) | Write orchestration code |
 | **Add observability** | `telemetry.Counter("done")` | Setup Prometheus + Grafana + exporters |
@@ -1077,6 +1144,10 @@ Compare to typical Python agent images:
 - Python base image: 100-150MB
 - Dependencies (numpy, pandas, etc.): 200-500MB
 - ML libraries if needed: +300-1000MB
+
+**GoMind Agents and Tools memory footprint** (pods running in the local Kind cluster):
+
+<img src="docs/images/pods-memory-footprints.png" alt="Pods Memory Footprint" width="600">
 
 ## When to Use GoMind
 
@@ -1171,7 +1242,7 @@ spec:
 
 | Example | Description |
 |---------|-------------|
-| [k8-deployment](https://github.com/itsneelabh/gomind/tree/main/examples/k8-deployment) | Kubernetes infrastructure with Redis, OTEL Collector, Prometheus, Jaeger, and Grafana |
+| [k8-deployment](https://github.com/itsneelabh/gomind/tree/main/examples/k8-deployment) | Kubernetes infrastructure with Redis/Valkey, OTEL Collector, Prometheus, Jaeger, and Grafana |
 
 See the [Examples README](https://github.com/itsneelabh/gomind/tree/main/examples) for detailed setup instructions and architecture guides.
 
