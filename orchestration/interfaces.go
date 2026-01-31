@@ -44,8 +44,19 @@ type Orchestrator interface {
 	// ProcessRequest handles a natural language request by orchestrating multiple agents
 	ProcessRequest(ctx context.Context, request string, metadata map[string]interface{}) (*OrchestratorResponse, error)
 
-	// ExecutePlan executes a pre-defined routing plan
+	// ExecutePlan executes a pre-defined routing plan (raw results, no synthesis)
 	ExecutePlan(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error)
+
+	// ExecutePlanWithSynthesis executes a pre-defined routing plan with synthesis.
+	// Unlike ExecutePlan(), this method:
+	// 1. Uses the orchestrator's synthesizer (which auto-records to LLM Debug Store)
+	// 2. Returns a complete OrchestratorResponse (not raw ExecutionResult)
+	// 3. Stores execution to ExecutionStore for DAG visualization
+	// 4. Sets up context baggage for request_id propagation
+	//
+	// Use this when you want workflow mode with full observability.
+	// Use ExecutePlan() when you need raw results for custom synthesis logic.
+	ExecutePlanWithSynthesis(ctx context.Context, plan *RoutingPlan, originalRequest string) (*OrchestratorResponse, error)
 
 	// GetExecutionHistory returns recent execution history
 	GetExecutionHistory() []ExecutionRecord
@@ -65,6 +76,8 @@ type OrchestratorResponse struct {
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`
 	Errors          []string               `json:"errors,omitempty"`
 	Confidence      float64                `json:"confidence"`
+	// Steps contains individual step results (populated by ExecutePlanWithSynthesis)
+	Steps []StepResult `json:"steps,omitempty"`
 }
 
 // StreamingOrchestratorResponse extends OrchestratorResponse for streaming scenarios

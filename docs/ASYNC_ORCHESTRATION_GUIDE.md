@@ -4,28 +4,78 @@ Welcome to the complete guide on async tasks in GoMind! Think of this as your fr
 
 ## Table of Contents
 
-- [What Are Async Tasks and Why Should You Care?](#what-are-async-tasks-and-why-should-you-care)
-- [The Solution: HTTP 202 + Polling Pattern](#the-solution-http-202--polling-pattern)
-- [Understanding the Architecture](#understanding-the-architecture)
-- [Quick Start: Your First Async Agent](#quick-start-your-first-async-agent)
-  - [Understanding the Request Format](#understanding-the-request-format)
-  - [Framework vs Developer Responsibilities](#framework-vs-developer-responsibilities)
-- [Deployment Modes](#deployment-modes)
-- [Writing Task Handlers](#writing-task-handlers)
-- [Progress Reporting](#progress-reporting)
-- [Distributed Tracing Across Async Boundaries](#distributed-tracing-across-async-boundaries)
-- [Monitoring and Metrics](#monitoring-and-metrics)
-- [Configuration Reference](#configuration-reference)
-  - [Implementing Custom Backends](#implementing-custom-backends)
-- [Best Practices](#best-practices)
-- [Troubleshooting](#troubleshooting)
-- [Related Documentation](#related-documentation)
+1. [What Are Async Tasks and Why Should You Care?](#1-what-are-async-tasks-and-why-should-you-care)
+   - 1.1 [The Problem: AI Tasks Take Minutes to Hours](#11-the-problem-ai-tasks-take-minutes-to-hours)
+   - 1.2 [The Restaurant Analogy](#12-the-restaurant-analogy)
+   - 1.3 [Why Synchronous Doesn't Work](#13-why-synchronous-doesnt-work)
+2. [The Solution: HTTP 202 + Polling Pattern](#2-the-solution-http-202--polling-pattern)
+   - 2.1 [How It Works](#21-how-it-works)
+3. [Understanding the Architecture](#3-understanding-the-architecture)
+   - 3.1 [Component Overview](#31-component-overview)
+   - 3.2 [Data Flow](#32-data-flow)
+4. [Quick Start: Your First Async Agent](#4-quick-start-your-first-async-agent)
+   - 4.1 [Step 1: Create Project Structure](#41-step-1-create-project-structure)
+   - 4.2 [Step 2: Initialize Redis-Backed Infrastructure](#42-step-2-initialize-redis-backed-infrastructure)
+   - 4.3 [Step 3: Create Worker Pool and Register Handlers](#43-step-3-create-worker-pool-and-register-handlers)
+   - 4.4 [Step 4: Set Up HTTP API](#44-step-4-set-up-http-api)
+   - 4.5 [Step 5: Implement Task Handler](#45-step-5-implement-task-handler)
+   - 4.6 [Step 6: Test Your Agent](#46-step-6-test-your-agent)
+   - 4.7 [Understanding the Request Format](#47-understanding-the-request-format)
+   - 4.8 [Framework vs Developer Responsibilities](#48-framework-vs-developer-responsibilities)
+5. [Deployment Modes](#5-deployment-modes)
+   - 5.1 [Mode 1: Embedded (Default, Local Development)](#51-mode-1-embedded-default-local-development)
+   - 5.2 [Mode 2: API + Worker (Production)](#52-mode-2-api--worker-production)
+6. [Writing Task Handlers](#6-writing-task-handlers)
+   - 6.1 [Handler Signature](#61-handler-signature)
+   - 6.2 [The Task Struct](#62-the-task-struct)
+   - 6.3 [Task Error Codes](#63-task-error-codes)
+   - 6.4 [Task Helper Functions](#64-task-helper-functions)
+   - 6.5 [Best Practices for Handlers](#65-best-practices-for-handlers)
+7. [Progress Reporting](#7-progress-reporting)
+   - 7.1 [TaskProgress Structure](#71-taskprogress-structure)
+   - 7.2 [Integration with OnStepComplete Callback](#72-integration-with-onstepcomplete-callback)
+   - 7.3 [Client-Side Polling](#73-client-side-polling)
+8. [Distributed Tracing Across Async Boundaries](#8-distributed-tracing-across-async-boundaries)
+   - 8.1 [The Challenge](#81-the-challenge)
+   - 8.2 [The Solution: StartLinkedSpan](#82-the-solution-startlinkedspan)
+   - 8.3 [What You See in Jaeger](#83-what-you-see-in-jaeger)
+   - 8.4 [Enabling Async Tracing](#84-enabling-async-tracing)
+9. [Observability Integration](#9-observability-integration)
+   - 9.1 [Distributed Tracing Setup](#91-distributed-tracing-setup)
+   - 9.2 [Log Correlation](#92-log-correlation)
+   - 9.3 [request_id Propagation](#93-request_id-propagation)
+   - 9.4 [Enabling Debug Stores](#94-enabling-debug-stores)
+   - 9.5 [Viewing Execution DAGs](#95-viewing-execution-dags)
+   - 9.6 [Finding Traces in Jaeger](#96-finding-traces-in-jaeger)
+   - 9.7 [Example: Full Observability Setup](#97-example-full-observability-setup)
+10. [Monitoring and Metrics](#10-monitoring-and-metrics)
+    - 10.1 [Built-in Metrics](#101-built-in-metrics)
+    - 10.2 [Key Metrics to Monitor](#102-key-metrics-to-monitor)
+    - 10.3 [Prometheus Queries](#103-prometheus-queries)
+    - 10.4 [Grafana Dashboard](#104-grafana-dashboard)
+11. [Configuration Reference](#11-configuration-reference)
+    - 11.1 [Environment Variables](#111-environment-variables)
+    - 11.2 [TaskWorkerConfig](#112-taskworkerconfig)
+    - 11.3 [RedisTaskQueueConfig](#113-redistaskqueueconfig)
+    - 11.4 [RedisTaskStoreConfig](#114-redistaskstoreconfig)
+    - 11.5 [Utility Methods (Beyond the Interface)](#115-utility-methods-beyond-the-interface)
+    - 11.6 [Implementing Custom Backends](#116-implementing-custom-backends)
+12. [Best Practices](#12-best-practices)
+    - 12.1 [DO](#121-do)
+    - 12.2 [DON'T](#122-dont)
+13. [Troubleshooting](#13-troubleshooting)
+    - 13.1 [Problem: Tasks Stuck in "queued" Status](#131-problem-tasks-stuck-in-queued-status)
+    - 13.2 [Problem: Tasks Fail Immediately](#132-problem-tasks-fail-immediately)
+    - 13.3 [Problem: Progress Not Updating](#133-problem-progress-not-updating)
+    - 13.4 [Problem: Traces Not Linked](#134-problem-traces-not-linked)
+    - 13.5 [Problem: Workers Using Too Much Memory](#135-problem-workers-using-too-much-memory)
+14. [Related Documentation](#14-related-documentation)
 
 ---
 
-## What Are Async Tasks and Why Should You Care?
+## 1. What Are Async Tasks and Why Should You Care?
 
-### The Problem: AI Tasks Take Minutes to Hours
+### 1.1 The Problem: AI Tasks Take Minutes to Hours
 
 AI agent workflows aren't like typical web requests that complete in milliseconds. They involve complex operations that can take **minutes to hours**:
 
@@ -49,7 +99,7 @@ Total: ~4+ minutes
 
 This is a fundamental mismatch with synchronous HTTP request-response patterns.
 
-### The Restaurant Analogy
+### 1.2 The Restaurant Analogy
 
 Think of it like a busy restaurant:
 
@@ -68,7 +118,7 @@ Think of it like a busy restaurant:
 
 **That order number is exactly what a Task ID does for long-running operations!**
 
-### Why Synchronous Doesn't Work
+### 1.3 Why Synchronous Doesn't Work
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -105,11 +155,11 @@ With async:
 
 ---
 
-## The Solution: HTTP 202 + Polling Pattern
+## 2. The Solution: HTTP 202 + Polling Pattern
 
 The solution is elegantly simple: **return immediately with a task ID, process in background, let clients poll for status**.
 
-### How It Works
+### 2.1 How It Works
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -163,7 +213,7 @@ The solution is elegantly simple: **return immediately with a task ID, process i
 
 ---
 
-## Understanding the Architecture
+## 3. Understanding the Architecture
 
 Before diving into code, let's understand the components.
 
@@ -173,7 +223,7 @@ Before diving into code, let's understand the components.
 >
 > This guide uses the Redis implementations throughout. See [Configuration Reference](#configuration-reference) for Redis configuration details, or [Implementing Custom Backends](#implementing-custom-backends) for guidance on creating your own implementations.
 
-### Component Overview
+### 3.1 Component Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -224,7 +274,7 @@ Before diving into code, let's understand the components.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Data Flow
+### 3.2 Data Flow
 
 1. **Submit**: Client → API Server → TaskStore.Create() → TaskQueue.Enqueue()
 2. **Process**: Worker → TaskQueue.Dequeue() → Handler() → ProgressReporter.Report()
@@ -232,13 +282,13 @@ Before diving into code, let's understand the components.
 
 ---
 
-## Quick Start: Your First Async Agent
+## 4. Quick Start: Your First Async Agent
 
 Let's build an async agent step by step.
 
 > **Working Example**: See [examples/agent-with-async/](../examples/agent-with-async/) for a complete implementation.
 
-### Step 1: Create Project Structure
+### 4.1 Step 1: Create Project Structure
 
 ```
 my-async-agent/
@@ -251,7 +301,7 @@ my-async-agent/
 └── setup.sh          # Deployment helper script
 ```
 
-### Step 2: Initialize Redis-Backed Infrastructure
+### 4.2 Step 2: Initialize Redis-Backed Infrastructure
 
 ```go
 // main.go
@@ -294,7 +344,7 @@ func main() {
 
 > 📁 **Full Example**: See [examples/agent-with-async/main.go](../examples/agent-with-async/main.go) lines 114-132 for complete Redis connection and task infrastructure setup.
 
-### Step 3: Create Worker Pool and Register Handlers
+### 4.3 Step 3: Create Worker Pool and Register Handlers
 
 ```go
 // main.go (continued)
@@ -326,7 +376,7 @@ func main() {
 
 > 📁 **Full Example**: See [examples/agent-with-async/main.go](../examples/agent-with-async/main.go) lines 241-259 for worker pool configuration and handler registration.
 
-### Step 4: Set Up HTTP API
+### 4.4 Step 4: Set Up HTTP API
 
 ```go
 // main.go (continued)
@@ -368,7 +418,7 @@ func main() {
 
 > 📁 **Full Example**: See [examples/agent-with-async/main.go](../examples/agent-with-async/main.go) lines 164-226 for API mode setup, or lines 344-486 for embedded mode with both API and workers.
 
-### Step 5: Implement Task Handler
+### 4.5 Step 5: Implement Task Handler
 
 > 📁 **Full Example**: See [examples/agent-with-async/travel_research_agent.go](../examples/agent-with-async/travel_research_agent.go) for the complete `AsyncTravelAgent` struct (lines 51-57), `QueryResult` type (lines 67-75), and `InitializeOrchestrator` method (lines 132-174).
 
@@ -429,7 +479,7 @@ func (a *MyAgent) HandleQuery(
 }
 ```
 
-### Step 6: Test Your Agent
+### 4.6 Step 6: Test Your Agent
 
 ```bash
 # Submit a task
@@ -473,7 +523,7 @@ curl http://localhost:8098/api/v1/tasks/abc123-def456-...
 # }
 ```
 
-### Understanding the Request Format
+### 4.7 Understanding the Request Format
 
 The task submission request uses a deliberate structure that separates **framework concerns** from **handler concerns**:
 
@@ -587,7 +637,7 @@ func (a *Agent) HandleTravelResearch(ctx context.Context, task *core.Task, repor
 
 > **Design Pattern**: This "envelope + payload" pattern is common in message queue systems (SQS, RabbitMQ, Kafka). The envelope (`type`, `timeout`, `task_id`) is understood by the infrastructure; the payload (`input`) is understood only by the consumer (handler).
 
-### Framework vs Developer Responsibilities
+### 4.8 Framework vs Developer Responsibilities
 
 Understanding what the framework handles automatically versus what you must implement is crucial for building effective async agents. This section provides a comprehensive breakdown.
 
@@ -850,11 +900,11 @@ func (a *Agent) HandleQuery(ctx context.Context, task *core.Task, reporter core.
 
 ---
 
-## Deployment Modes
+## 5. Deployment Modes
 
 GoMind async agents support three deployment modes, controlled by the `GOMIND_MODE` environment variable.
 
-### Mode 1: Embedded (Default, Local Development)
+### 5.1 Mode 1: Embedded (Default, Local Development)
 
 **When to use**: Local development, testing, simple deployments.
 
@@ -881,7 +931,7 @@ GOMIND_MODE= (unset or empty)
 - Can't scale API and workers independently
 - Limited horizontal scaling
 
-### Mode 2: API + Worker (Production)
+### 5.2 Mode 2: API + Worker (Production)
 
 **When to use**: Production deployments requiring independent scaling.
 
@@ -956,11 +1006,11 @@ spec:
 
 ---
 
-## Writing Task Handlers
+## 6. Writing Task Handlers
 
 Task handlers are the core of your async agent. They process tasks from the queue.
 
-### Handler Signature
+### 6.1 Handler Signature
 
 ```go
 type TaskHandler func(
@@ -970,7 +1020,7 @@ type TaskHandler func(
 ) error
 ```
 
-### The Task Struct
+### 6.2 The Task Struct
 
 ```go
 type Task struct {
@@ -991,7 +1041,7 @@ type Task struct {
 }
 ```
 
-### Task Error Codes
+### 6.3 Task Error Codes
 
 When a task fails, the `Error.Code` field contains one of these standard codes:
 
@@ -1003,7 +1053,7 @@ When a task fails, the `Error.Code` field contains one of these standard codes:
 | `HANDLER_PANIC` | `core.TaskErrorCodePanic` | Handler panicked (caught by worker) |
 | `INVALID_INPUT` | `core.TaskErrorCodeInvalidInput` | Task input validation failed |
 
-### Task Helper Functions
+### 6.4 Task Helper Functions
 
 The `core` package provides helper functions for creating tasks:
 
@@ -1023,7 +1073,7 @@ tc := telemetry.GetTraceContext(ctx)
 task.SetTraceContext(tc.TraceID, tc.SpanID)
 ```
 
-### Best Practices for Handlers
+### 6.5 Best Practices for Handlers
 
 #### 1. Validate Input Early
 
@@ -1114,11 +1164,11 @@ func (a *Agent) HandleQuery(ctx context.Context, task *core.Task, reporter core.
 
 ---
 
-## Progress Reporting
+## 7. Progress Reporting
 
 The `ProgressReporter` interface enables real-time visibility into task execution.
 
-### TaskProgress Structure
+### 7.1 TaskProgress Structure
 
 ```go
 type TaskProgress struct {
@@ -1130,7 +1180,7 @@ type TaskProgress struct {
 }
 ```
 
-### Integration with OnStepComplete Callback
+### 7.2 Integration with OnStepComplete Callback
 
 For AI-orchestrated tasks, the `OnStepComplete` callback provides automatic per-tool progress:
 
@@ -1160,7 +1210,7 @@ config.ExecutionOptions.OnStepComplete = func(
 
 > 📁 **Full Example**: See [examples/agent-with-async/handlers.go](../examples/agent-with-async/handlers.go) lines 88-140 for a complete `OnStepComplete` callback implementation that tracks planning, tool execution, and synthesis phases.
 
-### Client-Side Polling
+### 7.3 Client-Side Polling
 
 ```javascript
 // JavaScript polling example
@@ -1196,11 +1246,11 @@ async function pollTask(taskId) {
 
 ---
 
-## Distributed Tracing Across Async Boundaries
+## 8. Distributed Tracing Across Async Boundaries
 
 One of the key challenges with async tasks is maintaining trace context when the request (API) and processing (worker) happen in different processes.
 
-### The Challenge
+### 8.1 The Challenge
 
 ```
 Request Thread (API Pod)        Worker Thread (Worker Pod)
@@ -1215,7 +1265,7 @@ Request Thread (API Pod)        Worker Thread (Worker Pod)
                                    New trace-456?  ← BAD: Disconnected traces!
 ```
 
-### The Solution: StartLinkedSpan
+### 8.2 The Solution: StartLinkedSpan
 
 GoMind provides `telemetry.StartLinkedSpan()` to create linked traces across async boundaries:
 
@@ -1254,7 +1304,7 @@ func processTask(task *core.Task) {
 }
 ```
 
-### What You See in Jaeger
+### 8.3 What You See in Jaeger
 
 With linked spans, Jaeger shows the relationship:
 
@@ -1273,7 +1323,7 @@ Trace 2 (Worker Processing):
     └── ai_synthesis (1.8s)
 ```
 
-### Enabling Async Tracing
+### 8.4 Enabling Async Tracing
 
 The framework handles this automatically when you:
 
@@ -1300,11 +1350,276 @@ func main() {
 
 ---
 
-## Monitoring and Metrics
+## 9. Observability Integration
+
+Async agents benefit from GoMind's full observability stack: distributed tracing, log correlation, DAG visualization, and LLM debug payloads. This section shows how to set up observability with accurate code snippets from the `agent-with-async` example.
+
+> **Complete Guides**: For comprehensive details, see:
+> - [Distributed Tracing and Log Correlation Guide](./DISTRIBUTED_TRACING_GUIDE.md)
+> - [Logging Implementation Guide](./LOGGING_IMPLEMENTATION_GUIDE.md)
+
+### 9.1 Distributed Tracing Setup
+
+Distributed tracing enables end-to-end request tracking across async boundaries. The key is **initialization order**: telemetry must be initialized BEFORE creating agents.
+
+**From `examples/agent-with-async/main.go` (lines 97-112):**
+
+```go
+func main() {
+    // ...validation...
+
+    // 1. Set component type for telemetry labeling
+    core.SetCurrentComponentType(core.ComponentTypeAgent)
+
+    // 2. Initialize telemetry BEFORE creating agent
+    serviceName := "async-travel-agent"
+    if mode != "" {
+        serviceName = fmt.Sprintf("async-travel-agent-%s", mode)
+    }
+    initTelemetry(serviceName)
+    defer func() {
+        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        defer cancel()
+        if err := telemetry.Shutdown(ctx); err != nil {
+            log.Printf("Warning: Telemetry shutdown error: %v", err)
+        }
+    }()
+
+    // 3. Create agent AFTER telemetry is initialized
+    agent, err := NewAsyncTravelAgent(redisClient)
+    // ...
+}
+```
+
+**The `initTelemetry` function (lines 540-570):**
+
+```go
+func initTelemetry(serviceName string) {
+    env := os.Getenv("APP_ENV")
+    if env == "" {
+        env = "development"
+    }
+
+    var profile telemetry.Profile
+    switch env {
+    case "production", "prod":
+        profile = telemetry.ProfileProduction
+    case "staging":
+        profile = telemetry.ProfileStaging
+    default:
+        profile = telemetry.ProfileDevelopment
+    }
+
+    config := telemetry.UseProfile(profile)
+    config.ServiceName = serviceName
+
+    if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+        config.Endpoint = endpoint
+    }
+
+    if err := telemetry.Initialize(config); err != nil {
+        log.Printf("Warning: Telemetry init failed: %v", err)
+        return
+    }
+
+    telemetry.EnableFrameworkIntegration(nil)
+    log.Printf("Telemetry initialized: %s (%s)", serviceName, env)
+}
+```
+
+**Adding TracingMiddleware to the Framework (lines 190-192, 401-403):**
+
+```go
+framework, err := core.NewFramework(agent.BaseAgent,
+    core.WithName("async-travel-agent"),
+    core.WithPort(port),
+    // ... other options ...
+    core.WithMiddleware(telemetry.TracingMiddlewareWithConfig("async-travel-agent", &telemetry.TracingMiddlewareConfig{
+        ExcludedPaths: []string{"/health", "/ready", "/metrics"},
+    })),
+)
+```
+
+The `TracingMiddleware`:
+- Extracts trace context from incoming `traceparent` headers
+- Creates spans for each HTTP request
+- Propagates context to downstream operations
+- Excludes health endpoints to reduce noise
+
+### 9.2 Log Correlation
+
+For logs to correlate with traces, use the `WithContext` logging methods in handlers. The framework's `ProductionLogger` automatically extracts trace IDs (including `request_id`) from context and includes them in log output.
+
+**From `examples/agent-with-async/handlers.go` (lines 39-42, 235-241):**
+
+```go
+func (a *AsyncTravelAgent) HandleQuery(
+    ctx context.Context,
+    task *core.Task,
+    reporter core.ProgressReporter,
+) error {
+    // Use InfoWithContext for trace correlation - ctx contains request_id from ProcessRequest
+    a.Logger.InfoWithContext(ctx, "Starting AI orchestration", map[string]interface{}{
+        "task_id": task.ID,
+        "query":   query,
+    })
+
+    // ... processing ...
+
+    a.Logger.InfoWithContext(ctx, "AI orchestration completed", map[string]interface{}{
+        "task_id":     task.ID,
+        "query":       query,
+        "tools_used":  len(response.AgentsInvolved),
+        "duration_ms": duration.Milliseconds(),
+        "confidence":  response.Confidence,
+    })
+}
+```
+
+The `WithContext` methods automatically extract from context:
+- `trace.trace_id` - W3C trace ID for distributed tracing
+- `trace.span_id` - Current span ID
+- `request_id` - Correlation ID generated by `ProcessRequest` (via baggage)
+
+> **Important**: Always use `WithContext` methods in handlers to enable log correlation. See [LOGGING_IMPLEMENTATION_GUIDE.md](./LOGGING_IMPLEMENTATION_GUIDE.md#handler-logging-with-trace-correlation) for details.
+
+**JSON log output with trace context:**
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:45Z",
+  "level": "INFO",
+  "service": "async-travel-agent",
+  "component": "agent/async-travel-agent",
+  "message": "AI orchestration completed",
+  "task_id": "task-abc123",
+  "tools_used": 5,
+  "duration_ms": 8500,
+  "trace.trace_id": "fee30b72efcbefd21fddf9cd56d2c8c9",
+  "trace.span_id": "1234567890abcdef"
+}
+```
+
+### 9.3 request_id Propagation
+
+Every `ProcessRequest` call generates a unique `request_id` that propagates through all operations:
+
+```go
+// From examples/agent-with-async/handlers.go (lines 164-167)
+response, err := requestOrch.ProcessRequest(ctx, query, map[string]interface{}{
+    "task_id": task.ID,
+    "mode":    "async",
+})
+```
+
+The `ProcessRequest` method internally:
+1. **Generates request_id**: `ctx = telemetry.WithBaggage(ctx, "request_id", requestID)`
+2. **Sets span attribute**: `span.SetAttribute("request_id", requestID)`
+3. **Includes in response**: `response.RequestID` is returned
+
+**Accessing request_id in task result (line 224):**
+
+```go
+task.Result = &QueryResult{
+    // ...
+    Metadata: map[string]interface{}{
+        "request_id":  response.RequestID,  // Available for client correlation
+        "mode":        "ai_orchestrated",
+        "duration_ms": duration.Milliseconds(),
+    },
+}
+```
+
+The `request_id` enables correlation across:
+
+| Location | How to Find |
+|----------|-------------|
+| Task result | `task.Result.Metadata["request_id"]` |
+| Distributed traces (Jaeger) | Search by tag: `request_id=<value>` |
+| LLM Debug Store | Query by `request_id` |
+| Execution DAG Store | Query by `request_id` |
+| Application logs | Context field `request_id` |
+
+### 9.4 Enabling Debug Stores
+
+Set these environment variables to enable advanced observability:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GOMIND_EXECUTION_DEBUG_STORE_ENABLED` | Enable execution storage for DAG visualization | `false` |
+| `GOMIND_LLM_DEBUG_ENABLED` | Enable LLM debug payload capture | `false` |
+| `GOMIND_LLM_DEBUG_TTL` | Retention for successful LLM records | `24h` |
+| `GOMIND_LLM_DEBUG_ERROR_TTL` | Retention for error records | `168h` (7 days) |
+
+**What Gets Recorded:**
+
+**Execution DAG Store** (`GOMIND_EXECUTION_DEBUG_STORE_ENABLED=true`):
+- The routing plan (steps, dependencies, tool selections)
+- Execution results (success/failure per step, durations)
+- request_id and trace_id for correlation
+- Viewable in the Registry Viewer's "Execution DAG" screen
+
+**LLM Debug Store** (`GOMIND_LLM_DEBUG_ENABLED=true`):
+- Planning prompts and responses (tool selection reasoning)
+- Synthesis prompts and responses (final answer generation)
+- Token usage, model, provider, latency per call
+- Error details for failed LLM calls
+
+### 9.5 Viewing Execution DAGs
+
+With `GOMIND_EXECUTION_DEBUG_STORE_ENABLED=true`:
+
+1. Deploy the Registry Viewer (`examples/registry-viewer-app`)
+2. Navigate to the "Execution DAG" screen
+3. Select an execution by request_id
+4. View the plan structure, step results, and execution timeline
+
+### 9.6 Finding Traces in Jaeger
+
+Use the `request_id` from your task result to find traces:
+
+```bash
+# Get request_id from task result
+curl http://localhost:8098/api/v1/tasks/{task_id} | jq '.result.metadata.request_id'
+
+# Search in Jaeger by request_id tag
+# Open: http://localhost:16686
+# Service: async-travel-agent
+# Tags: request_id=<value>
+```
+
+### 9.7 Example: Full Observability Setup
+
+```yaml
+# k8-deployment.yaml (worker or embedded mode)
+env:
+  # Telemetry
+  - name: APP_ENV
+    value: "production"
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector:4318"
+  # Debug stores
+  - name: GOMIND_EXECUTION_DEBUG_STORE_ENABLED
+    value: "true"
+  - name: GOMIND_LLM_DEBUG_ENABLED
+    value: "true"
+  - name: GOMIND_LLM_DEBUG_TTL
+    value: "48h"
+```
+
+With this configuration, every async task that uses AI orchestration will:
+- Generate connected traces visible in Jaeger
+- Have logs correlated via trace_id
+- Appear in the Execution DAG viewer
+- Have full LLM payload visibility for debugging
+
+---
+
+## 10. Monitoring and Metrics
 
 Async agents expose metrics for monitoring queue depth, task latency, and worker health.
 
-### Built-in Metrics
+### 10.1 Built-in Metrics
 
 The async task system emits the following metrics via the `orchestration/task_telemetry.go` module:
 
@@ -1333,7 +1648,7 @@ The async task system emits the following metrics via the `orchestration/task_te
 | `gomind.tasks.worker.stopped` | Counter | `worker_id` | Worker stop events |
 | `gomind.tasks.worker.panic` | Counter | `worker_id` | Handler panics caught by workers |
 
-### Key Metrics to Monitor
+### 10.2 Key Metrics to Monitor
 
 | Metric | Type | Description | Alert Threshold |
 |--------|------|-------------|-----------------|
@@ -1344,7 +1659,7 @@ The async task system emits the following metrics via the `orchestration/task_te
 | `gomind_tasks_queue_depth` | Gauge | Queue backlog | > 100 |
 | `gomind_tasks_workers_active` | Gauge | Active workers | = 0 (no workers) |
 
-### Prometheus Queries
+### 10.3 Prometheus Queries
 
 ```promql
 # Task success rate
@@ -1368,15 +1683,15 @@ sum(rate(gomind_tasks_completed_total{status="failed"}[5m])) by (task_type) /
 sum(rate(gomind_tasks_completed_total[5m])) by (task_type)
 ```
 
-### Grafana Dashboard
+### 10.4 Grafana Dashboard
 
 See [examples/k8-deployment/grafana.yaml](../examples/k8-deployment/grafana.yaml) for a pre-built dashboard.
 
 ---
 
-## Configuration Reference
+## 11. Configuration Reference
 
-### Environment Variables
+### 11.1 Environment Variables
 
 | Variable | Description | Default | Example |
 |----------|-------------|---------|---------|
@@ -1391,6 +1706,10 @@ See [examples/k8-deployment/grafana.yaml](../examples/k8-deployment/grafana.yaml
 | `OPENAI_API_KEY` | OpenAI API key (enables AI orchestration) | - | `sk-...` |
 | `ANTHROPIC_API_KEY` | Anthropic API key (fallback provider) | - | `sk-ant-...` |
 | `GROQ_API_KEY` | Groq API key (alternative provider) | - | `gsk-...` |
+| `GOMIND_EXECUTION_DEBUG_STORE_ENABLED` | Enable execution storage for DAG visualization | `false` | `true` |
+| `GOMIND_LLM_DEBUG_ENABLED` | Enable LLM debug payload capture | `false` | `true` |
+| `GOMIND_LLM_DEBUG_TTL` | Retention for successful LLM records | `24h` | `48h` |
+| `GOMIND_LLM_DEBUG_ERROR_TTL` | Retention for error records | `168h` | `336h` |
 
 > 📖 **AI Provider Configuration**: For comprehensive information on configuring AI providers, model aliases, provider chains with failover, and environment variable overrides for models, see the [AI Providers Setup Guide](./AI_PROVIDERS_SETUP_GUIDE.md). It covers:
 > - All supported providers (OpenAI, Anthropic, Groq, DeepSeek, Gemini, Ollama, etc.)
@@ -1398,7 +1717,7 @@ See [examples/k8-deployment/grafana.yaml](../examples/k8-deployment/grafana.yaml
 > - Chain Client for production-grade failover between providers
 > - Cost-optimized and privacy-first deployment scenarios
 
-### TaskWorkerConfig
+### 11.2 TaskWorkerConfig
 
 ```go
 type TaskWorkerConfig struct {
@@ -1409,7 +1728,7 @@ type TaskWorkerConfig struct {
 }
 ```
 
-### RedisTaskQueueConfig
+### 11.3 RedisTaskQueueConfig
 
 ```go
 type RedisTaskQueueConfig struct {
@@ -1422,7 +1741,7 @@ type RedisTaskQueueConfig struct {
 }
 ```
 
-### RedisTaskStoreConfig
+### 11.4 RedisTaskStoreConfig
 
 ```go
 type RedisTaskStoreConfig struct {
@@ -1434,7 +1753,7 @@ type RedisTaskStoreConfig struct {
 }
 ```
 
-### Utility Methods (Beyond the Interface)
+### 11.5 Utility Methods (Beyond the Interface)
 
 The Redis implementations provide additional methods useful for monitoring and administration:
 
@@ -1465,7 +1784,7 @@ for _, task := range runningTasks {
 }
 ```
 
-### Implementing Custom Backends
+### 11.6 Implementing Custom Backends
 
 GoMind's async task system is designed with pluggable backends. While Redis implementations are provided as defaults, you can implement `core.TaskQueue` and `core.TaskStore` interfaces for other storage systems.
 
@@ -2092,9 +2411,9 @@ apiHandler := orchestration.NewTaskAPIHandler(taskQueue, taskStore, logger)
 
 ---
 
-## Best Practices
+## 12. Best Practices
 
-### DO
+### 12.1 DO
 
 1. **Set appropriate timeouts**:
    ```go
@@ -2138,7 +2457,7 @@ apiHandler := orchestration.NewTaskAPIHandler(taskQueue, taskStore, logger)
    }
    ```
 
-### DON'T
+### 12.2 DON'T
 
 1. **Don't block forever**:
    ```go
@@ -2192,9 +2511,9 @@ apiHandler := orchestration.NewTaskAPIHandler(taskQueue, taskStore, logger)
 
 ---
 
-## Troubleshooting
+## 13. Troubleshooting
 
-### Problem: Tasks Stuck in "queued" Status
+### 13.1 Problem: Tasks Stuck in "queued" Status
 
 **Symptoms**: Tasks submitted but never transition to "running".
 
@@ -2222,7 +2541,7 @@ kubectl get deployment my-agent-api -o jsonpath='{.spec.template.spec.containers
 kubectl get deployment my-agent-worker -o jsonpath='{.spec.template.spec.containers[0].env}'
 ```
 
-### Problem: Tasks Fail Immediately
+### 13.2 Problem: Tasks Fail Immediately
 
 **Symptoms**: Tasks transition to "failed" within seconds.
 
@@ -2249,7 +2568,7 @@ workerPool.RegisterHandler("query", agent.HandleQuery)  // Must match task type
 // {"type": "query", ...}  // Must match registered handler
 ```
 
-### Problem: Progress Not Updating
+### 13.3 Problem: Progress Not Updating
 
 **Symptoms**: Task shows 0% progress, then jumps to 100%.
 
@@ -2280,7 +2599,7 @@ func (a *Agent) HandleQuery(ctx context.Context, task *core.Task, reporter core.
 }
 ```
 
-### Problem: Traces Not Linked
+### 13.4 Problem: Traces Not Linked
 
 **Symptoms**: API and worker traces appear as separate, unconnected traces.
 
@@ -2301,7 +2620,7 @@ func main() {
 }
 ```
 
-### Problem: Workers Using Too Much Memory
+### 13.5 Problem: Workers Using Too Much Memory
 
 **Symptoms**: Worker pods OOMKilled.
 
@@ -2325,7 +2644,7 @@ containers:
 
 ---
 
-## Related Documentation
+## 14. Related Documentation
 
 - [Distributed Tracing Guide](./DISTRIBUTED_TRACING_GUIDE.md) - Complete tracing setup
 - [AI-Powered Payload Generation Guide](./TOOL_SCHEMA_DISCOVERY_GUIDE.md) - Tool schema discovery

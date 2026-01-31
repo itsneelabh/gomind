@@ -727,6 +727,7 @@ func (c *Config) LoadFromEnv() error {
 			"logging_level":     c.Logging.Level,
 			"namespace":         c.Namespace,
 			"development_mode":  c.Development.Enabled,
+			"env_vars_loaded":   envVarsLoaded,
 		})
 	}
 
@@ -1666,11 +1667,13 @@ func (p *ProductionLogger) logEvent(level, msg string, fields map[string]interfa
 			"message":   msg,
 		}
 
-		// LAYER 3: Add trace context when available
+		// LAYER 3: Add trace context when available (OTel semantic conventions)
+		// Fields like trace_id, span_id are added at root level per OpenTelemetry spec
+		// See: https://opentelemetry.io/docs/specs/otel/compatibility/logging_trace_context/
 		if ctx != nil && p.metricsEnabled {
 			if baggage := getContextBaggage(ctx); len(baggage) > 0 {
 				for k, v := range baggage {
-					logEntry["trace."+k] = v
+					logEntry[k] = v
 				}
 			}
 		}

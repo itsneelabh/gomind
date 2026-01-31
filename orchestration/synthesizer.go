@@ -269,21 +269,47 @@ func (s *AISynthesizer) SetLLMDebugStore(store LLMDebugStore) {
 }
 
 // recordDebugInteraction stores an LLM interaction for debugging.
+// Runs asynchronously to avoid blocking synthesis. Errors are logged, not propagated.
 // Uses WaitGroup to track in-flight recordings for graceful shutdown.
+// This follows FRAMEWORK_DESIGN_PRINCIPLES.md: Resilient Runtime Behavior.
 func (s *AISynthesizer) recordDebugInteraction(ctx context.Context, requestID string, interaction LLMInteraction) {
 	if s.debugStore == nil {
 		return
 	}
 
+	// Extract baggage BEFORE spawning goroutine to preserve correlation data.
+	// This is needed because the parent context may be canceled after the HTTP
+	// handler returns, but we still want the async recording to complete.
+	// Same pattern as orchestrator.recordDebugInteraction.
+	bag := telemetry.GetBaggage(ctx)
+
+	// Track this goroutine for graceful shutdown
 	s.debugWg.Add(1)
+
+	// Run async to avoid blocking synthesis
 	go func() {
 		defer s.debugWg.Done()
 
-		// Use original context with timeout to preserve baggage (original_request_id).
-		recordCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		// Use background context with timeout to avoid inheriting request cancellation.
+		// This ensures recordings complete even after HTTP handler returns.
+		// Same pattern as orchestrator.recordDebugInteraction.
+		// 1 second is sufficient for Redis (normally <100ms), avoids goroutine accumulation under load.
+		recordCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
+		// Re-inject baggage for HITL correlation (original_request_id).
+		// This allows LLM debug records from HITL resume requests to be
+		// correlated with the original conversation's request_id.
+		if bag != nil {
+			pairs := make([]string, 0, len(bag)*2)
+			for k, v := range bag {
+				pairs = append(pairs, k, v)
+			}
+			recordCtx = telemetry.WithBaggage(recordCtx, pairs...)
+		}
+
 		if err := s.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {
+			// Log but don't fail - debug is observability, not critical path
 			if s.logger != nil {
 				s.logger.Warn("Failed to record LLM debug interaction", map[string]interface{}{
 					"request_id": requestID,

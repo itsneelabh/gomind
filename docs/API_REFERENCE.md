@@ -2149,6 +2149,81 @@ response, err := orchestrator.ProcessRequest(ctx,
 )
 ```
 
+### Orchestrator Interface Methods
+
+The `Orchestrator` interface provides the following methods:
+
+```go
+type Orchestrator interface {
+    // ProcessRequest handles a natural language request by orchestrating multiple agents
+    ProcessRequest(ctx context.Context, request string, metadata map[string]interface{}) (*OrchestratorResponse, error)
+
+    // ExecutePlan executes a pre-defined routing plan (raw results, no synthesis)
+    ExecutePlan(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error)
+
+    // ExecutePlanWithSynthesis executes a pre-defined routing plan with synthesis.
+    // Unlike ExecutePlan(), this method:
+    // 1. Uses the orchestrator's synthesizer (which auto-records to LLM Debug Store)
+    // 2. Returns a complete OrchestratorResponse (not raw ExecutionResult)
+    // 3. Stores execution to ExecutionStore for DAG visualization
+    // 4. Sets up context baggage for request_id propagation
+    ExecutePlanWithSynthesis(ctx context.Context, plan *RoutingPlan, originalRequest string) (*OrchestratorResponse, error)
+
+    // GetExecutionHistory returns recent execution history
+    GetExecutionHistory() []ExecutionRecord
+
+    // GetMetrics returns orchestrator metrics
+    GetMetrics() OrchestratorMetrics
+}
+```
+
+**When to use each method:**
+
+| Method | Use Case |
+|--------|----------|
+| `ProcessRequest` | Natural language requests with AI-driven planning |
+| `ExecutePlan` | Pre-defined workflows when you need raw results for custom synthesis |
+| `ExecutePlanWithSynthesis` | Pre-defined workflows with full observability (DAG visualization, LLM debug store) |
+
+**Example - ExecutePlanWithSynthesis:**
+```go
+// Build a routing plan
+plan := &orchestration.RoutingPlan{
+    PlanID: "travel-research-123",
+    Steps: []orchestration.RoutingStep{
+        {
+            StepID:      "step-1",
+            AgentName:   "weather-tool",
+            Instruction: "Get current weather",
+            Metadata: map[string]interface{}{
+                "capability": "get_weather",
+                "parameters": map[string]interface{}{"location": "Tokyo"},
+            },
+        },
+        {
+            StepID:      "step-2",
+            AgentName:   "currency-tool",
+            Instruction: "Convert USD to JPY",
+            Metadata: map[string]interface{}{
+                "capability": "convert_currency",
+                "parameters": map[string]interface{}{"from": "USD", "to": "JPY", "amount": 1000},
+            },
+        },
+    },
+}
+
+// Execute with synthesis and DAG storage
+response, err := orchestrator.ExecutePlanWithSynthesis(ctx, plan, "Plan my trip to Tokyo")
+if err != nil {
+    return err
+}
+
+// Response includes synthesized result and step details
+fmt.Println(response.Response)      // AI-synthesized summary
+fmt.Println(response.Steps)         // Individual step results
+fmt.Println(response.RequestID)     // For DAG visualization lookup
+```
+
 ### ExecutionOptions Configuration
 
 Configure execution behavior for the orchestrator, including retry logic and type safety features.

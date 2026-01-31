@@ -676,20 +676,23 @@ The `WithContext` methods enable trace-log correlation. Here's how it works:
 
 ### JSON Output with Trace Context
 
-When using JSON format (production), trace context appears as fields:
+When using JSON format (production), trace context appears as **top-level fields** per the [OpenTelemetry specification](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/compatibility/logging_trace_context.md):
 
 ```json
 {
   "timestamp": "2024-01-15T10:00:00Z",
   "level": "INFO",
   "service": "weather-tool",
+  "component": "tool/weather",
   "message": "Processing weather request",
-  "trace.trace_id": "abc123def456789",
-  "trace.span_id": "1234567890abcdef",
+  "trace_id": "abc123def456789012345678901234",
+  "span_id": "1234567890abcdef",
   "lat": 35.67,
   "lon": 139.65
 }
 ```
+
+> **Design Principle**: GoMind uses standard OpenTelemetry field names (`trace_id`, `span_id`) at the root level for vendor-agnostic compatibility with any OTel-compliant observability backend (SigNoz, Grafana Loki, Datadog, Elastic, etc.).
 
 ---
 
@@ -1617,12 +1620,14 @@ Without this propagation, AI module logs would be silent (using `NoOpLogger`). T
 
 ```json
 {
-  "component": "framework/ai",
+  "timestamp": "2024-01-15T10:00:00Z",
   "level": "DEBUG",
+  "service": "my-agent",
+  "component": "framework/ai",
   "message": "AI HTTP request completed",
   "operation": "ai_http_success",
-  "trace.span_id": "e75ad960517fa8fe",
-  "trace.trace_id": "5b54aa1e7925acb809e77479b5797f5d"
+  "trace_id": "5b54aa1e7925acb809e77479b5797f5d",
+  "span_id": "e75ad960517fa8fe"
 }
 ```
 

@@ -345,8 +345,10 @@ const (
 	// RedisDBLLMDebug is for LLM debug payload storage (orchestration module)
 	RedisDBLLMDebug = 7
 
-	// RedisDBReserved8 through RedisDBReserved15 are reserved for future framework extensions
-	RedisDBReserved8  = 8
+	// RedisDBExecutionDebug is for execution debug store (DAG visualization)
+	RedisDBExecutionDebug = 8
+
+	// RedisDBReserved9 through RedisDBReserved15 are reserved for future framework extensions
 	RedisDBReserved9  = 9
 	RedisDBReserved10 = 10
 	RedisDBReserved11 = 11
@@ -388,6 +390,8 @@ func GetRedisDBName(db int) string {
 		return "Telemetry"
 	case RedisDBLLMDebug:
 		return "LLM Debug"
+	case RedisDBExecutionDebug:
+		return "Execution Debug"
 	default:
 		if IsReservedDB(db) {
 			return fmt.Sprintf("Reserved DB %d", db)

@@ -95,7 +95,12 @@ A new view for the Registry Viewer App to display LLM-based plan generation and 
         - [View Toggle](#view-toggle)
     12. [Implementation Phases (5a-5c)](#implementation-phases-1)
     13. [Data Flow Diagram](#data-flow-diagram)
-14. [Next Steps](#next-steps)
+14. [Phase 6: Workflow Mode Synthesis Recording](#phase-6-workflow-mode-synthesis-recording)
+    1. [Gap Analysis: Autonomous vs Workflow Mode](#gap-analysis-autonomous-vs-workflow-mode)
+    2. [Proposed Solution: ExecutePlanWithSynthesis](#proposed-solution-executeplanwithsynthesis)
+    3. [Implementation Details](#implementation-details-1)
+    4. [Migration Path for Existing Examples](#migration-path-for-existing-examples)
+15. [Next Steps](#next-steps)
 
 ---
 
@@ -112,7 +117,8 @@ Provide developers with a graphical visualization of LLM-based plan execution, e
 ### Scope
 
 - **In Scope:** LLM-based plan generation and execution (autonomous mode)
-- **Out of Scope (Initial):** Workflow engine DAG visualization (future enhancement)
+- **Phase 6 Enhancement:** Workflow mode (`ExecutePlan`) synthesis recording via `ExecutePlanWithSynthesis`
+- **Out of Scope (Initial):** Full workflow engine DAG visualization (WorkflowEngine with YAML definitions)
 - **Applies To:** Both regular and HITL (Human-in-the-Loop) executions
 
 ### Design Principles Alignment
@@ -219,14 +225,19 @@ type LLMDebugRecord struct {
 
 **Recording Sites (LLMInteraction.Type):**
 
-| Type | Description | Source File |
-|------|-------------|-------------|
-| `plan_generation` | Initial plan creation from user request | `orchestrator.go` |
-| `correction` | Plan correction after validation failure | `orchestrator.go` |
-| `synthesis` | Final response synthesis (non-streaming) | `synthesizer.go` |
-| `synthesis_streaming` | Final response synthesis (streaming) | `orchestrator.go` |
-| `micro_resolution` | Parameter binding between steps | `micro_resolver.go` |
-| `semantic_retry` | Full-context error recovery | `contextual_re_resolver.go` |
+| Type | Description | Source File | Autonomous Mode | Workflow Mode |
+|------|-------------|-------------|-----------------|---------------|
+| `plan_generation` | Initial plan creation from user request | `orchestrator.go` | ✅ Recorded | N/A (plan predefined) |
+| `correction` | Plan correction after validation failure | `orchestrator.go` | ✅ Recorded | N/A (plan predefined) |
+| `synthesis` | Final response synthesis (non-streaming) | `synthesizer.go` | ✅ Recorded | ❌ Not recorded* |
+| `synthesis_streaming` | Final response synthesis (streaming) | `orchestrator.go` | ✅ Recorded | ❌ Not recorded* |
+| `micro_resolution` | Parameter binding between steps | `micro_resolver.go` | ✅ Recorded | ✅ Recorded |
+| `semantic_retry` | Full-context error recovery | `contextual_re_resolver.go` | ✅ Recorded | ✅ Recorded |
+| `tiered_selection` | Capability-based tool selection | `tiered_capability_provider.go` | ✅ Recorded | ✅ Recorded |
+
+*\* Workflow mode synthesis gap addressed in [Phase 6](#phase-6-workflow-mode-synthesis-recording) via `ExecutePlanWithSynthesis`.*
+
+**Key Insight:** LLM calls during plan execution (micro_resolution, semantic_retry, tiered_selection) are recorded for **both** modes because they happen inside `SmartExecutor.Execute()`. The gap is only in synthesis, which happens **after** execution.
 
 #### 4. Existing Store Pattern (Reference)
 
@@ -2419,6 +2430,372 @@ stepCheckpoints.forEach((cp, idx) => {
 
 ---
 
+## Phase 6: Workflow Mode Synthesis Recording
+
+### Gap Analysis: Autonomous vs Workflow Mode
+
+The orchestration module provides two distinct modes of operation:
+
+| Mode | Entry Point | Plan Source | Synthesis | LLM Debug Recording |
+|------|-------------|-------------|-----------|---------------------|
+| **Autonomous** | `ProcessRequest()` | LLM-generated | Orchestrator's `Synthesizer` | ✅ Full recording |
+| **Workflow** | `ExecutePlan()` | Pre-defined by developer | Caller's responsibility | ⚠️ Partial (execution only) |
+
+**The Gap:**
+
+```
+Autonomous Mode Flow (ProcessRequest):
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────────┐
+│ Generate Plan   │ ──▶ │ Execute Steps   │ ──▶ │ Synthesize Response │
+│ (recorded ✅)   │     │ (recorded ✅)   │     │ (recorded ✅)       │
+└─────────────────┘     └─────────────────┘     └─────────────────────┘
+
+Workflow Mode Flow (ExecutePlan):
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────────┐
+│ Pre-defined     │ ──▶ │ Execute Steps   │ ──▶ │ Custom Synthesis    │
+│ Plan (N/A)      │     │ (recorded ✅)   │     │ (NOT recorded ❌)   │
+└─────────────────┘     └─────────────────┘     └─────────────────────┘
+```
+
+**Root Cause:** `ExecutePlan()` is intentionally a low-level building block that:
+1. Returns raw `ExecutionResult` without synthesis
+2. Gives workflow developers full control over synthesis logic
+3. Was designed before LLM Debug Store was added
+
+**Impact:** Workflow developers using `ExecutePlan()` with custom synthesis lose visibility into their synthesis LLM calls, making debugging harder.
+
+### Proposed Solution: ExecutePlanWithSynthesis
+
+Add a higher-level method that combines execution + synthesis with automatic recording:
+
+```go
+// ExecutePlanWithSynthesis executes a pre-defined routing plan and synthesizes the results.
+// Unlike ExecutePlan(), this method:
+// 1. Uses the orchestrator's synthesizer (which auto-records to LLM Debug Store)
+// 2. Returns a complete OrchestratorResponse (not raw ExecutionResult)
+// 3. Stores execution to ExecutionStore for DAG visualization
+//
+// Use this when you want workflow mode with full observability.
+// Use ExecutePlan() when you need raw results for custom synthesis logic.
+func (o *AIOrchestrator) ExecutePlanWithSynthesis(
+    ctx context.Context,
+    plan *RoutingPlan,
+    originalRequest string,
+) (*OrchestratorResponse, error)
+```
+
+**Design Rationale (per FRAMEWORK_DESIGN_PRINCIPLES.md and ARCHITECTURE.md):**
+
+| Principle | How This Follows It |
+|-----------|---------------------|
+| **Interface-First** | Extends existing `Orchestrator` interface with new method |
+| **Backwards Compatible** | `ExecutePlan()` unchanged; new method is additive |
+| **Explicit Control** | Developers choose which method to use |
+| **Production-First** | Enables debugging in production workflows |
+| **Fail-Safe Defaults** | Synthesizer nil check with fallback; NoOp span when telemetry unavailable |
+| **Telemetry Integration** | Creates span, propagates baggage for request correlation |
+| **Metrics & History** | Tracks execution via `updateMetrics()` and `addToHistory()` |
+
+### Implementation Details
+
+#### Change 1: Add Method to AIOrchestrator
+
+Location: `orchestration/orchestrator.go`
+
+```go
+// ExecutePlanWithSynthesis executes a pre-defined routing plan and synthesizes the results.
+// This method provides full observability by:
+// - Recording synthesis LLM calls to LLM Debug Store
+// - Storing execution to Execution Store for DAG visualization
+// - Returning a complete OrchestratorResponse
+//
+// For custom synthesis logic, use ExecutePlan() instead.
+//
+// Follows patterns from:
+// - ARCHITECTURE.md: Telemetry span with NoOp fallback, synthesizer nil check
+// - telemetry/ARCHITECTURE.md: Context propagation, span attributes
+// - docs/DISTRIBUTED_TRACING_GUIDE.md: RecordSpanError, AddSpanEvent, Counter with module label
+func (o *AIOrchestrator) ExecutePlanWithSynthesis(
+    ctx context.Context,
+    plan *RoutingPlan,
+    originalRequest string,
+) (*OrchestratorResponse, error) {
+    startTime := time.Now()
+
+    // Generate request_id for this workflow execution
+    requestID := generateRequestID()
+
+    // Add request_id to context baggage so downstream components (AI client, synthesizer,
+    // micro_resolver, etc.) can access it via telemetry.GetBaggage() and include it in their logs
+    ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
+    // Set original_request_id for trace correlation across HITL resumes.
+    // On initial requests: original_request_id = request_id (same value)
+    // On resume requests: original_request_id is already set via header, don't overwrite
+    if bag := telemetry.GetBaggage(ctx); bag == nil || bag["original_request_id"] == "" {
+        ctx = telemetry.WithBaggage(ctx, "original_request_id", requestID)
+    }
+
+    // Add request_id to context for GetRequestID() - used by HITL controller
+    ctx = WithRequestID(ctx, requestID)
+
+    // Start telemetry span if telemetry is available (nil-safe per FRAMEWORK_DESIGN_PRINCIPLES.md)
+    var span core.Span
+    if o.telemetry != nil {
+        ctx, span = o.telemetry.StartSpan(ctx, "orchestrator.execute_plan_with_synthesis")
+        defer span.End()
+    } else {
+        // Create a no-op span to avoid nil pointer dereferences
+        span = &core.NoOpSpan{}
+    }
+
+    // Set span attributes for distributed tracing searchability
+    // (per telemetry/ARCHITECTURE.md Pattern 3: Context Propagation)
+    span.SetAttribute("request_id", requestID)
+    span.SetAttribute("mode", string(ModeWorkflow))
+    span.SetAttribute("plan_id", plan.PlanID)
+    span.SetAttribute("step_count", len(plan.Steps))
+
+    if o.logger != nil {
+        o.logger.InfoWithContext(ctx, "Starting workflow execution with synthesis", map[string]interface{}{
+            "operation":  "execute_plan_with_synthesis",
+            "request_id": requestID,
+            "plan_id":    plan.PlanID,
+            "step_count": len(plan.Steps),
+        })
+    }
+
+    // Step 1: Execute the plan (uses SmartExecutor, which records micro_resolution, etc.)
+    // The context now carries request_id baggage, so all downstream LLM calls will use it
+    result, err := o.executor.Execute(ctx, plan)
+    if err != nil {
+        // Record error on span (per DISTRIBUTED_TRACING_GUIDE.md Pattern 4)
+        telemetry.RecordSpanError(ctx, err)
+
+        // Add span event with request_id first (per DISTRIBUTED_TRACING_GUIDE.md Pattern 6)
+        telemetry.AddSpanEvent(ctx, "workflow.execution.error",
+            attribute.String("request_id", requestID),
+            attribute.String("plan_id", plan.PlanID),
+            attribute.String("error", err.Error()),
+            attribute.Int64("duration_ms", time.Since(startTime).Milliseconds()),
+        )
+
+        // Emit counter metric with module label (per DISTRIBUTED_TRACING_GUIDE.md Pattern 5)
+        telemetry.Counter("workflow.execution.total",
+            "module", telemetry.ModuleOrchestration,
+            "status", "error",
+            "phase", "execution",
+        )
+
+        // Store failed execution for DAG visualization
+        o.storeExecutionAsync(ctx, originalRequest, requestID, plan, result, nil)
+
+        // Log with operation field (per DISTRIBUTED_TRACING_GUIDE.md Pattern 2)
+        if o.logger != nil {
+            o.logger.ErrorWithContext(ctx, "Workflow execution failed", map[string]interface{}{
+                "operation":   "execute_plan_with_synthesis",
+                "request_id":  requestID,
+                "plan_id":     plan.PlanID,
+                "error":       err.Error(),
+                "duration_ms": time.Since(startTime).Milliseconds(),
+            })
+        }
+
+        // Update metrics for failed execution
+        o.updateMetrics(time.Since(startTime), false)
+        return nil, fmt.Errorf("execution failed: %w", err)
+    }
+
+    // Store successful execution for DAG visualization
+    o.storeExecutionAsync(ctx, originalRequest, requestID, plan, result, nil)
+
+    // Log execution completion (follows ProcessRequest pattern from orchestrator.go:1118-1126)
+    if o.logger != nil {
+        failedSteps := 0
+        if result != nil && !result.Success {
+            for _, step := range result.Steps {
+                if !step.Success {
+                    failedSteps++
+                }
+            }
+        }
+        o.logger.InfoWithContext(ctx, "Workflow execution completed", map[string]interface{}{
+            "operation":    "workflow_execution",
+            "request_id":   requestID,
+            "plan_id":      plan.PlanID,
+            "success":      result != nil && result.Success,
+            "failed_steps": failedSteps,
+            "duration_ms":  time.Since(startTime).Milliseconds(),
+        })
+    }
+
+    // Step 2: Synthesize using orchestrator's synthesizer (auto-records to LLM Debug Store)
+    // Synthesizer nil check - fall back to raw results formatting if synthesizer unavailable
+    var synthesizedResponse string
+    if o.synthesizer != nil {
+        synthesizedResponse, err = o.synthesizer.Synthesize(ctx, originalRequest, result)
+        if err != nil {
+            // Record synthesis error on span (per DISTRIBUTED_TRACING_GUIDE.md Pattern 4)
+            telemetry.RecordSpanError(ctx, err)
+
+            // Add span event with request_id first (per DISTRIBUTED_TRACING_GUIDE.md Pattern 6)
+            telemetry.AddSpanEvent(ctx, "workflow.synthesis.error",
+                attribute.String("request_id", requestID),
+                attribute.String("error", err.Error()),
+                attribute.Int64("duration_ms", time.Since(startTime).Milliseconds()),
+            )
+
+            // Emit counter metric with module label (per DISTRIBUTED_TRACING_GUIDE.md Pattern 5)
+            telemetry.Counter("workflow.execution.total",
+                "module", telemetry.ModuleOrchestration,
+                "status", "error",
+                "phase", "synthesis",
+            )
+
+            // Log with operation field (per DISTRIBUTED_TRACING_GUIDE.md Pattern 2)
+            if o.logger != nil {
+                o.logger.ErrorWithContext(ctx, "Workflow synthesis failed", map[string]interface{}{
+                    "operation":   "execute_plan_with_synthesis",
+                    "request_id":  requestID,
+                    "plan_id":     plan.PlanID,
+                    "error":       err.Error(),
+                    "duration_ms": time.Since(startTime).Milliseconds(),
+                })
+            }
+
+            o.updateMetrics(time.Since(startTime), false)
+            return nil, fmt.Errorf("synthesis failed: %w", err)
+        }
+    } else {
+        // Fallback: format raw results (no LLM synthesis)
+        synthesizedResponse = formatRawExecutionResults(result)
+    }
+
+    // Build response
+    response := &OrchestratorResponse{
+        RequestID:       requestID,
+        OriginalRequest: originalRequest,
+        Response:        synthesizedResponse,
+        RoutingMode:     ModeWorkflow,
+        ExecutionTime:   time.Since(startTime),
+        AgentsInvolved:  o.extractAgentsFromPlan(plan),
+        Confidence:      0.95,
+    }
+
+    // Update metrics and history (follows ProcessRequest pattern from orchestrator.go:1147-1149)
+    o.updateMetrics(response.ExecutionTime, true)
+    o.addToHistory(response)
+
+    // Emit success counter (per DISTRIBUTED_TRACING_GUIDE.md Pattern 5)
+    telemetry.Counter("workflow.execution.total",
+        "module", telemetry.ModuleOrchestration,
+        "status", "success",
+    )
+
+    if o.logger != nil {
+        o.logger.InfoWithContext(ctx, "Workflow execution with synthesis completed", map[string]interface{}{
+            "operation":         "execute_plan_with_synthesis_complete",
+            "request_id":        requestID,
+            "success":           true,
+            "total_duration_ms": time.Since(startTime).Milliseconds(),
+        })
+    }
+
+    // Record success metrics if telemetry is available (follows ProcessRequest pattern from orchestrator.go:1161-1168)
+    if o.telemetry != nil {
+        o.telemetry.RecordMetric("orchestrator.requests.success", 1, map[string]string{
+            "mode": string(ModeWorkflow),
+        })
+        o.telemetry.RecordMetric("orchestrator.latency_ms", float64(time.Since(startTime).Milliseconds()), map[string]string{
+            "operation": "execute_plan_with_synthesis",
+        })
+    }
+
+    return response, nil
+}
+
+// formatRawExecutionResults formats execution results without AI synthesis.
+// Used as fallback when synthesizer is unavailable.
+func formatRawExecutionResults(result *ExecutionResult) string {
+    var output string
+    for _, step := range result.Steps {
+        status := "Success"
+        if !step.Success {
+            status = fmt.Sprintf("Failed: %s", step.Error)
+        }
+        output += fmt.Sprintf("**%s** (%s): %s\n%s\n\n", step.AgentName, step.StepID, status, step.Response)
+    }
+    return output
+}
+```
+
+#### Change 2: Update Orchestrator Interface (Optional)
+
+Location: `orchestration/interfaces.go`
+
+```go
+// Orchestrator coordinates multi-agent interactions
+type Orchestrator interface {
+    // ProcessRequest handles a natural language request by orchestrating multiple agents
+    ProcessRequest(ctx context.Context, request string, metadata map[string]interface{}) (*OrchestratorResponse, error)
+
+    // ExecutePlan executes a pre-defined routing plan (raw results, no synthesis)
+    ExecutePlan(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error)
+
+    // ExecutePlanWithSynthesis executes a pre-defined routing plan with synthesis.
+    // Returns OrchestratorResponse with synthesized response and full observability.
+    // Use this when you want workflow mode with LLM debug recording.
+    ExecutePlanWithSynthesis(ctx context.Context, plan *RoutingPlan, originalRequest string) (*OrchestratorResponse, error)
+
+    // GetExecutionHistory returns recent execution history
+    GetExecutionHistory() []ExecutionRecord
+
+    // GetMetrics returns orchestrator metrics
+    GetMetrics() OrchestratorMetrics
+}
+```
+
+### Migration Path for Existing Examples
+
+#### Before (agent-with-orchestration):
+
+```go
+// orchestration.go - handleWorkflowRequest
+result, err := t.Orchestrator.ExecutePlan(ctx, plan)
+if err != nil {
+    return "", err
+}
+return t.synthesizeWorkflowResults(ctx, workflowName, result) // Custom synthesis, NOT recorded
+```
+
+#### After:
+
+```go
+// orchestration.go - handleWorkflowRequest
+response, err := t.Orchestrator.ExecutePlanWithSynthesis(ctx, plan, userRequest)
+if err != nil {
+    return "", err
+}
+return response.Response, nil // Uses orchestrator's synthesizer, auto-recorded ✅
+```
+
+**Migration is a one-line change per workflow endpoint.**
+
+### What This Enables
+
+After Phase 6 implementation:
+
+| Capability | Autonomous Mode | Workflow Mode (ExecutePlan) | Workflow Mode (ExecutePlanWithSynthesis) |
+|------------|-----------------|-----------------------------|-----------------------------------------|
+| Execution DAG | ✅ | ✅ | ✅ |
+| Step timing | ✅ | ✅ | ✅ |
+| micro_resolution LLM | ✅ | ✅ | ✅ |
+| semantic_retry LLM | ✅ | ✅ | ✅ |
+| synthesis LLM | ✅ | ❌ | ✅ |
+| Full flow visualization | ✅ | ⚠️ Partial | ✅ |
+
+---
+
 ## Next Steps
 
 1. [x] Review and approve proposal
@@ -2465,5 +2842,11 @@ stepCheckpoints.forEach((cp, idx) => {
 11. [ ] **Phase 5f: Associate Resolution LLM with Steps** (After Phase 5b)
     - [ ] Update UI to show Resolution nodes connected to their parent steps
     - [ ] Use `step_id` from LLMInteraction to create parent-child edges
-12. [ ] Testing and documentation
-13. [ ] Deploy and gather feedback
+12. [x] **Phase 6: Workflow Mode Synthesis Recording**
+    - [x] Add `ExecutePlanWithSynthesis()` method to `AIOrchestrator`
+    - [x] Update `Orchestrator` interface with new method
+    - [x] Update `agent-with-orchestration` example to use new method
+    - [x] Add tests for new method
+    - [x] Update documentation
+13. [ ] Testing and documentation
+14. [ ] Deploy and gather feedback

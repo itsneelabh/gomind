@@ -2176,12 +2176,289 @@ func (o *AIOrchestrator) extractAgentsFromPlan(plan *RoutingPlan) []string {
 	return agents
 }
 
-// ExecutePlan executes a pre-defined routing plan
+// ExecutePlan executes a pre-defined routing plan.
+// This method sets up request_id in context baggage for observability,
+// ensuring downstream components can correlate logs with traces.
 func (o *AIOrchestrator) ExecutePlan(ctx context.Context, plan *RoutingPlan) (*ExecutionResult, error) {
 	if o.executor == nil {
 		return nil, fmt.Errorf("executor not configured")
 	}
+
+	// Generate request_id for this plan execution
+	requestID := generateRequestID()
+
+	// Add request_id to context baggage so downstream components (executor,
+	// tools, etc.) can access it via telemetry.GetBaggage() and include it in their logs
+	ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
+	// Set original_request_id for trace correlation across HITL resumes.
+	// On initial requests: original_request_id = request_id (same value)
+	// On resume requests: original_request_id is already set via header, don't overwrite
+	if bag := telemetry.GetBaggage(ctx); bag == nil || bag["original_request_id"] == "" {
+		ctx = telemetry.WithBaggage(ctx, "original_request_id", requestID)
+	}
+
+	// Add request_id to context for GetRequestID() - used by HITL controller
+	ctx = WithRequestID(ctx, requestID)
+
 	return o.executor.Execute(ctx, plan)
+}
+
+// ExecutePlanWithSynthesis executes a pre-defined routing plan and synthesizes the results.
+// This method provides full observability by:
+// - Recording synthesis LLM calls to LLM Debug Store
+// - Storing execution to Execution Store for DAG visualization
+// - Returning a complete OrchestratorResponse
+//
+// For custom synthesis logic, use ExecutePlan() instead.
+//
+// Follows patterns from:
+// - ARCHITECTURE.md: Telemetry span with NoOp fallback, synthesizer nil check
+// - telemetry/ARCHITECTURE.md: Context propagation, span attributes
+// - docs/DISTRIBUTED_TRACING_GUIDE.md: RecordSpanError, AddSpanEvent, Counter with module label
+func (o *AIOrchestrator) ExecutePlanWithSynthesis(
+	ctx context.Context,
+	plan *RoutingPlan,
+	originalRequest string,
+) (*OrchestratorResponse, error) {
+	startTime := time.Now()
+
+	// Validate plan is not nil (fail fast before any telemetry setup)
+	if plan == nil {
+		return nil, fmt.Errorf("plan cannot be nil")
+	}
+
+	// Generate request_id for this workflow execution
+	requestID := generateRequestID()
+
+	// Add request_id to context baggage so downstream components (AI client, synthesizer,
+	// micro_resolver, etc.) can access it via telemetry.GetBaggage() and include it in their logs
+	ctx = telemetry.WithBaggage(ctx, "request_id", requestID)
+
+	// Set original_request_id for trace correlation across HITL resumes.
+	// On initial requests: original_request_id = request_id (same value)
+	// On resume requests: original_request_id is already set via header, don't overwrite
+	if bag := telemetry.GetBaggage(ctx); bag == nil || bag["original_request_id"] == "" {
+		ctx = telemetry.WithBaggage(ctx, "original_request_id", requestID)
+	}
+
+	// Add request_id to context for GetRequestID() - used by HITL controller
+	ctx = WithRequestID(ctx, requestID)
+
+	// Start telemetry span if telemetry is available (nil-safe per FRAMEWORK_DESIGN_PRINCIPLES.md)
+	var span core.Span
+	if o.telemetry != nil {
+		ctx, span = o.telemetry.StartSpan(ctx, "orchestrator.execute_plan_with_synthesis")
+		defer span.End()
+	} else {
+		// Create a no-op span to avoid nil pointer dereferences
+		span = &core.NoOpSpan{}
+	}
+
+	// Set span attributes for distributed tracing searchability
+	// (per telemetry/ARCHITECTURE.md Pattern 3: Context Propagation)
+	span.SetAttribute("request_id", requestID)
+	span.SetAttribute("mode", string(ModeWorkflow))
+	span.SetAttribute("plan_id", plan.PlanID)
+	span.SetAttribute("step_count", len(plan.Steps))
+
+	if o.logger != nil {
+		o.logger.InfoWithContext(ctx, "Starting workflow execution with synthesis", map[string]interface{}{
+			"operation":  "execute_plan_with_synthesis",
+			"request_id": requestID,
+			"plan_id":    plan.PlanID,
+			"step_count": len(plan.Steps),
+		})
+	}
+
+	// Validate executor is configured
+	if o.executor == nil {
+		err := fmt.Errorf("executor not configured")
+		telemetry.RecordSpanError(ctx, err)
+
+		// Emit counter metric with module label (per DISTRIBUTED_TRACING_GUIDE.md Pattern 5)
+		telemetry.Counter("workflow.execution.total",
+			"module", telemetry.ModuleOrchestration,
+			"status", "error",
+			"phase", "validation",
+		)
+
+		if o.logger != nil {
+			o.logger.ErrorWithContext(ctx, "Executor not configured", map[string]interface{}{
+				"operation":  "execute_plan_with_synthesis",
+				"request_id": requestID,
+				"error":      err.Error(),
+			})
+		}
+		return nil, err
+	}
+
+	// Step 1: Execute the plan (uses SmartExecutor, which records micro_resolution, etc.)
+	// The context now carries request_id baggage, so all downstream LLM calls will use it
+	result, err := o.executor.Execute(ctx, plan)
+	if err != nil {
+		// Record error on span (per DISTRIBUTED_TRACING_GUIDE.md Pattern 4)
+		telemetry.RecordSpanError(ctx, err)
+
+		// Add span event with request_id first (per DISTRIBUTED_TRACING_GUIDE.md Pattern 6)
+		telemetry.AddSpanEvent(ctx, "workflow.execution.error",
+			attribute.String("request_id", requestID),
+			attribute.String("plan_id", plan.PlanID),
+			attribute.String("error", err.Error()),
+			attribute.Int64("duration_ms", time.Since(startTime).Milliseconds()),
+		)
+
+		// Emit counter metric with module label (per DISTRIBUTED_TRACING_GUIDE.md Pattern 5)
+		telemetry.Counter("workflow.execution.total",
+			"module", telemetry.ModuleOrchestration,
+			"status", "error",
+			"phase", "execution",
+		)
+
+		// Store failed execution for DAG visualization
+		o.storeExecutionAsync(ctx, originalRequest, requestID, plan, result, nil)
+
+		// Log with operation field (per DISTRIBUTED_TRACING_GUIDE.md Pattern 2)
+		if o.logger != nil {
+			o.logger.ErrorWithContext(ctx, "Workflow execution failed", map[string]interface{}{
+				"operation":   "execute_plan_with_synthesis",
+				"request_id":  requestID,
+				"plan_id":     plan.PlanID,
+				"error":       err.Error(),
+				"duration_ms": time.Since(startTime).Milliseconds(),
+			})
+		}
+
+		// Update metrics for failed execution
+		o.updateMetrics(time.Since(startTime), false)
+		return nil, fmt.Errorf("execution failed: %w", err)
+	}
+
+	// Store successful execution for DAG visualization
+	o.storeExecutionAsync(ctx, originalRequest, requestID, plan, result, nil)
+
+	// Log execution completion (follows ProcessRequest pattern from orchestrator.go:1118-1126)
+	if o.logger != nil {
+		failedSteps := 0
+		if result != nil && !result.Success {
+			for _, step := range result.Steps {
+				if !step.Success {
+					failedSteps++
+				}
+			}
+		}
+		o.logger.InfoWithContext(ctx, "Workflow execution completed", map[string]interface{}{
+			"operation":    "workflow_execution",
+			"request_id":   requestID,
+			"plan_id":      plan.PlanID,
+			"success":      result != nil && result.Success,
+			"failed_steps": failedSteps,
+			"duration_ms":  time.Since(startTime).Milliseconds(),
+		})
+	}
+
+	// Step 2: Synthesize using orchestrator's synthesizer (auto-records to LLM Debug Store)
+	// Synthesizer nil check - fall back to raw results formatting if synthesizer unavailable
+	var synthesizedResponse string
+	if o.synthesizer != nil {
+		synthesizedResponse, err = o.synthesizer.Synthesize(ctx, originalRequest, result)
+		if err != nil {
+			// Record synthesis error on span (per DISTRIBUTED_TRACING_GUIDE.md Pattern 4)
+			telemetry.RecordSpanError(ctx, err)
+
+			// Add span event with request_id first (per DISTRIBUTED_TRACING_GUIDE.md Pattern 6)
+			telemetry.AddSpanEvent(ctx, "workflow.synthesis.error",
+				attribute.String("request_id", requestID),
+				attribute.String("plan_id", plan.PlanID),
+				attribute.String("error", err.Error()),
+				attribute.Int64("duration_ms", time.Since(startTime).Milliseconds()),
+			)
+
+			// Emit counter metric with module label (per DISTRIBUTED_TRACING_GUIDE.md Pattern 5)
+			telemetry.Counter("workflow.execution.total",
+				"module", telemetry.ModuleOrchestration,
+				"status", "error",
+				"phase", "synthesis",
+			)
+
+			// Log with operation field (per DISTRIBUTED_TRACING_GUIDE.md Pattern 2)
+			if o.logger != nil {
+				o.logger.ErrorWithContext(ctx, "Workflow synthesis failed", map[string]interface{}{
+					"operation":   "execute_plan_with_synthesis",
+					"request_id":  requestID,
+					"plan_id":     plan.PlanID,
+					"error":       err.Error(),
+					"duration_ms": time.Since(startTime).Milliseconds(),
+				})
+			}
+
+			o.updateMetrics(time.Since(startTime), false)
+			return nil, fmt.Errorf("synthesis failed: %w", err)
+		}
+	} else {
+		// Fallback: format raw results (no LLM synthesis)
+		synthesizedResponse = formatRawExecutionResults(result)
+	}
+
+	// Build response
+	response := &OrchestratorResponse{
+		RequestID:       requestID,
+		OriginalRequest: originalRequest,
+		Response:        synthesizedResponse,
+		RoutingMode:     ModeWorkflow,
+		ExecutionTime:   time.Since(startTime),
+		AgentsInvolved:  o.extractAgentsFromPlan(plan),
+		Confidence:      0.95,
+		Steps:           result.Steps, // Include step-level details for API consumers
+	}
+
+	// Update metrics and history (follows ProcessRequest pattern from orchestrator.go:1147-1149)
+	o.updateMetrics(response.ExecutionTime, true)
+	o.addToHistory(response)
+
+	// Emit success counter (per DISTRIBUTED_TRACING_GUIDE.md Pattern 5)
+	telemetry.Counter("workflow.execution.total",
+		"module", telemetry.ModuleOrchestration,
+		"status", "success",
+	)
+
+	if o.logger != nil {
+		o.logger.InfoWithContext(ctx, "Workflow execution with synthesis completed", map[string]interface{}{
+			"operation":         "execute_plan_with_synthesis_complete",
+			"request_id":        requestID,
+			"success":           true,
+			"total_duration_ms": time.Since(startTime).Milliseconds(),
+		})
+	}
+
+	// Record success metrics if telemetry is available (follows ProcessRequest pattern from orchestrator.go:1161-1168)
+	if o.telemetry != nil {
+		o.telemetry.RecordMetric("orchestrator.requests.success", 1, map[string]string{
+			"mode": string(ModeWorkflow),
+		})
+		o.telemetry.RecordMetric("orchestrator.latency_ms", float64(time.Since(startTime).Milliseconds()), map[string]string{
+			"operation": "execute_plan_with_synthesis",
+		})
+	}
+
+	return response, nil
+}
+
+// formatRawExecutionResults formats execution results without AI synthesis.
+// Used as fallback when synthesizer is unavailable.
+func formatRawExecutionResults(result *ExecutionResult) string {
+	if result == nil {
+		return ""
+	}
+	var output string
+	for _, step := range result.Steps {
+		status := "Success"
+		if !step.Success {
+			status = fmt.Sprintf("Failed: %s", step.Error)
+		}
+		output += fmt.Sprintf("**%s** (%s): %s\n%s\n\n", step.AgentName, step.StepID, status, step.Response)
+	}
+	return output
 }
 
 // GetExecutionHistory returns recent execution history

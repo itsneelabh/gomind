@@ -398,13 +398,25 @@ func (r *ContextualReResolver) recordDebugInteraction(ctx context.Context, reque
 		return
 	}
 
+	// Extract baggage BEFORE spawning goroutine to preserve correlation data.
+	bag := telemetry.GetBaggage(ctx)
+
 	r.debugWg.Add(1)
 	go func() {
 		defer r.debugWg.Done()
 
-		// Use original context with timeout to preserve baggage (original_request_id).
-		recordCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		// Use background context with timeout to avoid inheriting request cancellation.
+		recordCtx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
+
+		// Re-inject baggage for HITL correlation (original_request_id).
+		if bag != nil {
+			pairs := make([]string, 0, len(bag)*2)
+			for k, v := range bag {
+				pairs = append(pairs, k, v)
+			}
+			recordCtx = telemetry.WithBaggage(recordCtx, pairs...)
+		}
 
 		if err := r.debugStore.RecordInteraction(recordCtx, requestID, interaction); err != nil {
 			r.logWarn("Failed to record LLM debug interaction", map[string]interface{}{

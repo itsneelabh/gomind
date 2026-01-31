@@ -1622,6 +1622,8 @@ These features are not yet implemented but could be added:
 - `NewWorkflowEngine(discovery, stateStore, logger)` - Create workflow engine
 - `ProcessRequest(ctx, request, metadata)` - Process natural language request
 - `ProcessRequestStreaming(ctx, query, tools, callback)` - Stream orchestration response with real-time tokens
+- `ExecutePlan(ctx, plan)` - Execute pre-defined routing plan (raw results, no synthesis)
+- `ExecutePlanWithSynthesis(ctx, plan, originalRequest)` - Execute plan with synthesis + DAG storage
 - `WithStepCallback(ctx, callback)` - Add per-request step completion callback
 - `ExecuteWorkflow(ctx, workflow, inputs)` - Execute defined workflow
 - `ParseWorkflowYAML(data)` - Parse workflow from YAML
