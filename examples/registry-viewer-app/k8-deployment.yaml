@@ -17,7 +17,7 @@ data:
   REDIS_URL: "redis://redis:6379"
   REDIS_NAMESPACE: "gomind"
   USE_MOCK: "false"
-  PORT: "8100"
+  PORT: "8361"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -43,7 +43,7 @@ spec:
         image: registry-viewer:latest
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 8100
+        - containerPort: 8361
           name: http
         env:
         # Load config from ConfigMap (can be overridden by pod-level env vars)
@@ -77,14 +77,14 @@ spec:
         livenessProbe:
           httpGet:
             path: /api/health
-            port: 8100
+            port: 8361
           initialDelaySeconds: 5
           periodSeconds: 10
           timeoutSeconds: 3
         readinessProbe:
           httpGet:
             path: /api/health
-            port: 8100
+            port: 8361
           initialDelaySeconds: 3
           periodSeconds: 5
           timeoutSeconds: 3
@@ -100,8 +100,8 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-  - port: 8100
-    targetPort: 8100
+  - port: 8361
+    targetPort: 8361
     protocol: TCP
     name: http
   selector:

@@ -7,12 +7,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-K8_DEPLOYMENT_DIR="$SCRIPT_DIR/../k8-deployment"
+EXAMPLES_DIR="$(dirname "$SCRIPT_DIR")"
+GOMIND_ROOT="$(dirname "$EXAMPLES_DIR")"
+K8_DEPLOYMENT_DIR="$EXAMPLES_DIR/k8-deployment"
 
 # Configuration
 NAMESPACE="gomind-examples"
 APP_NAME="registry-viewer"
-APP_PORT=8100
+APP_PORT=8361
 IMAGE_NAME="registry-viewer:latest"
 REDIS_NAMESPACE="gomind"
 
@@ -135,7 +137,7 @@ build_app() {
     echo ""
 }
 
-# Build Docker image
+# Build Docker image using Dockerfile.workspace from gomind root
 build_docker() {
     log_info "Building Docker image..."
 
@@ -150,8 +152,12 @@ build_docker() {
         no_cache_flag="--no-cache"
     fi
 
-    cd "$SCRIPT_DIR"
-    docker build $no_cache_flag -t "$IMAGE_NAME" .
+    # Build from gomind root using Dockerfile.workspace
+    # This allows copying local modules (core, orchestration, telemetry) into the build context
+    cd "$GOMIND_ROOT"
+    docker build $no_cache_flag \
+        -f examples/registry-viewer-app/Dockerfile.workspace \
+        -t "$IMAGE_NAME" .
 
     log_success "Docker image built: $IMAGE_NAME"
     echo ""
@@ -237,8 +243,9 @@ deploy_k8s() {
 }
 
 # Port forward
+# Port forward with auto-reconnect
 port_forward() {
-    log_info "Setting up port forward..."
+    log_info "Setting up port forward with auto-reconnect..."
 
     if [ "$KUBECTL_AVAILABLE" != true ]; then
         log_error "kubectl is required for port forwarding"
@@ -248,10 +255,6 @@ port_forward() {
     # Kill existing port forwards
     pkill -f "port-forward.*$APP_NAME" 2>/dev/null || true
     sleep 1
-
-    kubectl port-forward -n "$NAMESPACE" svc/$APP_NAME-service $APP_PORT:$APP_PORT &
-
-    sleep 2
 
     log_success "Port forward established"
     echo ""
@@ -265,10 +268,22 @@ port_forward() {
     echo "    GET /api/services  - List all registered services"
     echo "    GET /api/health    - Health check"
     echo ""
+    echo -e "${YELLOW}Port forwards have auto-reconnect enabled${NC}"
     echo "Press Ctrl+C to stop port forward"
     echo ""
 
-    wait
+    # Auto-reconnect loop - restarts port forward if it dies (e.g., during rollout)
+    while true; do
+        kubectl port-forward -n "$NAMESPACE" svc/$APP_NAME-service $APP_PORT:$APP_PORT 2>/dev/null
+        exit_code=$?
+        if [ $exit_code -eq 130 ] || [ $exit_code -eq 143 ]; then
+            # SIGINT (130) or SIGTERM (143) - user cancelled
+            log_info "Port forward stopped by user"
+            break
+        fi
+        log_warn "Port forward disconnected (exit code: $exit_code), reconnecting in 3s..."
+        sleep 3
+    done
 }
 
 # Run locally (with mock data by default)
@@ -486,7 +501,7 @@ Redis Configuration:
 
   To override, set REDIS_URL environment variable before deploying.
 
-Port: $APP_PORT (no conflicts with other examples which use 8080-8099)
+Port: $APP_PORT (no conflicts with other examples which use 8333-8369)
 EOF
 }
 
