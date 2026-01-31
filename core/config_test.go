@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -683,4 +684,56 @@ func ExampleNewConfig_production() {
 	fmt.Printf("Production config: %s in %s namespace\n",
 		cfg.Name, cfg.Namespace)
 	// Output: Production config: prod-agent in production namespace
+}
+
+// mockMetricsRegistry is a minimal mock for testing getContextBaggage
+type mockMetricsRegistry struct {
+	baggage map[string]string
+}
+
+func (m *mockMetricsRegistry) Counter(name string, labels ...string)                              {}
+func (m *mockMetricsRegistry) EmitWithContext(ctx context.Context, name string, value float64, labels ...string) {
+}
+func (m *mockMetricsRegistry) Gauge(name string, value float64, labels ...string)     {}
+func (m *mockMetricsRegistry) Histogram(name string, value float64, labels ...string) {}
+func (m *mockMetricsRegistry) GetBaggage(ctx context.Context) map[string]string {
+	return m.baggage
+}
+
+func TestGetContextBaggage(t *testing.T) {
+	// Save original state and restore after test
+	originalRegistry := globalMetricsRegistry
+	defer func() {
+		globalMetricsRegistry = originalRegistry
+	}()
+
+	t.Run("returns empty map when registry is nil", func(t *testing.T) {
+		globalMetricsRegistry = nil
+
+		result := getContextBaggage(context.Background())
+
+		assert.NotNil(t, result)
+		assert.Empty(t, result)
+	})
+
+	t.Run("returns baggage from registry when set", func(t *testing.T) {
+		expectedBaggage := map[string]string{
+			"request_id": "test-123",
+			"trace_id":   "abc-456",
+		}
+		globalMetricsRegistry = &mockMetricsRegistry{baggage: expectedBaggage}
+
+		result := getContextBaggage(context.Background())
+
+		assert.Equal(t, expectedBaggage, result)
+	})
+
+	t.Run("returns empty baggage from registry", func(t *testing.T) {
+		globalMetricsRegistry = &mockMetricsRegistry{baggage: map[string]string{}}
+
+		result := getContextBaggage(context.Background())
+
+		assert.NotNil(t, result)
+		assert.Empty(t, result)
+	})
 }
