@@ -90,6 +90,11 @@ func NewHybridResolver(aiClient core.AIClient, logger core.Logger, opts ...Hybri
 // The stepID parameter associates any LLM calls (micro_resolution) with the
 // execution step for DAG visualization. Pass empty string if not step-specific.
 //
+// The stepInstruction parameter provides context about what this step is trying to do.
+// This is critical for ordinal resolution - when the instruction mentions "first",
+// "second", "third" etc., the LLM needs this context to extract the correct item
+// from the source data. Pass empty string if not available.
+//
 // This ensures domain-agnostic behavior while avoiding unnecessary LLM calls
 // for trivial parameter mappings.
 func (h *HybridResolver) ResolveParameters(
@@ -97,6 +102,7 @@ func (h *HybridResolver) ResolveParameters(
 	dependencyResults map[string]*StepResult,
 	targetCapability *EnhancedCapability,
 	stepID string,
+	stepInstruction string,
 ) (map[string]interface{}, error) {
 	// Collect source data from all dependencies
 	sourceData := h.collectSourceData(dependencyResults)
@@ -158,11 +164,27 @@ func (h *HybridResolver) ResolveParameters(
 	}
 
 	h.logInfo("Using micro-resolution for unmapped parameters", map[string]interface{}{
-		"capability": targetCapability.Name,
-		"unmapped":   unmapped,
+		"capability":  targetCapability.Name,
+		"unmapped":    unmapped,
+		"instruction": stepInstruction,
 	})
 
-	hint := fmt.Sprintf("Need to extract values for required parameters: %v", unmapped)
+	// Build hint with step instruction context for ordinal resolution
+	var hint string
+	if stepInstruction != "" {
+		hint = fmt.Sprintf(`STEP INSTRUCTION: %s
+
+Need to extract values for required parameters: %v
+
+IMPORTANT: If the step instruction mentions ordinal references like "first", "second", "third", or "Nth", extract the corresponding item from the source data in that position. For example:
+- "first AI chip company" → extract the 1st company mentioned
+- "second stock" → extract the 2nd stock mentioned
+- "third result" → extract the 3rd item
+
+Pay close attention to which specific item the instruction is referring to.`, stepInstruction, unmapped)
+	} else {
+		hint = fmt.Sprintf("Need to extract values for required parameters: %v", unmapped)
+	}
 	resolved, err := h.microResolver.ResolveParameters(ctx, sourceData, targetCapability, hint, stepID)
 	if err != nil {
 		// Micro-resolution failed, return what we have

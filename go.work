@@ -4,8 +4,8 @@ use (
 	.
 	./ai
 	./core
+	./examples/stock-market-tool
 	./orchestration
 	./resilience
 	./telemetry
-	./ui
 )

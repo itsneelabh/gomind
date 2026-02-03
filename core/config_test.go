@@ -691,7 +691,7 @@ type mockMetricsRegistry struct {
 	baggage map[string]string
 }
 
-func (m *mockMetricsRegistry) Counter(name string, labels ...string)                              {}
+func (m *mockMetricsRegistry) Counter(name string, labels ...string) {}
 func (m *mockMetricsRegistry) EmitWithContext(ctx context.Context, name string, value float64, labels ...string) {
 }
 func (m *mockMetricsRegistry) Gauge(name string, value float64, labels ...string)     {}

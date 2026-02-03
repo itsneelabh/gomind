@@ -1543,7 +1543,8 @@ func (e *SmartExecutor) executeStep(ctx context.Context, step RoutingStep) StepR
 				// Collect step results from dependencies
 				stepResultsMap := e.collectDependencyResults(ctx, step.DependsOn)
 
-				resolved, err := e.hybridResolver.ResolveParameters(ctx, stepResultsMap, capabilityForResolution, step.StepID)
+				// Pass step instruction for ordinal resolution context (e.g., "first", "second", "third")
+				resolved, err := e.hybridResolver.ResolveParameters(ctx, stepResultsMap, capabilityForResolution, step.StepID, step.Instruction)
 				if err != nil {
 					if e.logger != nil {
 						e.logger.WarnWithContext(ctx, "Hybrid resolution failed, falling back to template interpolation", map[string]interface{}{
