@@ -33,7 +33,7 @@ func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
 		baseURL = DefaultBaseURL
 	}
 
-	base := providers.NewBaseClient(30*time.Second, logger)
+	base := providers.NewBaseClient(180*time.Second, logger) // 3 minutes default for reasoning models
 	base.DefaultModel = "gemini-1.5-flash"
 	base.DefaultMaxTokens = 1000
 
@@ -56,7 +56,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	if c.apiKey == "" {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - API key not configured", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - API key not configured", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "gemini",
 				"error":     "api_key_missing",
@@ -110,7 +110,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - marshal error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - marshal error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "gemini",
 				"error":     err.Error(),
@@ -127,7 +127,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - create request error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - create request error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "gemini",
 				"error":     err.Error(),
@@ -145,7 +145,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	resp, err := c.ExecuteWithRetry(ctx, req)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - send error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - send error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "gemini",
 				"error":     err.Error(),
@@ -163,7 +163,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - read response error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - read response error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "gemini",
 				"error":     err.Error(),
@@ -177,7 +177,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	// Handle errors
 	if resp.StatusCode != http.StatusOK {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - API error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - API error", map[string]interface{}{
 				"operation":   "ai_request_error",
 				"provider":    "gemini",
 				"status_code": resp.StatusCode,
@@ -194,7 +194,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	var geminiResp GeminiResponse
 	if err := json.Unmarshal(body, &geminiResp); err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - parse response error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - parse response error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "gemini",
 				"error":     err.Error(),
@@ -208,7 +208,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	// Extract text content from response
 	if len(geminiResp.Candidates) == 0 {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - no candidates", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - no candidates", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "gemini",
 				"error":     "no_candidates_returned",
@@ -228,7 +228,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	if content == "" {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini request failed - empty response", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini request failed - empty response", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "gemini",
 				"error":     "no_text_content",
@@ -277,7 +277,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 
 	if c.apiKey == "" {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini streaming request failed - API key not configured", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini streaming request failed - API key not configured", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "gemini",
 				"error":     "api_key_missing",
@@ -324,7 +324,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini streaming request failed - marshal error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini streaming request failed - marshal error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "gemini",
 				"error":     err.Error(),
@@ -342,7 +342,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini streaming request failed - create request error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini streaming request failed - create request error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "gemini",
 				"error":     err.Error(),
@@ -360,7 +360,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Gemini streaming request failed - send error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini streaming request failed - send error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "gemini",
 				"error":     err.Error(),
@@ -378,7 +378,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		if c.Logger != nil {
-			c.Logger.Error("Gemini streaming request failed - API error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Gemini streaming request failed - API error", map[string]interface{}{
 				"operation":   "ai_stream_error",
 				"provider":    "gemini",
 				"status_code": resp.StatusCode,
@@ -449,7 +449,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			if c.Logger != nil {
-				c.Logger.Debug("Gemini stream - failed to parse chunk", map[string]interface{}{
+				c.Logger.DebugWithContext(ctx, "Gemini stream - failed to parse chunk", map[string]interface{}{
 					"operation": "ai_stream_parse",
 					"provider":  "gemini",
 					"error":     err.Error(),

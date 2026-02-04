@@ -141,7 +141,7 @@ type AIConfig struct {
 	Model         string        `json:"model" env:"GOMIND_AI_MODEL" default:"gpt-4"`
 	Temperature   float32       `json:"temperature" env:"GOMIND_AI_TEMPERATURE" default:"0.7"`
 	MaxTokens     int           `json:"max_tokens" env:"GOMIND_AI_MAX_TOKENS" default:"2000"`
-	Timeout       time.Duration `json:"timeout" env:"GOMIND_AI_TIMEOUT" default:"30s"`
+	Timeout       time.Duration `json:"timeout" env:"GOMIND_AI_TIMEOUT" default:"180s"`
 	RetryAttempts int           `json:"retry_attempts" env:"GOMIND_AI_RETRY_ATTEMPTS" default:"3"`
 	RetryDelay    time.Duration `json:"retry_delay" env:"GOMIND_AI_RETRY_DELAY" default:"1s"`
 }

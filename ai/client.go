@@ -13,7 +13,7 @@ func NewClient(opts ...AIOption) (core.AIClient, error) {
 	config := &AIConfig{
 		Provider:    string(ProviderAuto),
 		MaxRetries:  3,
-		Timeout:     30 * time.Second,
+		Timeout:     180 * time.Second, // 3 minutes default for reasoning models
 		Temperature: 0.7,
 		MaxTokens:   1000,
 		Logger:      nil, // Will be set by framework or options

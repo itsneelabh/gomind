@@ -35,7 +35,7 @@ func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
 		baseURL = DefaultBaseURL
 	}
 
-	base := providers.NewBaseClient(30*time.Second, logger)
+	base := providers.NewBaseClient(180*time.Second, logger) // 3 minutes default for reasoning models
 	// Use "default" alias so resolveModel() is always called, enabling env var overrides
 	// The actual model is resolved at request-time via modelAliases["default"]
 	// or GOMIND_ANTHROPIC_MODEL_DEFAULT env var
@@ -61,7 +61,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	if c.apiKey == "" {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic request failed - API key not configured", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic request failed - API key not configured", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "anthropic",
 				"error":     "api_key_missing",
@@ -108,7 +108,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic request failed - marshal error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic request failed - marshal error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "anthropic",
 				"error":     err.Error(),
@@ -123,7 +123,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/messages", bytes.NewBuffer(jsonData))
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic request failed - create request error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic request failed - create request error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "anthropic",
 				"error":     err.Error(),
@@ -143,7 +143,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	resp, err := c.ExecuteWithRetry(ctx, req)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic request failed - send error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic request failed - send error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "anthropic",
 				"error":     err.Error(),
@@ -161,7 +161,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic request failed - read response error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic request failed - read response error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "anthropic",
 				"error":     err.Error(),
@@ -175,7 +175,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	// Handle errors
 	if resp.StatusCode != http.StatusOK {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic request failed - API error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic request failed - API error", map[string]interface{}{
 				"operation":   "ai_request_error",
 				"provider":    "anthropic",
 				"status_code": resp.StatusCode,
@@ -192,7 +192,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	var anthropicResp AnthropicResponse
 	if err := json.Unmarshal(body, &anthropicResp); err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic request failed - parse response error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic request failed - parse response error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "anthropic",
 				"error":     err.Error(),
@@ -213,7 +213,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	if content == "" {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic request failed - empty response", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic request failed - empty response", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "anthropic",
 				"error":     "no_text_content",
@@ -262,7 +262,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 
 	if c.apiKey == "" {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic streaming request failed - API key not configured", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic streaming request failed - API key not configured", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "anthropic",
 				"error":     "api_key_missing",
@@ -298,7 +298,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic streaming request failed - marshal error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic streaming request failed - marshal error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "anthropic",
 				"error":     err.Error(),
@@ -313,7 +313,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/messages", bytes.NewBuffer(jsonData))
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic streaming request failed - create request error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic streaming request failed - create request error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "anthropic",
 				"error":     err.Error(),
@@ -333,7 +333,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic streaming request failed - send error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic streaming request failed - send error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "anthropic",
 				"error":     err.Error(),
@@ -351,7 +351,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		if c.Logger != nil {
-			c.Logger.Error("Anthropic streaming request failed - API error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Anthropic streaming request failed - API error", map[string]interface{}{
 				"operation":   "ai_stream_error",
 				"provider":    "anthropic",
 				"status_code": resp.StatusCode,
@@ -437,7 +437,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 		var event StreamEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			if c.Logger != nil {
-				c.Logger.Debug("Anthropic stream - failed to parse event", map[string]interface{}{
+				c.Logger.DebugWithContext(ctx, "Anthropic stream - failed to parse event", map[string]interface{}{
 					"operation": "ai_stream_parse",
 					"provider":  "anthropic",
 					"error":     err.Error(),

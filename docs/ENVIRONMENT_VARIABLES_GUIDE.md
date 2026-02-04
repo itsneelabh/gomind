@@ -276,7 +276,7 @@ Configure AI client settings for LLM integration.
 | `GOMIND_AI_PROVIDER` | `openai` | Struct Tag Only | AI provider | [core/config.go:138](../core/config.go#L138) |
 | `GOMIND_AI_TEMPERATURE` | `0.7` | Struct Tag Only | Sampling temperature (0.0-2.0) | [core/config.go:142](../core/config.go#L142) |
 | `GOMIND_AI_MAX_TOKENS` | `2000` | Struct Tag Only | Maximum tokens in response | [core/config.go:143](../core/config.go#L143) |
-| `GOMIND_AI_TIMEOUT` | `30s` | Struct Tag Only | Request timeout | [core/config.go:144](../core/config.go#L144) |
+| `GOMIND_AI_TIMEOUT` | `180s` | Struct Tag Only | Request timeout (3 min default for reasoning model support) | [core/config.go:144](../core/config.go#L144) |
 | `GOMIND_AI_RETRY_ATTEMPTS` | `3` | Struct Tag Only | Number of retry attempts | [core/config.go:145](../core/config.go#L145) |
 | `GOMIND_AI_RETRY_DELAY` | `1s` | Struct Tag Only | Delay between retries | [core/config.go:146](../core/config.go#L146) |
 

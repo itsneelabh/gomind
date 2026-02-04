@@ -30,7 +30,7 @@ func NewClient(cfg aws.Config, region string, logger core.Logger) *Client {
 	bedrockClient := bedrockruntime.NewFromConfig(cfg)
 
 	// Create base client with defaults
-	base := providers.NewBaseClient(30*time.Second, logger)
+	base := providers.NewBaseClient(180*time.Second, logger) // 3 minutes default for reasoning models
 	base.DefaultModel = ModelClaude3Sonnet // Default to Claude Sonnet
 	base.DefaultMaxTokens = 1000
 
@@ -111,7 +111,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	output, err := c.bedrockClient.Converse(ctx, input)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock request failed - converse error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock request failed - converse error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "bedrock",
 				"error":     err.Error(),
@@ -125,7 +125,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	// Extract text content from response
 	if output.Output == nil {
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock request failed - no output", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock request failed - no output", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "bedrock",
 				"error":     "no_output",
@@ -148,7 +148,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 		}
 	default:
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock request failed - unexpected output type", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock request failed - unexpected output type", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "bedrock",
 				"error":     "unexpected_output_type",
@@ -162,7 +162,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	if content == "" {
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock request failed - empty response", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock request failed - empty response", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "bedrock",
 				"error":     "no_text_content",
@@ -228,7 +228,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 
 	// Log streaming request
 	if c.Logger != nil {
-		c.Logger.Info("Bedrock stream request initiated", map[string]interface{}{
+		c.Logger.InfoWithContext(ctx, "Bedrock stream request initiated", map[string]interface{}{
 			"operation":     "ai_stream_request",
 			"provider":      "bedrock",
 			"model":         options.Model,
@@ -278,7 +278,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	output, err := c.bedrockClient.ConverseStream(ctx, input)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock stream request failed - stream error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock stream request failed - stream error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "bedrock",
 				"error":     err.Error(),
@@ -347,7 +347,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 			// Stream ended normally - capture stop reason
 			finishReason = string(v.Value.StopReason)
 			if c.Logger != nil {
-				c.Logger.Debug("Bedrock stream completed", map[string]interface{}{
+				c.Logger.DebugWithContext(ctx, "Bedrock stream completed", map[string]interface{}{
 					"operation":   "ai_stream_complete",
 					"provider":    "bedrock",
 					"stop_reason": finishReason,
@@ -377,7 +377,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	// Check for stream errors
 	if err := eventStream.Err(); err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock stream error during processing", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock stream error during processing", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "bedrock",
 				"error":     err.Error(),
@@ -458,7 +458,7 @@ func (c *Client) InvokeModel(ctx context.Context, modelID string, body []byte) (
 	output, err := c.bedrockClient.InvokeModel(ctx, input)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock invoke model failed", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock invoke model failed", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "bedrock",
 				"model":     modelID,
@@ -493,7 +493,7 @@ func (c *Client) GetEmbeddings(ctx context.Context, text string) ([]float32, err
 	body, err := json.Marshal(request)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock embeddings failed - marshal error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock embeddings failed - marshal error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "bedrock",
 				"error":     err.Error(),
@@ -518,7 +518,7 @@ func (c *Client) GetEmbeddings(ctx context.Context, text string) ([]float32, err
 
 	if err := json.Unmarshal(responseBody, &response); err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("Bedrock embeddings failed - parse response error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "Bedrock embeddings failed - parse response error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "bedrock",
 				"error":     err.Error(),

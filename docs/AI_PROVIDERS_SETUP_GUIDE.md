@@ -45,6 +45,9 @@ Welcome to the GoMind AI providers guide! This document explains how to configur
   - [Enabling Debug Logging](#enabling-debug-logging)
   - [Understanding AI Module Logs](#understanding-ai-module-logs)
   - [Tracing AI Requests in Jaeger](#tracing-ai-requests-in-jaeger)
+- [Advanced Configuration](#advanced-configuration)
+  - [Request Timeouts](#request-timeouts)
+  - [Reasoning Model Support](#reasoning-model-support)
 - [Quick Reference](#quick-reference)
   - [Environment Variable Cheat Sheet](#environment-variable-cheat-sheet)
   - [Decision Tree: Which Client Type?](#decision-tree-which-client-type)
@@ -942,6 +945,118 @@ If you have telemetry enabled, AI requests create spans:
    - `ai.model`: Resolved model name
    - `ai.prompt_tokens`, `ai.completion_tokens`: Token usage
    - `ai.attempt` spans: Each provider attempt during failover
+
+---
+
+## Advanced Configuration
+
+This section covers advanced configuration options for fine-tuning AI client behavior, particularly for reasoning models and long-running requests.
+
+### Request Timeouts
+
+By default, all AI providers use a **180-second (3 minute) timeout**. This accommodates reasoning models (GPT-5, o1, o3, o4) which take longer due to internal chain-of-thought processing.
+
+#### Single Client Timeout
+
+```go
+import "time"
+
+// Default timeout (180s) - sufficient for most use cases including reasoning models
+client, err := ai.NewClient()
+
+// Custom timeout for very complex tasks
+client, err := ai.NewClient(
+    ai.WithTimeout(300 * time.Second),  // 5 minutes
+)
+
+// Shorter timeout for latency-sensitive applications
+client, err := ai.NewClient(
+    ai.WithTimeout(60 * time.Second),   // 1 minute
+)
+```
+
+#### Chain Client Timeout
+
+```go
+// Chain client with custom timeout applied to all providers
+chainClient, err := ai.NewChainClient(
+    ai.WithProviderChain("openai", "anthropic"),
+    ai.WithChainTimeout(240 * time.Second),  // 4 minutes
+)
+```
+
+#### When to Adjust Timeout
+
+| Scenario | Recommended Timeout |
+|----------|---------------------|
+| Simple queries with standard models (GPT-4, Claude) | 60s |
+| Complex prompts with standard models | 120s |
+| Reasoning models (GPT-5, o1, o3, o4) | 180s (default) |
+| Orchestration/plan generation | 240-300s |
+| Very complex multi-step reasoning | 300s+ |
+
+### Reasoning Model Support
+
+OpenAI reasoning models (GPT-5, o1, o3, o4) require special handling because they:
+1. **Reject `max_tokens`** - Must use `max_completion_tokens` instead
+2. **Reject `temperature`** - Only default value (1) is supported
+3. **Count internal reasoning tokens** - Chain-of-thought tokens are counted but NOT returned
+
+The framework handles #1 and #2 automatically. For #3, a **token multiplier** ensures sufficient tokens for both reasoning and visible output.
+
+#### The Token Multiplier Problem
+
+```
+Without multiplier (2000 tokens requested):
+┌────────────────────────────────────┐
+│  Internal Reasoning (invisible)    │  ← Uses ~1800 tokens
+├────────────────────────────────────┤
+│  Visible Output (truncated!)       │  ← Only ~200 tokens remain
+└────────────────────────────────────┘
+Result: Empty or truncated responses
+
+With 5x multiplier (10000 tokens allocated):
+┌────────────────────────────────────┐
+│  Internal Reasoning (invisible)    │  ← Uses ~4000 tokens
+├────────────────────────────────────┤
+│  Visible Output (complete!)        │  ← ~6000 tokens for response
+└────────────────────────────────────┘
+Result: Full, complete responses
+```
+
+#### Configuring Token Multiplier
+
+```go
+// Default 5x multiplier (recommended for most use cases)
+client, err := ai.NewClient()
+
+// Lower multiplier for cost optimization (simpler prompts)
+client, err := ai.NewClient(
+    ai.WithReasoningTokenMultiplier(3),  // 3x multiplier
+)
+
+// Higher multiplier for very complex reasoning tasks
+client, err := ai.NewClient(
+    ai.WithReasoningTokenMultiplier(8),  // 8x multiplier
+)
+
+// Chain client with custom multiplier
+chainClient, err := ai.NewChainClient(
+    ai.WithProviderChain("openai", "anthropic"),
+    ai.WithChainReasoningTokenMultiplier(4),  // 4x multiplier
+)
+```
+
+#### When to Adjust Token Multiplier
+
+| Scenario | Recommended Multiplier |
+|----------|------------------------|
+| Simple Q&A with reasoning models | 3x |
+| Standard prompts | 5x (default) |
+| Complex analysis or planning | 6-8x |
+| Multi-step orchestration plans | 8x+ |
+
+> **Note**: The token multiplier only affects OpenAI reasoning models (GPT-5, o1, o3, o4). Standard models (GPT-4, Claude, etc.) are unaffected.
 
 ---
 

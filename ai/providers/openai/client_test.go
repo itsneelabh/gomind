@@ -429,6 +429,183 @@ func TestClient_GenerateResponseContextCancellation(t *testing.T) {
 	}
 }
 
+func TestTruncateForLog(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		maxLen int
+		want   string
+	}{
+		{
+			name:   "shorter than max",
+			input:  "hello",
+			maxLen: 10,
+			want:   "hello",
+		},
+		{
+			name:   "equal to max",
+			input:  "hello",
+			maxLen: 5,
+			want:   "hello",
+		},
+		{
+			name:   "longer than max",
+			input:  "hello world",
+			maxLen: 5,
+			want:   "hello...",
+		},
+		{
+			name:   "empty string",
+			input:  "",
+			maxLen: 5,
+			want:   "",
+		},
+		{
+			name:   "max is zero",
+			input:  "hello",
+			maxLen: 0,
+			want:   "...",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateForLog(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncateForLog(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClient_SupportsStreaming(t *testing.T) {
+	client := NewClient("test-key", "", "", nil)
+	if !client.SupportsStreaming() {
+		t.Error("OpenAI client should support streaming")
+	}
+}
+
+func TestClient_GenerateResponse_ReasoningContent(t *testing.T) {
+	// Test that content is extracted from reasoning_content field when content is empty
+	// This is used by reasoning models like GPT-5, o1, o3, o4
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"model": "gpt-5-mini",
+			"choices": [{
+				"message": {
+					"role": "assistant",
+					"content": "",
+					"reasoning_content": "This is the reasoning response from GPT-5"
+				},
+				"finish_reason": "stop"
+			}],
+			"usage": {
+				"prompt_tokens": 10,
+				"completion_tokens": 50,
+				"total_tokens": 60
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient("test-key", server.URL, "", logger)
+
+	resp, err := client.GenerateResponse(context.Background(), "test", &core.AIOptions{
+		Model:     "gpt-5-mini",
+		MaxTokens: 1000,
+	})
+
+	if err != nil {
+		t.Fatalf("GenerateResponse() error = %v", err)
+	}
+
+	if resp.Content != "This is the reasoning response from GPT-5" {
+		t.Errorf("Content = %q, want reasoning_content value", resp.Content)
+	}
+}
+
+func TestClient_GenerateResponse_ReasoningModelParams(t *testing.T) {
+	// Test that reasoning model parameters are correctly applied
+	var capturedRequest map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedRequest)
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"choices": [{
+				"message": {"content": "reasoning response"}
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient("test-key", server.URL, "", logger)
+
+	_, err := client.GenerateResponse(context.Background(), "test", &core.AIOptions{
+		Model:       "o3-mini",
+		Temperature: 0.7, // Should be ignored for reasoning models
+		MaxTokens:   1000,
+	})
+
+	if err != nil {
+		t.Fatalf("GenerateResponse() error = %v", err)
+	}
+
+	// Verify max_completion_tokens is used (not max_tokens)
+	if _, ok := capturedRequest["max_completion_tokens"]; !ok {
+		t.Error("Reasoning model should use max_completion_tokens")
+	}
+	if _, ok := capturedRequest["max_tokens"]; ok {
+		t.Error("Reasoning model should NOT have max_tokens")
+	}
+	// Verify temperature is NOT included for reasoning models
+	if _, ok := capturedRequest["temperature"]; ok {
+		t.Error("Reasoning model should NOT have temperature")
+	}
+	// Verify multiplier was applied (1000 * 5 = 5000)
+	if capturedRequest["max_completion_tokens"] != float64(5000) {
+		t.Errorf("max_completion_tokens = %v, want 5000 (1000 * 5 default multiplier)", capturedRequest["max_completion_tokens"])
+	}
+}
+
+func TestClient_GenerateResponse_CustomReasoningMultiplier(t *testing.T) {
+	var capturedRequest map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedRequest)
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"choices": [{
+				"message": {"content": "response"}
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient("test-key", server.URL, "", logger)
+	client.ReasoningTokenMultiplier = 3 // Custom multiplier
+
+	_, err := client.GenerateResponse(context.Background(), "test", &core.AIOptions{
+		Model:     "gpt-5-mini",
+		MaxTokens: 1000,
+	})
+
+	if err != nil {
+		t.Fatalf("GenerateResponse() error = %v", err)
+	}
+
+	// Verify custom multiplier was applied (1000 * 3 = 3000)
+	if capturedRequest["max_completion_tokens"] != float64(3000) {
+		t.Errorf("max_completion_tokens = %v, want 3000 (1000 * 3 custom multiplier)", capturedRequest["max_completion_tokens"])
+	}
+}
+
 func TestClient_ResponseParsing(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -519,5 +696,279 @@ func TestClient_ResponseParsing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// =============================================================================
+// StreamResponse Tests
+// =============================================================================
+
+func TestClient_StreamResponse_Success(t *testing.T) {
+	// Create SSE server that sends streaming response
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify streaming headers
+		if r.Header.Get("Accept") != "text/event-stream" {
+			t.Error("Expected Accept: text/event-stream header")
+		}
+
+		// Set SSE headers
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		// Flush the headers
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+
+		// Send streaming chunks
+		chunks := []string{
+			`data: {"id":"1","model":"gpt-4","choices":[{"delta":{"role":"assistant"}}]}`,
+			`data: {"id":"1","model":"gpt-4","choices":[{"delta":{"content":"Hello"}}]}`,
+			`data: {"id":"1","model":"gpt-4","choices":[{"delta":{"content":" world"}}]}`,
+			`data: {"id":"1","model":"gpt-4","choices":[{"delta":{"content":"!"},"finish_reason":"stop"}]}`,
+			`data: {"id":"1","model":"gpt-4","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`,
+			`data: [DONE]`,
+		}
+
+		for _, chunk := range chunks {
+			w.Write([]byte(chunk + "\n\n"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient("test-key", server.URL, "", logger)
+
+	var receivedChunks []string
+	callback := func(chunk core.StreamChunk) error {
+		if chunk.Content != "" {
+			receivedChunks = append(receivedChunks, chunk.Content)
+		}
+		return nil
+	}
+
+	resp, err := client.StreamResponse(context.Background(), "test", &core.AIOptions{
+		Model:     "gpt-4",
+		MaxTokens: 100,
+	}, callback)
+
+	if err != nil {
+		t.Fatalf("StreamResponse() error = %v", err)
+	}
+
+	// Verify full content
+	expectedContent := "Hello world!"
+	if resp.Content != expectedContent {
+		t.Errorf("Content = %q, want %q", resp.Content, expectedContent)
+	}
+
+	// Verify chunks received
+	if len(receivedChunks) != 3 {
+		t.Errorf("Received %d chunks, want 3", len(receivedChunks))
+	}
+
+	// Verify model
+	if resp.Model != "gpt-4" {
+		t.Errorf("Model = %q, want gpt-4", resp.Model)
+	}
+
+	// Verify provider
+	if resp.Provider != "openai" {
+		t.Errorf("Provider = %q, want openai", resp.Provider)
+	}
+}
+
+func TestClient_StreamResponse_MissingAPIKey(t *testing.T) {
+	logger := &mockLogger{}
+	client := NewClient("", "", "", logger) // No API key
+
+	callback := func(chunk core.StreamChunk) error {
+		return nil
+	}
+
+	_, err := client.StreamResponse(context.Background(), "test", &core.AIOptions{
+		Model: "gpt-4",
+	}, callback)
+
+	if err == nil {
+		t.Error("Expected error for missing API key")
+	}
+	if !strings.Contains(err.Error(), "API key not configured") {
+		t.Errorf("Expected API key error, got: %v", err)
+	}
+}
+
+func TestClient_StreamResponse_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error": {"message": "Invalid API key"}}`))
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient("test-key", server.URL, "", logger)
+
+	callback := func(chunk core.StreamChunk) error {
+		return nil
+	}
+
+	_, err := client.StreamResponse(context.Background(), "test", &core.AIOptions{
+		Model: "gpt-4",
+	}, callback)
+
+	if err == nil {
+		t.Error("Expected error for API error response")
+	}
+}
+
+func TestClient_StreamResponse_ReasoningModel(t *testing.T) {
+	// Test streaming with reasoning model (GPT-5, o1, o3, o4) which uses reasoning_content
+	var capturedRequest map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedRequest)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		// Streaming response with reasoning_content (used by o1/o3/gpt-5)
+		chunks := []string{
+			`data: {"id":"1","model":"o3-mini","choices":[{"delta":{"role":"assistant"}}]}`,
+			`data: {"id":"1","model":"o3-mini","choices":[{"delta":{"reasoning_content":"Thinking..."}}]}`,
+			`data: {"id":"1","model":"o3-mini","choices":[{"delta":{"content":"The answer is 42"},"finish_reason":"stop"}]}`,
+			`data: [DONE]`,
+		}
+
+		for _, chunk := range chunks {
+			w.Write([]byte(chunk + "\n\n"))
+		}
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient("test-key", server.URL, "", logger)
+
+	var chunks []string
+	callback := func(chunk core.StreamChunk) error {
+		if chunk.Content != "" {
+			chunks = append(chunks, chunk.Content)
+		}
+		return nil
+	}
+
+	resp, err := client.StreamResponse(context.Background(), "test", &core.AIOptions{
+		Model:     "o3-mini",
+		MaxTokens: 1000,
+	}, callback)
+
+	if err != nil {
+		t.Fatalf("StreamResponse() error = %v", err)
+	}
+
+	// Verify max_completion_tokens is used for reasoning model
+	if _, ok := capturedRequest["max_completion_tokens"]; !ok {
+		t.Error("Reasoning model should use max_completion_tokens")
+	}
+
+	// Verify temperature is NOT included
+	if _, ok := capturedRequest["temperature"]; ok {
+		t.Error("Reasoning model should NOT have temperature")
+	}
+
+	// Both reasoning_content and content should be captured
+	if len(chunks) < 2 {
+		t.Errorf("Expected at least 2 chunks (reasoning + content), got %d", len(chunks))
+	}
+
+	// Final response should contain all content
+	if resp.Content == "" {
+		t.Error("Expected non-empty response content")
+	}
+}
+
+func TestClient_StreamResponse_WithSystemPrompt(t *testing.T) {
+	var capturedRequest map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedRequest)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		w.Write([]byte(`data: {"id":"1","model":"gpt-4","choices":[{"delta":{"content":"Hi"}}]}` + "\n\n"))
+		w.Write([]byte(`data: [DONE]` + "\n\n"))
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient("test-key", server.URL, "", logger)
+
+	callback := func(chunk core.StreamChunk) error { return nil }
+
+	_, err := client.StreamResponse(context.Background(), "test prompt", &core.AIOptions{
+		Model:        "gpt-4",
+		SystemPrompt: "You are a helpful assistant.",
+	}, callback)
+
+	if err != nil {
+		t.Fatalf("StreamResponse() error = %v", err)
+	}
+
+	// Verify system message was included
+	messages := capturedRequest["messages"].([]interface{})
+	if len(messages) != 2 {
+		t.Fatalf("Expected 2 messages (system + user), got %d", len(messages))
+	}
+
+	systemMsg := messages[0].(map[string]interface{})
+	if systemMsg["role"] != "system" {
+		t.Errorf("First message role = %v, want system", systemMsg["role"])
+	}
+	if systemMsg["content"] != "You are a helpful assistant." {
+		t.Errorf("System content = %v, want 'You are a helpful assistant.'", systemMsg["content"])
+	}
+}
+
+func TestClient_StreamResponse_ContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		// Send first chunk
+		w.Write([]byte(`data: {"id":"1","model":"gpt-4","choices":[{"delta":{"content":"Hello"}}]}` + "\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+
+		// Wait longer than test will wait
+		time.Sleep(500 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	logger := &mockLogger{}
+	client := NewClient("test-key", server.URL, "", logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var chunksReceived int
+	callback := func(chunk core.StreamChunk) error {
+		chunksReceived++
+		// Cancel after receiving first chunk
+		cancel()
+		return nil
+	}
+
+	resp, err := client.StreamResponse(ctx, "test", &core.AIOptions{
+		Model: "gpt-4",
+	}, callback)
+
+	// Should return partial result with ErrStreamPartiallyCompleted or context error
+	if resp != nil && resp.Content == "" && err == nil {
+		t.Error("Expected either partial content or error on cancellation")
 	}
 }

@@ -96,6 +96,12 @@ func (f *Factory) Create(config *ai.AIConfig) core.AIClient {
 		client.DefaultMaxTokens = config.MaxTokens
 	}
 
+	// Apply reasoning token multiplier for reasoning models (GPT-5, o1, o3, o4)
+	// This ensures sufficient tokens for both internal reasoning and visible output
+	if config.ReasoningTokenMultiplier > 0 {
+		client.ReasoningTokenMultiplier = config.ReasoningTokenMultiplier
+	}
+
 	// Apply custom headers if any
 	if len(config.Headers) > 0 {
 		// Create a custom transport to add headers

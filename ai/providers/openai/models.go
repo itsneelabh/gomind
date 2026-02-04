@@ -23,9 +23,11 @@ type Choice struct {
 }
 
 // Message represents a chat message
+// For reasoning models (GPT-5, o1, o3, o4), content may be in ReasoningContent field
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"` // GPT-5/o-series reasoning models
 }
 
 // Usage represents token usage information
@@ -52,9 +54,11 @@ type StreamChoice struct {
 }
 
 // StreamDelta represents the delta content in a streaming chunk
+// For reasoning models (GPT-5, o1, o3, o4), content may be in ReasoningContent field
 type StreamDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role             string `json:"role,omitempty"`
+	Content          string `json:"content,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"` // GPT-5/o-series reasoning models
 }
 
 // StreamResponse represents a streaming response chunk from OpenAI API

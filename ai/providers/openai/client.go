@@ -18,9 +18,10 @@ import (
 // Client implements core.AIClient for OpenAI
 type Client struct {
 	*providers.BaseClient
-	apiKey        string
-	baseURL       string
-	providerAlias string // For request-time alias resolution (e.g., "openai.deepseek")
+	apiKey                   string
+	baseURL                  string
+	providerAlias            string // For request-time alias resolution (e.g., "openai.deepseek")
+	ReasoningTokenMultiplier int    // Token multiplier for reasoning models (0 = use default 5x)
 }
 
 // NewClient creates a new OpenAI client with configuration
@@ -29,7 +30,7 @@ func NewClient(apiKey, baseURL, providerAlias string, logger core.Logger) *Clien
 		baseURL = "https://api.openai.com/v1"
 	}
 
-	base := providers.NewBaseClient(30*time.Second, logger)
+	base := providers.NewBaseClient(180*time.Second, logger) // 3 minutes default for reasoning models
 	// Use "default" alias so ResolveModel() is always called, enabling env var overrides
 	// The actual model is resolved at request-time via ModelAliases["openai"]["default"]
 	// or GOMIND_OPENAI_MODEL_DEFAULT env var
@@ -52,6 +53,14 @@ func (c *Client) getProviderName() string {
 	return c.providerAlias
 }
 
+// truncateForLog truncates a string for logging purposes
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
 // GenerateResponse generates a response using OpenAI
 func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *core.AIOptions) (*core.AIResponse, error) {
 	// Start distributed tracing span
@@ -64,7 +73,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 
 	if c.apiKey == "" {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI request failed - API key not configured", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI request failed - API key not configured", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "openai",
 				"error":     "api_key_missing",
@@ -102,18 +111,29 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 		"content": prompt,
 	})
 
-	// Build request body
-	reqBody := map[string]interface{}{
-		"model":       options.Model,
-		"messages":    messages,
-		"temperature": options.Temperature,
-		"max_tokens":  options.MaxTokens,
+	// Build request body (handles reasoning model differences automatically)
+	reqBody := buildRequestBody(options.Model, messages, options.MaxTokens, options.Temperature, false, c.ReasoningTokenMultiplier)
+
+	// Log reasoning model parameter adjustments (uses WithContext for trace correlation)
+	if c.Logger != nil && IsReasoningModel(options.Model) {
+		multiplier := c.ReasoningTokenMultiplier
+		if multiplier <= 0 {
+			multiplier = DefaultReasoningTokenMultiplier
+		}
+		c.Logger.DebugWithContext(ctx, "Using reasoning model parameters", map[string]interface{}{
+			"operation":                   "ai_request_params",
+			"provider":                    "openai",
+			"model":                       options.Model,
+			"using_max_completion_tokens": true,
+			"temperature_omitted":         true,
+			"token_multiplier":            multiplier,
+		})
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI request failed - marshal error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI request failed - marshal error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "openai",
 				"error":     err.Error(),
@@ -128,7 +148,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI request failed - create request error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI request failed - create request error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "openai",
 				"error":     err.Error(),
@@ -146,7 +166,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	resp, err := c.ExecuteWithRetry(ctx, req)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI request failed - send error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI request failed - send error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "openai",
 				"error":     err.Error(),
@@ -164,7 +184,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI request failed - read response error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI request failed - read response error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "openai",
 				"error":     err.Error(),
@@ -178,7 +198,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	// Handle errors
 	if resp.StatusCode != http.StatusOK {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI request failed - API error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI request failed - API error", map[string]interface{}{
 				"operation":   "ai_request_error",
 				"provider":    "openai",
 				"status_code": resp.StatusCode,
@@ -195,7 +215,7 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 	var openAIResp OpenAIResponse
 	if err := json.Unmarshal(body, &openAIResp); err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI request failed - parse response error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI request failed - parse response error", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "openai",
 				"error":     err.Error(),
@@ -206,9 +226,26 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	// Debug: Log raw response for reasoning model investigation (uses WithContext for trace correlation)
+	if c.Logger != nil && IsReasoningModel(options.Model) {
+		// Truncate raw body for logging (first 2000 chars)
+		rawBodyStr := string(body)
+		if len(rawBodyStr) > 2000 {
+			rawBodyStr = rawBodyStr[:2000] + "...[truncated]"
+		}
+		c.Logger.DebugWithContext(ctx, "Raw OpenAI response for reasoning model", map[string]interface{}{
+			"operation":         "ai_raw_response_debug",
+			"provider":          "openai",
+			"model":             options.Model,
+			"raw_response":      rawBodyStr,
+			"choices_count":     len(openAIResp.Choices),
+			"completion_tokens": openAIResp.Usage.CompletionTokens,
+		})
+	}
+
 	if len(openAIResp.Choices) == 0 {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI request failed - empty response", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI request failed - empty response", map[string]interface{}{
 				"operation": "ai_request_error",
 				"provider":  "openai",
 				"error":     "no_choices_returned",
@@ -220,8 +257,29 @@ func (c *Client) GenerateResponse(ctx context.Context, prompt string, options *c
 		return nil, emptyErr
 	}
 
+	// Debug: Log parsed message fields for reasoning model investigation (uses WithContext for trace correlation)
+	if c.Logger != nil && IsReasoningModel(options.Model) {
+		msg := openAIResp.Choices[0].Message
+		c.Logger.DebugWithContext(ctx, "Parsed message fields for reasoning model", map[string]interface{}{
+			"operation":                 "ai_parsed_message_debug",
+			"provider":                  "openai",
+			"model":                     options.Model,
+			"content_length":            len(msg.Content),
+			"reasoning_content_length":  len(msg.ReasoningContent),
+			"content_preview":           truncateForLog(msg.Content, 200),
+			"reasoning_content_preview": truncateForLog(msg.ReasoningContent, 200),
+			"role":                      msg.Role,
+		})
+	}
+
+	// Extract content - for reasoning models (GPT-5, o1, o3, o4), content may be in ReasoningContent
+	responseContent := openAIResp.Choices[0].Message.Content
+	if responseContent == "" && openAIResp.Choices[0].Message.ReasoningContent != "" {
+		responseContent = openAIResp.Choices[0].Message.ReasoningContent
+	}
+
 	result := &core.AIResponse{
-		Content:  openAIResp.Choices[0].Message.Content,
+		Content:  responseContent,
 		Model:    openAIResp.Model,
 		Provider: c.getProviderName(),
 		Usage: core.TokenUsage{
@@ -257,7 +315,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 
 	if c.apiKey == "" {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI streaming request failed - API key not configured", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI streaming request failed - API key not configured", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "openai",
 				"error":     "api_key_missing",
@@ -295,22 +353,29 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 		"content": prompt,
 	})
 
-	// Build request body with streaming enabled
-	reqBody := map[string]interface{}{
-		"model":       options.Model,
-		"messages":    messages,
-		"temperature": options.Temperature,
-		"max_tokens":  options.MaxTokens,
-		"stream":      true,
-		"stream_options": map[string]interface{}{
-			"include_usage": true, // Request usage info in final chunk
-		},
+	// Build request body with streaming enabled (handles reasoning model differences automatically)
+	reqBody := buildRequestBody(options.Model, messages, options.MaxTokens, options.Temperature, true, c.ReasoningTokenMultiplier)
+
+	// Log reasoning model parameter adjustments (uses WithContext for trace correlation)
+	if c.Logger != nil && IsReasoningModel(options.Model) {
+		multiplier := c.ReasoningTokenMultiplier
+		if multiplier <= 0 {
+			multiplier = DefaultReasoningTokenMultiplier
+		}
+		c.Logger.DebugWithContext(ctx, "Using reasoning model parameters for streaming", map[string]interface{}{
+			"operation":                   "ai_stream_params",
+			"provider":                    "openai",
+			"model":                       options.Model,
+			"using_max_completion_tokens": true,
+			"temperature_omitted":         true,
+			"token_multiplier":            multiplier,
+		})
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI streaming request failed - marshal error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI streaming request failed - marshal error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "openai",
 				"error":     err.Error(),
@@ -325,7 +390,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI streaming request failed - create request error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI streaming request failed - create request error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "openai",
 				"error":     err.Error(),
@@ -344,7 +409,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI streaming request failed - send error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI streaming request failed - send error", map[string]interface{}{
 				"operation": "ai_stream_error",
 				"provider":  "openai",
 				"error":     err.Error(),
@@ -362,7 +427,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		if c.Logger != nil {
-			c.Logger.Error("OpenAI streaming request failed - API error", map[string]interface{}{
+			c.Logger.ErrorWithContext(ctx, "OpenAI streaming request failed - API error", map[string]interface{}{
 				"operation":   "ai_stream_error",
 				"provider":    "openai",
 				"status_code": resp.StatusCode,
@@ -442,7 +507,7 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 		if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
 			// Log but continue - some chunks may be malformed
 			if c.Logger != nil {
-				c.Logger.Debug("OpenAI stream - failed to parse chunk", map[string]interface{}{
+				c.Logger.DebugWithContext(ctx, "OpenAI stream - failed to parse chunk", map[string]interface{}{
 					"operation": "ai_stream_parse",
 					"provider":  "openai",
 					"error":     err.Error(),
@@ -467,12 +532,18 @@ func (c *Client) StreamResponse(ctx context.Context, prompt string, options *cor
 
 		// Process choices
 		for _, choice := range streamResp.Choices {
-			if choice.Delta.Content != "" {
-				fullContent.WriteString(choice.Delta.Content)
+			// Extract content - for reasoning models (GPT-5, o1, o3, o4), content may be in ReasoningContent
+			deltaContent := choice.Delta.Content
+			if deltaContent == "" && choice.Delta.ReasoningContent != "" {
+				deltaContent = choice.Delta.ReasoningContent
+			}
+
+			if deltaContent != "" {
+				fullContent.WriteString(deltaContent)
 
 				// Create chunk and call callback
 				chunk := core.StreamChunk{
-					Content: choice.Delta.Content,
+					Content: deltaContent,
 					Delta:   true,
 					Index:   chunkIndex,
 					Model:   model,

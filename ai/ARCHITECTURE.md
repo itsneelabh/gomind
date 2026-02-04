@@ -378,7 +378,7 @@ type Client struct {
 }
 
 func NewClient(apiKey, baseURL string, logger core.Logger) *Client {
-    base := providers.NewBaseClient(30*time.Second, logger)
+    base := providers.NewBaseClient(180*time.Second, logger)  // 3 min default for reasoning models
     base.DefaultModel = "gpt-3.5-turbo"
     base.DefaultMaxTokens = 1000
 
@@ -662,7 +662,7 @@ client, err := ai.NewClient(
     ai.WithMaxTokens(1000),              // Token limit
 
     // Connection settings
-    ai.WithTimeout(30 * time.Second),    // Request timeout
+    ai.WithTimeout(180 * time.Second),   // Request timeout (default, supports reasoning models)
     ai.WithMaxRetries(3),                // Retry count
 
     // Observability

@@ -1190,6 +1190,83 @@ chain, _ := ai.NewChainClient(
 )
 ```
 
+### Client Configuration Options
+
+Configure AI client behavior with these options. All options work with both `NewClient` and `NewChainClient`.
+
+#### WithTimeout
+
+Set the HTTP timeout for AI API requests. Default is 180 seconds (3 minutes), which accommodates reasoning models that require longer processing time.
+
+```go
+func WithTimeout(timeout time.Duration) AIOption
+func WithChainTimeout(timeout time.Duration) ChainOption  // For chain clients
+```
+
+**Example:**
+```go
+import "time"
+
+// Single client with extended timeout for complex tasks
+client, _ := ai.NewClient(
+    ai.WithTimeout(300 * time.Second),  // 5 minutes
+)
+
+// Chain client with custom timeout
+chainClient, _ := ai.NewChainClient(
+    ai.WithProviderChain("openai", "anthropic"),
+    ai.WithChainTimeout(240 * time.Second),  // 4 minutes
+)
+```
+
+#### WithReasoningTokenMultiplier
+
+Configure the token multiplier for OpenAI reasoning models (GPT-5, o1, o3, o4). These models count internal chain-of-thought tokens against `max_completion_tokens` but don't return them, which can cause empty responses without adequate token allocation.
+
+```go
+func WithReasoningTokenMultiplier(multiplier int) AIOption
+func WithChainReasoningTokenMultiplier(multiplier int) ChainOption  // For chain clients
+```
+
+**Default:** 5x multiplier (e.g., 2000 requested tokens → 10000 allocated)
+
+**Example:**
+```go
+// Lower multiplier for cost optimization (simpler prompts)
+client, _ := ai.NewClient(
+    ai.WithReasoningTokenMultiplier(3),  // 3x multiplier
+)
+
+// Higher multiplier for complex reasoning tasks
+client, _ := ai.NewClient(
+    ai.WithReasoningTokenMultiplier(8),  // 8x multiplier
+)
+
+// Chain client with custom multiplier
+chainClient, _ := ai.NewChainClient(
+    ai.WithProviderChain("openai", "anthropic"),
+    ai.WithChainReasoningTokenMultiplier(6),
+)
+```
+
+> **Note:** The multiplier only affects OpenAI reasoning models. Standard models (GPT-4, Claude, etc.) are unaffected.
+
+#### Other Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `WithProvider(name)` | `string` | auto-detect | AI provider name |
+| `WithProviderAlias(alias)` | `string` | - | Provider alias (e.g., "openai.groq") |
+| `WithModel(model)` | `string` | provider default | Model name or alias |
+| `WithAPIKey(key)` | `string` | from env | Override API key |
+| `WithBaseURL(url)` | `string` | provider default | Custom API endpoint |
+| `WithTemperature(t)` | `float32` | 0.7 | Sampling temperature (0.0-2.0) |
+| `WithMaxTokens(n)` | `int` | 4096 | Default max tokens |
+| `WithTimeout(d)` | `time.Duration` | 180s | HTTP request timeout |
+| `WithReasoningTokenMultiplier(n)` | `int` | 5 | Token multiplier for reasoning models |
+| `WithLogger(l)` | `core.Logger` | nil | Logger for AI operations |
+| `WithTelemetry(t)` | `core.Telemetry` | nil | Telemetry for distributed tracing |
+
 ### GenerateResponse
 
 Generate AI responses with optional parameters for fine-tuning behavior.

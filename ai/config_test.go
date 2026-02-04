@@ -81,7 +81,7 @@ func TestConfigurationApplication(t *testing.T) {
 			config := &AIConfig{
 				Provider:    string(ProviderAuto),
 				MaxRetries:  3,
-				Timeout:     30 * time.Second,
+				Timeout:     180 * time.Second,
 				Temperature: 0.7,
 				MaxTokens:   1000,
 			}

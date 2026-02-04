@@ -44,6 +44,13 @@ type AIConfig struct {
 	Temperature float32
 	MaxTokens   int
 
+	// ReasoningTokenMultiplier is the factor by which max_tokens is increased for
+	// reasoning models (GPT-5, o1, o3, o4). These models count internal chain-of-thought
+	// tokens against max_completion_tokens but don't return them, causing empty responses
+	// if not enough tokens are allocated. Default is 5 (set in openai/reasoning.go).
+	// Set to 0 to use the default, or specify a custom value (e.g., 3 for cost optimization).
+	ReasoningTokenMultiplier int
+
 	Logger    core.Logger
 	Telemetry core.Telemetry
 
@@ -132,6 +139,22 @@ func WithTemperature(temp float32) AIOption {
 func WithMaxTokens(tokens int) AIOption {
 	return func(c *AIConfig) {
 		c.MaxTokens = tokens
+	}
+}
+
+// WithReasoningTokenMultiplier sets the token multiplier for reasoning models (GPT-5, o1, o3, o4).
+// Reasoning models count internal chain-of-thought tokens against max_completion_tokens but
+// don't return them in the response. Without a multiplier, complex prompts exhaust tokens on
+// reasoning, leaving nothing for visible output.
+//
+// Default is 5 (5x multiplier). Set to a lower value (e.g., 3) for cost optimization if
+// responses are simpler, or higher (e.g., 8) for very complex reasoning tasks.
+//
+// Example: With multiplier=5 and MaxTokens=2000, reasoning models get 10000 tokens,
+// ensuring ~4000 for internal reasoning + ~6000 for visible output.
+func WithReasoningTokenMultiplier(multiplier int) AIOption {
+	return func(c *AIConfig) {
+		c.ReasoningTokenMultiplier = multiplier
 	}
 }
 

@@ -55,7 +55,7 @@ func TestNewBaseClient(t *testing.T) {
 	}{
 		{
 			name:    "with logger",
-			timeout: 30 * time.Second,
+			timeout: 180 * time.Second,
 			logger:  &mockLogger{},
 		},
 		{
@@ -96,7 +96,7 @@ func TestNewBaseClient(t *testing.T) {
 }
 
 func TestBaseClient_ApplyDefaults(t *testing.T) {
-	client := NewBaseClient(30*time.Second, nil)
+	client := NewBaseClient(180*time.Second, nil)
 	client.DefaultModel = "default-model"
 	client.DefaultMaxTokens = 1000
 	client.DefaultTemperature = 0.7
@@ -245,7 +245,7 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 			}))
 			defer server.Close()
 
-			client := NewBaseClient(30*time.Second, nil)
+			client := NewBaseClient(180*time.Second, nil)
 			client.MaxRetries = tt.maxRetries
 			client.RetryDelay = 10 * time.Millisecond // Short delay for tests
 
@@ -277,7 +277,7 @@ func TestBaseClient_ExecuteWithRetry(t *testing.T) {
 }
 
 func TestBaseClient_HandleError(t *testing.T) {
-	client := NewBaseClient(30*time.Second, nil)
+	client := NewBaseClient(180*time.Second, nil)
 
 	tests := []struct {
 		name       string
@@ -333,7 +333,7 @@ func TestBaseClient_HandleError(t *testing.T) {
 
 func TestBaseClient_Logging(t *testing.T) {
 	logger := &mockLogger{}
-	client := NewBaseClient(30*time.Second, logger)
+	client := NewBaseClient(180*time.Second, logger)
 
 	// Test LogRequest
 	client.LogRequest("test-provider", "test-model", "test prompt")
@@ -395,7 +395,7 @@ func TestBaseClient_ContextCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewBaseClient(30*time.Second, nil)
+	client := NewBaseClient(180*time.Second, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
@@ -450,7 +450,7 @@ func (m *mockSpan) RecordError(err error) {
 }
 
 func TestBaseClient_SetTelemetry(t *testing.T) {
-	client := NewBaseClient(30*time.Second, nil)
+	client := NewBaseClient(180*time.Second, nil)
 
 	// Initially telemetry should be nil
 	if client.Telemetry != nil {
@@ -495,7 +495,7 @@ func TestBaseClient_StartSpan(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := NewBaseClient(30*time.Second, nil)
+			client := NewBaseClient(180*time.Second, nil)
 			client.Telemetry = tt.telemetry
 
 			ctx := context.Background()
@@ -537,7 +537,7 @@ func TestBaseClient_StartSpan(t *testing.T) {
 
 func TestBaseClient_LogResponseContent(t *testing.T) {
 	logger := &mockLogger{}
-	client := NewBaseClient(30*time.Second, logger)
+	client := NewBaseClient(180*time.Second, logger)
 
 	// Call LogResponseContent
 	client.LogResponseContent("test-provider", "test-model", "This is a test response")
@@ -640,7 +640,7 @@ func TestDefaultRetryConfig(t *testing.T) {
 }
 
 func TestHandleError_DefaultCase(t *testing.T) {
-	client := NewBaseClient(30*time.Second, nil)
+	client := NewBaseClient(180*time.Second, nil)
 
 	// Test with an unknown status code (not handled by specific cases)
 	err := client.HandleError(418, []byte("I'm a teapot"), "TestProvider")

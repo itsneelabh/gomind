@@ -76,11 +76,21 @@ func NewChainClient(opts ...ChainOption) (*ChainClient, error) {
 	// RESILIENT: Runtime provider creation failures are handled gracefully
 	successCount := 0
 	for _, alias := range config.ProviderAliases {
-		provider, err := NewClient(
+		// Build options for provider creation
+		opts := []AIOption{
 			WithProviderAlias(alias),
 			WithLogger(config.Logger),
 			WithTelemetry(config.Telemetry),
-		)
+		}
+		// Apply timeout if configured (important for reasoning models)
+		if config.Timeout > 0 {
+			opts = append(opts, WithTimeout(config.Timeout))
+		}
+		// Apply reasoning token multiplier if configured
+		if config.ReasoningTokenMultiplier > 0 {
+			opts = append(opts, WithReasoningTokenMultiplier(config.ReasoningTokenMultiplier))
+		}
+		provider, err := NewClient(opts...)
 		if err != nil {
 			// Runtime failures (e.g., missing API keys) are warnings, not errors
 			// This allows partial chain creation when some providers aren't configured
@@ -591,9 +601,11 @@ func isClientError(err error) bool {
 
 // ChainConfig holds configuration for chain client
 type ChainConfig struct {
-	ProviderAliases []string
-	Logger          core.Logger
-	Telemetry       core.Telemetry
+	ProviderAliases          []string
+	Logger                   core.Logger
+	Telemetry                core.Telemetry
+	Timeout                  time.Duration // HTTP timeout for AI requests (0 = use provider default)
+	ReasoningTokenMultiplier int           // Token multiplier for reasoning models (0 = use default 5x)
 }
 
 // ChainOption configures a chain client
@@ -621,6 +633,30 @@ func WithChainLogger(logger core.Logger) ChainOption {
 func WithChainTelemetry(telemetry core.Telemetry) ChainOption {
 	return func(c *ChainConfig) {
 		c.Telemetry = telemetry
+	}
+}
+
+// WithChainTimeout sets the HTTP timeout for AI requests in the chain
+// This is important for reasoning models (GPT-5, o1, o3, o4) that need longer
+// processing time for chain-of-thought responses.
+// If not set, the default provider timeout (180s) is used.
+func WithChainTimeout(timeout time.Duration) ChainOption {
+	return func(c *ChainConfig) {
+		c.Timeout = timeout
+	}
+}
+
+// WithChainReasoningTokenMultiplier sets the token multiplier for reasoning models
+// in all providers within the chain. Reasoning models (GPT-5, o1, o3, o4) count
+// internal chain-of-thought tokens against max_completion_tokens but don't return
+// them in the response. Without a multiplier, complex prompts exhaust tokens on
+// reasoning, leaving nothing for visible output.
+//
+// Default is 5 (5x multiplier). Set to a lower value (e.g., 3) for cost optimization
+// if responses are simpler, or higher (e.g., 8) for very complex reasoning tasks.
+func WithChainReasoningTokenMultiplier(multiplier int) ChainOption {
+	return func(c *ChainConfig) {
+		c.ReasoningTokenMultiplier = multiplier
 	}
 }
 
