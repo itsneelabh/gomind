@@ -143,7 +143,7 @@ func TestTieredCapabilityProvider_BelowThreshold(t *testing.T) {
 	}
 
 	// Verify full catalog returned
-	if !strings.Contains(capabilities, "test-agent") {
+	if !strings.Contains(capabilities.FormattedInfo, "test-agent") {
 		t.Error("Expected capabilities to contain test-agent")
 	}
 }
@@ -170,14 +170,14 @@ func TestTieredCapabilityProvider_AboveThreshold(t *testing.T) {
 	}
 
 	// Verify only selected tools are in output
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected capabilities to contain capability_0")
 	}
-	if !strings.Contains(capabilities, "capability_5") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_5") {
 		t.Error("Expected capabilities to contain capability_5")
 	}
 	// Verify non-selected tools are NOT in output
-	if strings.Contains(capabilities, "capability_10") {
+	if strings.Contains(capabilities.FormattedInfo, "capability_10") {
 		t.Error("Expected capabilities to NOT contain capability_10 (not selected)")
 	}
 }
@@ -199,14 +199,14 @@ func TestTieredCapabilityProvider_HallucinationFiltering(t *testing.T) {
 	}
 
 	// Verify only valid tools returned
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected capabilities to contain capability_0")
 	}
-	if !strings.Contains(capabilities, "capability_1") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_1") {
 		t.Error("Expected capabilities to contain capability_1")
 	}
 	// Verify fake tool is not included
-	if strings.Contains(capabilities, "fake_cap") {
+	if strings.Contains(capabilities.FormattedInfo, "fake_cap") {
 		t.Error("Expected fake tool to be filtered out")
 	}
 }
@@ -228,10 +228,10 @@ func TestTieredCapabilityProvider_FallbackOnError(t *testing.T) {
 	}
 
 	// Verify full catalog returned as fallback
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected fallback to include all tools")
 	}
-	if !strings.Contains(capabilities, "capability_10") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_10") {
 		t.Error("Expected fallback to include all tools")
 	}
 }
@@ -253,7 +253,7 @@ func TestTieredCapabilityProvider_EmptySelection(t *testing.T) {
 	}
 
 	// Verify full catalog returned as fallback
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected fallback to include all tools")
 	}
 }
@@ -275,7 +275,7 @@ func TestTieredCapabilityProvider_AllHallucinations(t *testing.T) {
 	}
 
 	// Verify full catalog returned as fallback
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected fallback to include all tools")
 	}
 }
@@ -414,13 +414,13 @@ func TestTieredCapabilityProvider_MultiAgent(t *testing.T) {
 	}
 
 	// Verify tools from all selected agents are present
-	if !strings.Contains(capabilities, "agent-0") {
+	if !strings.Contains(capabilities.FormattedInfo, "agent-0") {
 		t.Error("Expected capabilities to contain agent-0")
 	}
-	if !strings.Contains(capabilities, "agent-1") {
+	if !strings.Contains(capabilities.FormattedInfo, "agent-1") {
 		t.Error("Expected capabilities to contain agent-1")
 	}
-	if !strings.Contains(capabilities, "agent-2") {
+	if !strings.Contains(capabilities.FormattedInfo, "agent-2") {
 		t.Error("Expected capabilities to contain agent-2")
 	}
 }
@@ -439,7 +439,7 @@ func TestTieredCapabilityProvider_ParseToolSelection_MarkdownWrapped(t *testing.
 		t.Fatalf("Failed to parse markdown-wrapped response: %v", err)
 	}
 
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected capabilities to contain capability_0")
 	}
 }
@@ -460,7 +460,7 @@ func TestTieredCapabilityProvider_InvalidJSON(t *testing.T) {
 	}
 
 	// Verify full catalog returned as fallback
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected fallback to include all tools")
 	}
 }
@@ -751,7 +751,7 @@ func TestTieredCapabilityProvider_CircuitBreakerIntegration(t *testing.T) {
 	}
 
 	// Verify capabilities were returned correctly
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected capabilities to contain capability_0")
 	}
 }
@@ -775,13 +775,13 @@ func TestTieredCapabilityProvider_CircuitBreakerOpen(t *testing.T) {
 	}
 
 	// Verify fallback to FormatForLLM (all tools returned)
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected fallback to include capability_0")
 	}
-	if !strings.Contains(capabilities, "capability_10") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_10") {
 		t.Error("Expected fallback to include capability_10 (all tools)")
 	}
-	if !strings.Contains(capabilities, "capability_20") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_20") {
 		t.Error("Expected fallback to include capability_20 (all tools)")
 	}
 }
@@ -808,7 +808,7 @@ func TestTieredCapabilityProvider_WithoutCircuitBreaker(t *testing.T) {
 	}
 
 	// Verify capabilities were returned
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected capabilities to contain capability_0")
 	}
 }
@@ -872,10 +872,10 @@ func TestTieredCapabilityProvider_ContextCancellation(t *testing.T) {
 	}
 
 	// Verify fallback returns all tools
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected fallback to include all tools")
 	}
-	if !strings.Contains(capabilities, "capability_10") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_10") {
 		t.Error("Expected fallback to include capability_10")
 	}
 }
@@ -924,7 +924,7 @@ func TestTieredCapabilityProvider_ContextTimeout(t *testing.T) {
 	}
 
 	// Verify fallback returns all tools
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected fallback to include all tools on timeout")
 	}
 }
@@ -999,7 +999,7 @@ func TestTieredCapabilityProvider_ErrorWrapping(t *testing.T) {
 	}
 
 	// Verify fallback worked
-	if !strings.Contains(capabilities, "capability_0") {
+	if !strings.Contains(capabilities.FormattedInfo, "capability_0") {
 		t.Error("Expected fallback to include all tools")
 	}
 }

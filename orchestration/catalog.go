@@ -478,6 +478,41 @@ func (c *AgentCatalog) FindByCapability(capability string) []string {
 	return c.capabilityIndex[capability]
 }
 
+// GetPublicAgentNames returns the names of agents that have at least one public capability.
+// This mirrors the filtering logic of FormatForLLM() to ensure consistency between
+// the formatted capability info and the list of agent names used for hallucination validation.
+// Agents with only internal capabilities are excluded.
+//
+// Names are normalized to lowercase for consistent case-insensitive matching during
+// hallucination validation. This ensures consistency across the system - normalization
+// happens at the source rather than at each consumption point.
+//
+// This method should be used by capability providers to ensure AgentNames matches FormattedInfo.
+// See orchestration/bugs/BUG_LLM_HALLUCINATED_TOOL.md for context.
+func (c *AgentCatalog) GetPublicAgentNames() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var names []string
+	for _, agent := range c.agents {
+		// Same filtering logic as FormatForLLM: only include agents with public capabilities
+		hasPublicCapability := false
+		for _, cap := range agent.Capabilities {
+			if !cap.Internal {
+				hasPublicCapability = true
+				break
+			}
+		}
+
+		if hasPublicCapability && agent.Registration != nil {
+			// Normalize to lowercase for consistent case-insensitive matching
+			names = append(names, strings.ToLower(agent.Registration.Name))
+		}
+	}
+
+	return names
+}
+
 // FormatForLLM formats the catalog for LLM consumption.
 // This creates a human-readable text representation of all agents and their capabilities
 // that can be included in prompts to LLMs for intelligent orchestration decisions.

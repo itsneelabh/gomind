@@ -645,30 +645,30 @@ func TestAIOrchestrator_BuildPlanningPromptWithParseError(t *testing.T) {
 	// Create a sample parse error
 	parseErr := fmt.Errorf("invalid character '*' after object key:value pair")
 
-	prompt, err := orchestrator.buildPlanningPromptWithParseError(context.Background(), "test request", parseErr)
+	promptResult, err := orchestrator.buildPlanningPromptWithParseError(context.Background(), "test request", parseErr)
 
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
 	// Verify the prompt contains error feedback
-	if !strings.Contains(prompt, "IMPORTANT: Your previous response could not be parsed as valid JSON") {
+	if !strings.Contains(promptResult.Prompt, "IMPORTANT: Your previous response could not be parsed as valid JSON") {
 		t.Error("Expected error feedback header in prompt")
 	}
 
-	if !strings.Contains(prompt, "invalid character '*'") {
+	if !strings.Contains(promptResult.Prompt, "invalid character '*'") {
 		t.Error("Expected parse error message in prompt")
 	}
 
-	if !strings.Contains(prompt, "NO arithmetic expressions") {
+	if !strings.Contains(promptResult.Prompt, "NO arithmetic expressions") {
 		t.Error("Expected arithmetic expression warning in prompt")
 	}
 
-	if !strings.Contains(prompt, "NO markdown formatting") {
+	if !strings.Contains(promptResult.Prompt, "NO markdown formatting") {
 		t.Error("Expected markdown formatting warning in prompt")
 	}
 
-	if !strings.Contains(prompt, "NO trailing commas") {
+	if !strings.Contains(promptResult.Prompt, "NO trailing commas") {
 		t.Error("Expected trailing comma warning in prompt")
 	}
 }

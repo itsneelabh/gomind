@@ -312,6 +312,18 @@ type OrchestratorConfig struct {
 	PlanParseRetryEnabled bool `json:"plan_parse_retry_enabled"`
 	PlanParseMaxRetries   int  `json:"plan_parse_max_retries"` // Default: 2
 
+	// Hallucination Detection configuration
+	// When HallucinationValidationEnabled is true, validates that LLM-generated plans
+	// only reference agents that were included in the prompt's capability info.
+	// This catches cases where the LLM invents agent names not in the allowed list.
+	// See orchestration/bugs/BUG_LLM_HALLUCINATED_TOOL.md for detailed analysis.
+	//
+	// Set HallucinationValidationEnabled to false to disable validation entirely.
+	// Default: true | Env: GOMIND_HALLUCINATION_VALIDATION_ENABLED
+	HallucinationValidationEnabled bool `json:"hallucination_validation_enabled"` // Default: true
+	HallucinationRetryEnabled      bool `json:"hallucination_retry_enabled"`      // Default: true
+	HallucinationMaxRetries        int  `json:"hallucination_max_retries"`        // Default: 1
+
 	// Layer 4: Semantic Retry Configuration
 	// When enabled, uses ContextualReResolver to fix errors that require computation
 	SemanticRetry SemanticRetryConfig `json:"semantic_retry,omitempty"`
@@ -422,6 +434,13 @@ func DefaultConfig() *OrchestratorConfig {
 		PlanParseRetryEnabled: true, // Enable by default for production reliability
 		PlanParseMaxRetries:   2,    // Up to 2 retry attempts after initial failure
 
+		// Hallucination Detection defaults
+		// Validates that LLM plans only use agents from the allowed list.
+		// See orchestration/bugs/BUG_LLM_HALLUCINATED_TOOL.md for detailed analysis.
+		HallucinationValidationEnabled: true, // Enable validation by default
+		HallucinationRetryEnabled:      true, // Enable retry for production reliability
+		HallucinationMaxRetries:        1,    // Up to 1 retry attempt (usually enough for self-correction)
+
 		// Tiered Capability Resolution defaults (enabled by default for token optimization)
 		// Research: "Less is More" (Nov 2024) shows LLM accuracy degradation at ~20 tools
 		EnableTieredResolution: true,
@@ -444,6 +463,20 @@ func DefaultConfig() *OrchestratorConfig {
 	if maxRetries := os.Getenv("GOMIND_PLAN_RETRY_MAX"); maxRetries != "" {
 		if val, err := strconv.Atoi(maxRetries); err == nil && val >= 0 {
 			config.PlanParseMaxRetries = val
+		}
+	}
+
+	// Hallucination Detection configuration from environment
+	// GOMIND_HALLUCINATION_VALIDATION_ENABLED=false completely disables validation
+	if hallValidation := os.Getenv("GOMIND_HALLUCINATION_VALIDATION_ENABLED"); hallValidation != "" {
+		config.HallucinationValidationEnabled = strings.ToLower(hallValidation) == "true"
+	}
+	if hallRetryEnabled := os.Getenv("GOMIND_HALLUCINATION_RETRY_ENABLED"); hallRetryEnabled != "" {
+		config.HallucinationRetryEnabled = strings.ToLower(hallRetryEnabled) == "true"
+	}
+	if hallMaxRetries := os.Getenv("GOMIND_HALLUCINATION_MAX_RETRIES"); hallMaxRetries != "" {
+		if val, err := strconv.Atoi(hallMaxRetries); err == nil && val >= 0 {
+			config.HallucinationMaxRetries = val
 		}
 	}
 

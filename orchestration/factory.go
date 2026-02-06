@@ -335,6 +335,23 @@ func WithPlanParseRetry(enabled bool, maxRetries int) OrchestratorOption {
 	}
 }
 
+// WithHallucinationRetry creates an option for configuring hallucination retry behavior.
+// When enabled, the orchestrator will retry LLM plan generation if the LLM hallucinates
+// agent names that were not in the allowed list provided in the prompt.
+// See orchestration/bugs/BUG_LLM_HALLUCINATED_TOOL.md for detailed analysis.
+//
+// Parameters:
+//   - enabled: whether to retry on hallucination detection
+//   - maxRetries: maximum number of retry attempts (0 = no retries, default: 1)
+func WithHallucinationRetry(enabled bool, maxRetries int) OrchestratorOption {
+	return func(c *OrchestratorConfig) {
+		c.HallucinationRetryEnabled = enabled
+		if maxRetries >= 0 {
+			c.HallucinationMaxRetries = maxRetries
+		}
+	}
+}
+
 // CreateOrchestratorWithOptions creates an orchestrator with option functions
 func CreateOrchestratorWithOptions(deps OrchestratorDependencies, opts ...OrchestratorOption) (*AIOrchestrator, error) {
 	config := DefaultConfig()
