@@ -126,6 +126,61 @@ func (t *TieredCapabilityProvider) SetCircuitBreaker(cb core.CircuitBreaker) {
 	t.circuitBreaker = cb
 }
 
+// logDebugWithContext logs debug messages with context for trace correlation.
+// Follows Pattern 1 (nil check), Pattern 2 (operation), Pattern 3 (request_id).
+func (t *TieredCapabilityProvider) logDebugWithContext(ctx context.Context, msg string, extraFields map[string]interface{}) {
+	if t.logger != nil {
+		fields := map[string]interface{}{
+			"operation": "tiered_selection",
+		}
+		if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+			if reqID := baggage["request_id"]; reqID != "" {
+				fields["request_id"] = reqID
+			}
+		}
+		for k, v := range extraFields {
+			fields[k] = v
+		}
+		t.logger.DebugWithContext(ctx, msg, fields)
+	}
+}
+
+// logInfoWithContext logs info messages with context for trace correlation.
+func (t *TieredCapabilityProvider) logInfoWithContext(ctx context.Context, msg string, extraFields map[string]interface{}) {
+	if t.logger != nil {
+		fields := map[string]interface{}{
+			"operation": "tiered_selection",
+		}
+		if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+			if reqID := baggage["request_id"]; reqID != "" {
+				fields["request_id"] = reqID
+			}
+		}
+		for k, v := range extraFields {
+			fields[k] = v
+		}
+		t.logger.InfoWithContext(ctx, msg, fields)
+	}
+}
+
+// logWarnWithContext logs warning messages with context for trace correlation.
+func (t *TieredCapabilityProvider) logWarnWithContext(ctx context.Context, msg string, extraFields map[string]interface{}) {
+	if t.logger != nil {
+		fields := map[string]interface{}{
+			"operation": "tiered_selection",
+		}
+		if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+			if reqID := baggage["request_id"]; reqID != "" {
+				fields["request_id"] = reqID
+			}
+		}
+		for k, v := range extraFields {
+			fields[k] = v
+		}
+		t.logger.WarnWithContext(ctx, msg, fields)
+	}
+}
+
 // recordDebugInteraction stores an LLM interaction for debugging.
 // Uses WaitGroup to ensure graceful shutdown waits for pending recordings.
 // Per LLM_DEBUG_PAYLOAD_DESIGN.md section 4.6 Lifecycle Management.
@@ -218,20 +273,19 @@ func (t *TieredCapabilityProvider) GetCapabilities(
 	ctx context.Context,
 	request string,
 	metadata map[string]interface{},
-) (string, error) {
+) (*CapabilityResult, error) {
 	// Get all capability summaries
 	summaries := t.catalog.GetCapabilitySummaries()
 
 	// Check if tiering is beneficial
 	if len(summaries) < t.MinToolsForTiering {
 		// Below threshold - use direct approach (simpler, one LLM call)
-		if t.logger != nil {
-			t.logger.DebugWithContext(ctx, "Below tiering threshold, using direct approach", map[string]interface{}{
-				"tool_count": len(summaries),
-				"threshold":  t.MinToolsForTiering,
-			})
-		}
-		return t.catalog.FormatForLLM(), nil
+		t.logDebugWithContext(ctx, "Below tiering threshold, using direct approach", map[string]interface{}{
+			"tool_count": len(summaries),
+			"threshold":  t.MinToolsForTiering,
+		})
+		// Get all agent names from catalog
+		return t.buildResultFromAllAgents(), nil
 	}
 
 	// Tier 1: Select relevant tools using lightweight summaries
@@ -241,27 +295,21 @@ func (t *TieredCapabilityProvider) GetCapabilities(
 
 	if err != nil {
 		// Fallback to direct approach on selection failure
-		if t.logger != nil {
-			t.logger.WarnWithContext(ctx, "Tool selection failed, falling back to direct approach", map[string]interface{}{
-				"operation":   "tiered_selection",
-				"status":      "fallback",
-				"error":       err.Error(),
-				"duration_ms": tier1Duration.Milliseconds(),
-			})
-		}
-		return t.catalog.FormatForLLM(), nil
+		t.logWarnWithContext(ctx, "Tool selection failed, falling back to direct approach", map[string]interface{}{
+			"status":      "fallback",
+			"error":       err.Error(),
+			"duration_ms": tier1Duration.Milliseconds(),
+		})
+		return t.buildResultFromAllAgents(), nil
 	}
 
-	if t.logger != nil {
-		t.logger.InfoWithContext(ctx, "Tier 1 tool selection complete", map[string]interface{}{
-			"operation":      "tiered_selection",
-			"status":         "success",
-			"total_tools":    len(summaries),
-			"selected_tools": selectedTools,
-			"reduction":      fmt.Sprintf("%.1f%%", (1-float64(len(selectedTools))/float64(len(summaries)))*100),
-			"duration_ms":    tier1Duration.Milliseconds(),
-		})
-	}
+	t.logInfoWithContext(ctx, "Tier 1 tool selection complete", map[string]interface{}{
+		"status":         "success",
+		"total_tools":    len(summaries),
+		"selected_tools": selectedTools,
+		"reduction":      fmt.Sprintf("%.1f%%", (1-float64(len(selectedTools))/float64(len(summaries)))*100),
+		"duration_ms":    tier1Duration.Milliseconds(),
+	})
 
 	// Record metrics for observability (Phase 5)
 	if t.telemetry != nil {
@@ -275,8 +323,51 @@ func (t *TieredCapabilityProvider) GetCapabilities(
 		t.telemetry.RecordMetric("orchestrator.tiered.tokens_saved", float64(savedTokens), nil)
 	}
 
+	// Extract unique agent names from selected tools (format: "agent/capability")
+	agentNames := extractAgentNamesFromToolIDs(selectedTools)
+
 	// Tier 2: Get full schemas for selected tools only
-	return t.catalog.FormatToolsForLLM(selectedTools), nil
+	return &CapabilityResult{
+		FormattedInfo: t.catalog.FormatToolsForLLM(selectedTools),
+		AgentNames:    agentNames,
+	}, nil
+}
+
+// buildResultFromAllAgents creates a CapabilityResult with all public agents from the catalog.
+// Used when tiering is not beneficial or as a fallback.
+// Uses GetPublicAgentNames() to ensure AgentNames matches the agents in FormattedInfo.
+func (t *TieredCapabilityProvider) buildResultFromAllAgents() *CapabilityResult {
+	// Use GetPublicAgentNames to match FormatForLLM filtering (excludes internal-only agents)
+	agentNames := t.catalog.GetPublicAgentNames()
+
+	return &CapabilityResult{
+		FormattedInfo: t.catalog.FormatForLLM(),
+		AgentNames:    agentNames,
+	}
+}
+
+// extractAgentNamesFromToolIDs extracts unique agent names from tool IDs.
+// Tool IDs are in format "agent-name/capability-name".
+// Names are normalized to lowercase for consistent case-insensitive matching during
+// hallucination validation. This ensures consistency across the system.
+func extractAgentNamesFromToolIDs(toolIDs []string) []string {
+	agentSet := make(map[string]bool)
+	for _, toolID := range toolIDs {
+		// Split "agent/capability" and take the agent part
+		// Normalize to lowercase for consistent case-insensitive matching
+		if idx := strings.Index(toolID, "/"); idx > 0 {
+			agentSet[strings.ToLower(toolID[:idx])] = true
+		} else {
+			// If no slash, treat the whole ID as agent name
+			agentSet[strings.ToLower(toolID)] = true
+		}
+	}
+
+	agents := make([]string, 0, len(agentSet))
+	for agent := range agentSet {
+		agents = append(agents, agent)
+	}
+	return agents
 }
 
 // selectRelevantTools uses an LLM call to identify which tools are needed.
@@ -526,8 +617,8 @@ func (t *TieredCapabilityProvider) validateAndFilterTools(
 	}
 
 	// Log any hallucinated tools (research shows this is common with many tools)
-	if len(invalid) > 0 && t.logger != nil {
-		t.logger.WarnWithContext(ctx, "LLM selected non-existent tools (hallucination)", map[string]interface{}{
+	if len(invalid) > 0 {
+		t.logWarnWithContext(ctx, "LLM selected non-existent tools (hallucination)", map[string]interface{}{
 			"invalid_tools": invalid,
 			"valid_count":   len(filtered),
 		})

@@ -564,6 +564,9 @@ Configure the AI orchestrator for multi-agent coordination.
 | `GOMIND_CAPABILITY_THRESHOLD` | `0.7` | **Implemented** | Minimum similarity threshold | [orchestration/capability_provider.go:103](../orchestration/capability_provider.go#L103) |
 | `GOMIND_PLAN_RETRY_ENABLED` | `true` | **Implemented** | Retry plan generation on JSON parse failures | [orchestration/interfaces.go](../orchestration/interfaces.go) |
 | `GOMIND_PLAN_RETRY_MAX` | `2` | **Implemented** | Maximum retry attempts for plan parsing (0 = disabled) | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_HALLUCINATION_VALIDATION_ENABLED` | `true` | **Implemented** | Validate that LLM-generated plans only reference agents from the allowed list | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_HALLUCINATION_RETRY_ENABLED` | `true` | **Implemented** | Retry plan generation with enhanced context when hallucination is detected | [orchestration/interfaces.go](../orchestration/interfaces.go) |
+| `GOMIND_HALLUCINATION_MAX_RETRIES` | `1` | **Implemented** | Maximum retry attempts for hallucination correction (0 = disabled) | [orchestration/interfaces.go](../orchestration/interfaces.go) |
 | `GOMIND_VALIDATE_PAYLOADS` | `false` | **Implemented** | Enable schema validation for AI-generated payloads | [examples/agent-example/orchestration.go:670](../examples/agent-example/orchestration.go#L670) |
 | `GOMIND_AGENT_MAX_RETRIES` | `2` | Example Only | Max retries for agent execution | [examples/agent-example/orchestration.go:157](../examples/agent-example/orchestration.go#L157) |
 | `GOMIND_AGENT_USE_AI_CORRECTION` | `true` | Example Only | Enable AI-based parameter correction | [examples/agent-example/orchestration.go:162](../examples/agent-example/orchestration.go#L162) |
@@ -612,6 +615,38 @@ export GOMIND_PLAN_RETRY_MAX=0
 ```
 
 See [PLAN_GENERATION_RETRY.md](../orchestration/notes/PLAN_GENERATION_RETRY.md) for implementation details.
+
+### Hallucination Detection
+
+LLMs can hallucinate non-existent agents when generating execution plans. For example, when asked about "time in CST", the LLM might invent a `time-tool-v1` agent even though only `weather-tool-v2` was provided in the prompt. Hallucination detection validates that all agents referenced in the plan were actually included in the capability information shown to the LLM.
+
+When validation fails, the retry mechanism provides explicit error feedback with the list of allowed agents, giving the LLM a chance to self-correct:
+
+```bash
+# Disable hallucination validation entirely (not recommended)
+export GOMIND_HALLUCINATION_VALIDATION_ENABLED=false
+
+# Disable retry (fail immediately when hallucination detected)
+export GOMIND_HALLUCINATION_RETRY_ENABLED=false
+
+# Increase retry attempts (default: 1, usually sufficient for self-correction)
+export GOMIND_HALLUCINATION_MAX_RETRIES=2
+```
+
+**How it works:**
+
+1. **Plan Generated**: LLM produces an execution plan with agent references
+2. **Validation**: Each agent name is checked against the allowed list (agents shown in the prompt)
+3. **Hallucination Detected**: If an agent name isn't in the allowed list, validation fails
+4. **Enhanced Retry**: The LLM receives error feedback with the exact hallucinated name and the complete allowed agent list
+5. **Self-Correction**: LLM regenerates the plan using only valid agents
+
+**When to disable:**
+- **Testing/Development**: When using mock agents not in the catalog
+- **Custom Validation**: When implementing your own agent validation logic
+- **Debugging**: To see raw LLM output without intervention
+
+See [BUG_LLM_HALLUCINATED_TOOL.md](../orchestration/bugs/BUG_LLM_HALLUCINATED_TOOL.md) for detailed analysis and implementation.
 
 ### Semantic Retry Configuration (Layer 4)
 
@@ -671,6 +706,11 @@ export GOMIND_CAPABILITY_THRESHOLD=0.75
 # For plan parse retry configuration
 export GOMIND_PLAN_RETRY_ENABLED=true
 export GOMIND_PLAN_RETRY_MAX=2
+
+# For hallucination detection (validates LLM doesn't invent agents)
+export GOMIND_HALLUCINATION_VALIDATION_ENABLED=true
+export GOMIND_HALLUCINATION_RETRY_ENABLED=true
+export GOMIND_HALLUCINATION_MAX_RETRIES=1
 
 # For semantic retry configuration (Layer 4)
 export GOMIND_SEMANTIC_RETRY_ENABLED=true

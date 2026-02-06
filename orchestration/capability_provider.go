@@ -15,11 +15,24 @@ import (
 	"github.com/itsneelabh/gomind/telemetry"
 )
 
+// CapabilityResult contains both the LLM-ready formatted string and structured agent data.
+// This eliminates the need for regex parsing to extract agent names for hallucination validation.
+// See orchestration/bugs/BUG_LLM_HALLUCINATED_TOOL.md for context.
+type CapabilityResult struct {
+	// FormattedInfo is the capability information formatted for LLM consumption
+	FormattedInfo string
+
+	// AgentNames contains the exact agent names included in FormattedInfo.
+	// Used for hallucination validation - no regex parsing needed.
+	// Names should be in their canonical form (as stored in registry).
+	AgentNames []string
+}
+
 // CapabilityProvider defines the interface for providing agent/tool capabilities to the orchestrator
 type CapabilityProvider interface {
-	// GetCapabilities returns relevant agent/tool capabilities for a given request
-	// Returns formatted capability information ready for LLM consumption
-	GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (string, error)
+	// GetCapabilities returns relevant agent/tool capabilities for a given request.
+	// Returns CapabilityResult containing both the formatted info and the list of agent names.
+	GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (*CapabilityResult, error)
 }
 
 // DefaultCapabilityProvider uses the existing AgentCatalog.FormatForLLM approach
@@ -34,10 +47,18 @@ func NewDefaultCapabilityProvider(catalog *AgentCatalog) *DefaultCapabilityProvi
 	}
 }
 
-// GetCapabilities returns all agents/tools formatted for LLM
-func (d *DefaultCapabilityProvider) GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (string, error) {
-	// Use existing catalog.FormatForLLM() method
-	return d.catalog.FormatForLLM(), nil
+// GetCapabilities returns all agents/tools formatted for LLM with their names.
+// Uses GetPublicAgentNames() to ensure AgentNames matches the agents in FormattedInfo.
+// This is critical for hallucination validation - agents with only internal capabilities
+// are excluded from both the formatted info AND the agent names list.
+func (d *DefaultCapabilityProvider) GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (*CapabilityResult, error) {
+	// Get agent names using the same filtering as FormatForLLM (excludes internal-only agents)
+	agentNames := d.catalog.GetPublicAgentNames()
+
+	return &CapabilityResult{
+		FormattedInfo: d.catalog.FormatForLLM(),
+		AgentNames:    agentNames,
+	}, nil
 }
 
 // ServiceCapabilityProvider queries an external service for relevant capabilities
@@ -133,10 +154,10 @@ func NewServiceCapabilityProvider(config *ServiceCapabilityConfig) *ServiceCapab
 }
 
 // GetCapabilities queries external service with resilience layers
-func (s *ServiceCapabilityProvider) GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (string, error) {
+func (s *ServiceCapabilityProvider) GetCapabilities(ctx context.Context, request string, metadata map[string]interface{}) (*CapabilityResult, error) {
 	// Layer 2: Use injected circuit breaker if provided
 	if s.circuitBreaker != nil {
-		var result string
+		var result *CapabilityResult
 		err := s.circuitBreaker.Execute(ctx, func() error {
 			var err error
 			result, err = s.queryExternalService(ctx, request, metadata)
@@ -146,10 +167,12 @@ func (s *ServiceCapabilityProvider) GetCapabilities(ctx context.Context, request
 		if err != nil {
 			// Layer 3: Try fallback for graceful degradation
 			if s.fallback != nil {
-				s.logDebug("Circuit breaker open, using fallback provider")
+				s.logDebugWithContext(ctx, "Circuit breaker open, using fallback provider", map[string]interface{}{
+					"reason": "circuit_breaker_open",
+				})
 				return s.fallback.GetCapabilities(ctx, request, metadata)
 			}
-			return "", fmt.Errorf("capability service failed: %w", err)
+			return nil, fmt.Errorf("capability service failed: %w", err)
 		}
 		return result, nil
 	}
@@ -159,14 +182,16 @@ func (s *ServiceCapabilityProvider) GetCapabilities(ctx context.Context, request
 }
 
 // getCapabilitiesWithSimpleResilience provides basic resilience when no circuit breaker is injected
-func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx context.Context, request string, metadata map[string]interface{}) (string, error) {
+func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx context.Context, request string, metadata map[string]interface{}) (*CapabilityResult, error) {
 	// Simple circuit breaker check
 	if s.isCircuitOpen() {
 		if s.fallback != nil {
-			s.logDebug("Simple circuit open, using fallback provider")
+			s.logDebugWithContext(ctx, "Simple circuit open, using fallback provider", map[string]interface{}{
+				"reason": "simple_circuit_open",
+			})
 			return s.fallback.GetCapabilities(ctx, request, metadata)
 		}
-		return "", fmt.Errorf("capability service circuit open, too many recent failures")
+		return nil, fmt.Errorf("capability service circuit open, too many recent failures")
 	}
 
 	// Try with exponential backoff retry
@@ -175,10 +200,15 @@ func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx cont
 		if attempt > 0 {
 			// Exponential backoff
 			delay := time.Duration(attempt) * s.retryDelay
-			s.logDebug(fmt.Sprintf("Retrying after %v (attempt %d/%d)", delay, attempt, s.retryAttempts))
+			s.logDebugWithContext(ctx, "Retrying capability service request", map[string]interface{}{
+				"attempt":      attempt,
+				"max_attempts": s.retryAttempts,
+				"delay_ms":     delay.Milliseconds(),
+				"status":       "retry",
+			})
 			select {
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return nil, ctx.Err()
 			case <-time.After(delay):
 			}
 		}
@@ -189,7 +219,12 @@ func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx cont
 			return result, nil
 		}
 		lastErr = err
-		s.logError(fmt.Sprintf("Attempt %d failed: %v", attempt+1, err))
+		s.logErrorWithContext(ctx, "Capability service request failed", map[string]interface{}{
+			"attempt":      attempt + 1,
+			"max_attempts": s.retryAttempts + 1,
+			"error":        err.Error(),
+			"status":       "failed",
+		})
 	}
 
 	// All retries failed
@@ -197,11 +232,15 @@ func (s *ServiceCapabilityProvider) getCapabilitiesWithSimpleResilience(ctx cont
 
 	// Layer 3: Try fallback for graceful degradation
 	if s.fallback != nil {
-		s.logDebug("All retries failed, using fallback provider")
+		s.logWarnWithContext(ctx, "All retries failed, using fallback provider", map[string]interface{}{
+			"retries_exhausted": s.retryAttempts,
+			"reason":            "all_retries_failed",
+			"status":            "fallback",
+		})
 		return s.fallback.GetCapabilities(ctx, request, metadata)
 	}
 
-	return "", fmt.Errorf("capability service unavailable after %d retries: %w", s.retryAttempts, lastErr)
+	return nil, fmt.Errorf("capability service unavailable after %d retries: %w", s.retryAttempts, lastErr)
 }
 
 // isCircuitOpen checks if too many recent failures occurred
@@ -239,7 +278,7 @@ func (s *ServiceCapabilityProvider) recordFailure() {
 }
 
 // queryExternalService performs the actual HTTP call
-func (s *ServiceCapabilityProvider) queryExternalService(ctx context.Context, request string, metadata map[string]interface{}) (string, error) {
+func (s *ServiceCapabilityProvider) queryExternalService(ctx context.Context, request string, metadata map[string]interface{}) (*CapabilityResult, error) {
 	// Construct the request payload according to the contract
 	req := CapabilityRequest{
 		Query:     request,
@@ -251,13 +290,13 @@ func (s *ServiceCapabilityProvider) queryExternalService(ctx context.Context, re
 	// Marshal request to JSON
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	// Create HTTP POST request with context
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.endpoint+"/capabilities", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	// Set required headers
@@ -267,7 +306,7 @@ func (s *ServiceCapabilityProvider) queryExternalService(ctx context.Context, re
 	// Execute the HTTP request
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("failed to query capability service: %w", err)
+		return nil, fmt.Errorf("failed to query capability service: %w", err)
 	}
 	defer func() {
 		_ = resp.Body.Close() // Error can be safely ignored as we've read the body
@@ -278,36 +317,91 @@ func (s *ServiceCapabilityProvider) queryExternalService(ctx context.Context, re
 		var errorBody bytes.Buffer
 		_, err := errorBody.ReadFrom(resp.Body)
 		if err != nil {
-			return "", fmt.Errorf("capability service returned %d: unable to read error body: %w", resp.StatusCode, err)
+			return nil, fmt.Errorf("capability service returned %d: unable to read error body: %w", resp.StatusCode, err)
 		}
-		return "", fmt.Errorf("capability service returned %d: %s", resp.StatusCode, errorBody.String())
+		return nil, fmt.Errorf("capability service returned %d: %s", resp.StatusCode, errorBody.String())
 	}
 
 	// Decode the JSON response according to the contract
 	var capabilityResp CapabilityResponse
 	if err := json.NewDecoder(resp.Body).Decode(&capabilityResp); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	// Validate response
 	if capabilityResp.Capabilities == "" {
-		return "", fmt.Errorf("capability service returned empty capabilities")
+		return nil, fmt.Errorf("capability service returned empty capabilities")
 	}
 
-	return capabilityResp.Capabilities, nil
+	// Warn if external service doesn't return agent names (legacy service or misconfiguration)
+	// This means hallucination validation will be skipped for this request
+	if len(capabilityResp.AgentNames) == 0 {
+		s.logWarnWithContext(ctx, "Capability service did not return agent_names - hallucination validation will be skipped", map[string]interface{}{
+			"reason": "missing_agent_names",
+			"hint":   "Update capability service to return agent_names field for hallucination validation",
+		})
+	}
+
+	return &CapabilityResult{
+		FormattedInfo: capabilityResp.Capabilities,
+		AgentNames:    capabilityResp.AgentNames, // May be nil for older services
+	}, nil
 }
 
-// logDebug logs debug messages if logger is available
-func (s *ServiceCapabilityProvider) logDebug(msg string) {
+// logDebugWithContext logs debug messages with context for trace correlation
+// Follows Pattern 1 (nil check), Pattern 2 (operation), Pattern 3 (request_id)
+func (s *ServiceCapabilityProvider) logDebugWithContext(ctx context.Context, msg string, extraFields map[string]interface{}) {
 	if s.logger != nil {
-		s.logger.Debug(msg, nil)
+		fields := map[string]interface{}{
+			"operation": "capability_service",
+		}
+		// Pattern 3: Extract request_id from baggage for trace correlation
+		if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+			if reqID := baggage["request_id"]; reqID != "" {
+				fields["request_id"] = reqID
+			}
+		}
+		// Merge extra fields
+		for k, v := range extraFields {
+			fields[k] = v
+		}
+		s.logger.DebugWithContext(ctx, msg, fields)
 	}
 }
 
-// logError logs error messages if logger is available
-func (s *ServiceCapabilityProvider) logError(msg string) {
+// logWarnWithContext logs warning messages with context for trace correlation
+func (s *ServiceCapabilityProvider) logWarnWithContext(ctx context.Context, msg string, extraFields map[string]interface{}) {
 	if s.logger != nil {
-		s.logger.Error(msg, nil)
+		fields := map[string]interface{}{
+			"operation": "capability_service",
+		}
+		if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+			if reqID := baggage["request_id"]; reqID != "" {
+				fields["request_id"] = reqID
+			}
+		}
+		for k, v := range extraFields {
+			fields[k] = v
+		}
+		s.logger.WarnWithContext(ctx, msg, fields)
+	}
+}
+
+// logErrorWithContext logs error messages with context for trace correlation
+func (s *ServiceCapabilityProvider) logErrorWithContext(ctx context.Context, msg string, extraFields map[string]interface{}) {
+	if s.logger != nil {
+		fields := map[string]interface{}{
+			"operation": "capability_service",
+		}
+		if baggage := telemetry.GetBaggage(ctx); baggage != nil {
+			if reqID := baggage["request_id"]; reqID != "" {
+				fields["request_id"] = reqID
+			}
+		}
+		for k, v := range extraFields {
+			fields[k] = v
+		}
+		s.logger.ErrorWithContext(ctx, msg, fields)
 	}
 }
 
@@ -344,9 +438,10 @@ type CapabilityRequest struct {
 
 // CapabilityResponse defines the response from external capability service
 type CapabilityResponse struct {
-	Capabilities   string `json:"capabilities"`    // Formatted capabilities for LLM
-	AgentsFound    int    `json:"agents_found"`    // Number of agents found
-	ToolsFound     int    `json:"tools_found"`     // Number of tools found
-	SearchMethod   string `json:"search_method"`   // Method used (e.g., "vector_similarity")
-	ProcessingTime string `json:"processing_time"` // Time taken to process (e.g., "100ms")
+	Capabilities   string   `json:"capabilities"`    // Formatted capabilities for LLM
+	AgentNames     []string `json:"agent_names"`     // List of agent names included (for hallucination validation)
+	AgentsFound    int      `json:"agents_found"`    // Number of agents found
+	ToolsFound     int      `json:"tools_found"`     // Number of tools found
+	SearchMethod   string   `json:"search_method"`   // Method used (e.g., "vector_similarity")
+	ProcessingTime string   `json:"processing_time"` // Time taken to process (e.g., "100ms")
 }
